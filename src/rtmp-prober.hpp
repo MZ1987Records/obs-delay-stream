@@ -1,0 +1,290 @@
+#pragma once
+
+/*
+ * rtmp-prober.hpp
+ *
+ * RTMPサーバーへの「計測専用」TCP接続を張り、
+ * ハンドシェイク(C0+C1 → S0+S1+S2)のRTTから
+ * ネットワーク片道遅延を推定する。
+ *
+ * 実際の配信接続には一切干渉しない。
+ *
+ * 計測ステップ:
+ *   1. TCP SYN → SYN-ACK (TCP RTT)
+ *   2. RTMP C0+C1 送信 → S0+S1 受信 (RTMP handshake RTT)
+ *   3. 両者の平均を「ネットワーク往復遅延」とする
+ *   4. ÷2 で片道遅延を推定
+ *   5. これを N回繰り返して平均・最大・最小を算出
+ *
+ * Windows (Winsock2) のみ対応。
+ */
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+
+#include <string>
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <functional>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <cstdio>
+#include <algorithm>
+#include <numeric>
+
+using ProbeClk = std::chrono::steady_clock;
+using ProbeMs  = std::chrono::duration<double, std::milli>;
+
+// ============================================================
+// RtmpProbeResult
+// ============================================================
+struct RtmpProbeResult {
+    bool   valid        = false;
+    double avg_rtt_ms   = 0.0;   // 平均RTT (ms)
+    double avg_one_way  = 0.0;   // 推定片道遅延 = RTT/2
+    double min_rtt_ms   = 0.0;
+    double max_rtt_ms   = 0.0;
+    double jitter_ms    = 0.0;   // RTT標準偏差
+    int    samples      = 0;
+    int    failed       = 0;     // 失敗した試行数
+    std::string error_msg;
+};
+
+// ============================================================
+// RtmpProber
+// ============================================================
+class RtmpProber {
+public:
+    // 計測完了コールバック（ワーカースレッドから呼ばれる）
+    std::function<void(RtmpProbeResult)> on_result;
+
+    RtmpProber() {
+        // Winsock初期化（多重呼び出し安全）
+        WSADATA wsa{};
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+    }
+    ~RtmpProber() {
+        cancel();
+    }
+
+    // ----- 計測開始 -----
+    // url_or_host: "rtmp://example.com/live/key" または "example.com:1935"
+    // num_probes : 計測試行回数
+    // interval_ms: 試行間隔 (ms)
+    bool start(const std::string& rtmp_url,
+               int num_probes   = 10,
+               int interval_ms  = 300)
+    {
+        if (running_) return false;
+
+        // URL解析
+        if (!parse_url(rtmp_url, host_, port_)) {
+            RtmpProbeResult r;
+            r.error_msg = "URLの解析に失敗しました: " + rtmp_url;
+            if (on_result) on_result(r);
+            return false;
+        }
+
+        running_     = true;
+        num_probes_  = num_probes;
+        interval_ms_ = interval_ms;
+
+        if (worker_.joinable()) worker_.join();
+        worker_ = std::thread([this]() { probe_loop(); });
+        return true;
+    }
+
+    void cancel() {
+        running_ = false;
+        if (worker_.joinable()) worker_.join();
+    }
+
+    bool         is_running() const { return running_; }
+    RtmpProbeResult last_result() const {
+        std::lock_guard<std::mutex> lk(mtx_);
+        return last_result_;
+    }
+
+    // 解析済みホスト・ポートのゲッター（GUI表示用）
+    std::string host() const { return host_; }
+    int         port() const { return port_; }
+
+private:
+    // ============================================================
+    // RTMP URL → host, port 解析
+    // 対応形式:
+    //   rtmp://host:port/app/key
+    //   rtmps://host:port/...
+    //   host:port
+    //   host  (port=1935)
+    // ============================================================
+    static bool parse_url(const std::string& url, std::string& host, int& port) {
+        std::string s = url;
+
+        // スキーム除去
+        for (auto prefix : {"rtmps://", "rtmp://"}) {
+            if (s.rfind(prefix, 0) == 0) {
+                s = s.substr(std::strlen(prefix));
+                break;
+            }
+        }
+
+        // パス除去 (最初の '/' まで)
+        auto slash = s.find('/');
+        if (slash != std::string::npos) s = s.substr(0, slash);
+
+        // host:port 分割
+        auto colon = s.rfind(':');
+        if (colon != std::string::npos) {
+            host = s.substr(0, colon);
+            port = std::atoi(s.c_str() + colon + 1);
+            if (port <= 0 || port > 65535) port = 1935;
+        } else {
+            host = s;
+            port = 1935;
+        }
+
+        return !host.empty();
+    }
+
+    // ============================================================
+    // 1回分の計測: TCP接続 + RTMP C0C1 送受信
+    // 戻り値: RTT (ms) または -1.0 (失敗)
+    // ============================================================
+    double probe_once() {
+        // --- アドレス解決 ---
+        addrinfo hints{}, *res = nullptr;
+        hints.ai_family   = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        char port_str[8];
+        snprintf(port_str, sizeof(port_str), "%d", port_);
+        if (getaddrinfo(host_.c_str(), port_str, &hints, &res) != 0 || !res)
+            return -1.0;
+
+        SOCKET sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if (sock == INVALID_SOCKET) { freeaddrinfo(res); return -1.0; }
+
+        // タイムアウト設定 (2秒)
+        DWORD timeout_ms = 2000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+                   reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+                   reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+
+        // --- TCP接続（ここがTCP RTTを含む） ---
+        auto t0 = ProbeClk::now();
+        if (connect(sock, res->ai_addr, (int)res->ai_addrlen) != 0) {
+            closesocket(sock);
+            freeaddrinfo(res);
+            return -1.0;
+        }
+
+        // --- RTMP C0 + C1 送信 (1 + 1536 bytes) ---
+        // C0: version = 3
+        // C1: time(4B) + zeros(4B) + random(1528B)
+        uint8_t c0c1[1 + 1536] = {};
+        c0c1[0] = 3; // RTMP version
+        // C1 timestamp (4 bytes, big-endian) = 0
+        // C1 zeros (4 bytes) = 0
+        // C1 random data (1528 bytes) — すべて0でも仕様上問題ない
+
+        if (send(sock, reinterpret_cast<const char*>(c0c1), sizeof(c0c1), 0)
+            != sizeof(c0c1))
+        {
+            closesocket(sock);
+            freeaddrinfo(res);
+            return -1.0;
+        }
+
+        // --- S0 + S1 + S2 受信 (1 + 1536 + 1536 bytes) ---
+        // 最低 S0(1) + S1(1536) = 1537 bytes 来れば計測成立
+        uint8_t s_buf[1 + 1536 + 1536];
+        int received = 0;
+        int target   = 1 + 1536; // S0+S1
+        while (received < target) {
+            int n = recv(sock, reinterpret_cast<char*>(s_buf + received),
+                         target - received, 0);
+            if (n <= 0) break;
+            received += n;
+        }
+
+        auto t1 = ProbeClk::now();
+        closesocket(sock);
+        freeaddrinfo(res);
+
+        if (received < target) return -1.0;
+
+        return ProbeMs(t1 - t0).count();
+    }
+
+    // ============================================================
+    // 計測ループ
+    // ============================================================
+    void probe_loop() {
+        std::vector<double> samples;
+        int failed = 0;
+
+        for (int i = 0; i < num_probes_ && running_; ++i) {
+            double rtt = probe_once();
+            if (rtt > 0.0)
+                samples.push_back(rtt);
+            else
+                ++failed;
+
+            // 最後の1回以外はインターバル待機
+            if (i < num_probes_ - 1) {
+                for (int t = 0; t < interval_ms_ && running_; ++t)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+
+        running_ = false;
+
+        // --- 結果集計 ---
+        RtmpProbeResult r;
+        r.failed  = failed;
+        r.samples = (int)samples.size();
+
+        if (samples.empty()) {
+            r.valid     = false;
+            r.error_msg = "全ての計測が失敗しました。\n"
+                          "RTMPサーバーのアドレスとポートを確認してください。";
+        } else {
+            r.valid       = true;
+            r.min_rtt_ms  = *std::min_element(samples.begin(), samples.end());
+            r.max_rtt_ms  = *std::max_element(samples.begin(), samples.end());
+            r.avg_rtt_ms  = std::accumulate(samples.begin(), samples.end(), 0.0)
+                            / r.samples;
+            r.avg_one_way = r.avg_rtt_ms / 2.0;
+
+            // ジッター (標準偏差)
+            double sq_sum = 0;
+            for (double v : samples)
+                sq_sum += (v - r.avg_rtt_ms) * (v - r.avg_rtt_ms);
+            r.jitter_ms = std::sqrt(sq_sum / r.samples);
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            last_result_ = r;
+        }
+
+        if (on_result) on_result(r);
+    }
+
+    std::string      host_;
+    int              port_        = 1935;
+    int              num_probes_  = 10;
+    int              interval_ms_ = 300;
+    std::atomic<bool> running_{false};
+    std::thread      worker_;
+    mutable std::mutex mtx_;
+    RtmpProbeResult  last_result_;
+};

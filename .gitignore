@@ -1,0 +1,53 @@
+# Build outputs
+/build/
+/build_*/
+/cmake-build-*/
+/out/
+/bin/
+/lib/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.ninja
+*.ninja_deps
+*.ninja_log
+
+# Compiled artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.exp
+
+# Third-party dependencies (cloned locally)
+/third_party/
+
+# IDE / Editor
+.vs/
+.vscode/
+.idea/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.user.props
+*.user.targets
+*.sdf
+*.ipch
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
