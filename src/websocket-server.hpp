@@ -124,23 +124,28 @@ public:
     bool start(uint16_t port) {
         if (running_) return true;
         port_ = port;
-        server_ptr_ = std::make_unique<WsServer>();
+        auto srv = std::make_shared<WsServer>();
         try {
-            server_ptr_->set_error_channels(websocketpp::log::elevel::none);
-            server_ptr_->set_access_channels(websocketpp::log::alevel::none);
-            server_ptr_->init_asio();
-            server_ptr_->set_reuse_addr(true);
-            server_ptr_->set_open_handler([this](ConnHandle h) { on_open(h); });
-            server_ptr_->set_close_handler([this](ConnHandle h) { on_close(h); });
-            server_ptr_->set_message_handler([this](ConnHandle h, WsServer::message_ptr m) {
+            srv->set_error_channels(websocketpp::log::elevel::none);
+            srv->set_access_channels(websocketpp::log::alevel::none);
+            srv->init_asio();
+            srv->set_reuse_addr(true);
+            srv->set_open_handler([this](ConnHandle h) { on_open(h); });
+            srv->set_close_handler([this](ConnHandle h) { on_close(h); });
+            srv->set_message_handler([this](ConnHandle h, WsServer::message_ptr m) {
                 on_message(h, m);
             });
-            server_ptr_->listen(port_);
-            server_ptr_->start_accept();
-            thread_ = std::thread([this]() { server_ptr_->run(); });
+            srv->listen(port_);
+            srv->start_accept();
+            {
+                std::lock_guard<std::mutex> lk(mtx_);
+                server_ptr_ = srv;
+            }
+            thread_ = std::thread([srv]() { srv->run(); });
             running_ = true;
             return true;
         } catch (...) {
+            std::lock_guard<std::mutex> lk(mtx_);
             server_ptr_.reset();
             return false;
         }
@@ -161,9 +166,14 @@ public:
         join_all_measure_threads();
 
         // 3. ASIO サーバーを停止
-        if (server_ptr_) {
-            try { server_ptr_->stop_listening(); } catch (...) {}
-            try { server_ptr_->stop(); } catch (...) {}
+        std::shared_ptr<WsServer> srv;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            srv = server_ptr_;
+        }
+        if (srv) {
+            try { srv->stop_listening(); } catch (...) {}
+            try { srv->stop(); } catch (...) {}
         }
         if (thread_.joinable()) thread_.join();
 
@@ -175,6 +185,7 @@ public:
         }
 
         // 5. サーバーオブジェクト破棄
+        std::lock_guard<std::mutex> lk(mtx_);
         server_ptr_.reset();
     }
 
@@ -207,15 +218,16 @@ public:
 
         // 送信先ハンドルのスナップショットを取得（短時間ロック）
         std::vector<ConnHandle> targets;
+        std::shared_ptr<WsServer> srv;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             auto* cs = find_ch(stream_id_, ch);
             if (!cs || cs->conns.empty()) return;
             targets.assign(cs->conns.begin(), cs->conns.end());
+            srv = server_ptr_;
         }
 
         // ASIO スレッドに送信を委譲（音声スレッドはブロックしない）
-        auto srv = server_ptr_.get();
         if (!srv) return;
         try {
             srv->get_io_service().post([srv, targets = std::move(targets),
@@ -230,21 +242,30 @@ public:
 
     // ----- RTT計測 (ch: 0-indexed) -----
     bool start_measurement(int ch, int num_pings = 10, int interval_ms = 150) {
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto* cs = find_ch(stream_id_, ch);
-        if (!cs || cs->conns.empty() || cs->measuring) return false;
+        std::string sid;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto* cs = find_ch(stream_id_, ch);
+            if (!cs || cs->conns.empty() || cs->measuring) return false;
 
-        cs->measuring = true;
-        cs->ping_times.clear();
-        cs->rtt_samples.clear();
+            cs->measuring = true;
+            cs->ping_times.clear();
+            cs->rtt_samples.clear();
+            sid = stream_id_;
+        }
 
         // 管理されたスレッドで計測
-        std::string sid = stream_id_;
-        auto t = std::make_unique<std::thread>(
-            [this, sid, ch, num_pings, interval_ms]() {
-                measure_loop(sid, ch, num_pings, interval_ms);
-            });
-        measure_threads_.push_back(std::move(t));
+        auto mt = std::make_unique<MeasureThread>();
+        MeasureThread* mt_ptr = mt.get();
+        mt->th = std::thread([this, sid, ch, num_pings, interval_ms, mt_ptr]() {
+            measure_loop(sid, ch, num_pings, interval_ms);
+            mt_ptr->done.store(true, std::memory_order_release);
+        });
+        {
+            std::lock_guard<std::mutex> lk(measure_threads_mtx_);
+            measure_threads_.push_back(std::move(mt));
+        }
+        cleanup_done_measure_threads();
         return true;
     }
 
@@ -353,19 +374,43 @@ private:
 
     // ----- 全計測スレッドを join -----
     void join_all_measure_threads() {
-        std::vector<std::unique_ptr<std::thread>> threads;
+        std::vector<std::unique_ptr<MeasureThread>> threads;
         {
             std::lock_guard<std::mutex> lk(measure_threads_mtx_);
             threads.swap(measure_threads_);
         }
         for (auto& t : threads) {
-            if (t && t->joinable()) t->join();
+            if (t && t->th.joinable()) t->th.join();
+        }
+    }
+
+    void cleanup_done_measure_threads() {
+        std::vector<std::unique_ptr<MeasureThread>> done;
+        {
+            std::lock_guard<std::mutex> lk(measure_threads_mtx_);
+            for (auto it = measure_threads_.begin(); it != measure_threads_.end(); ) {
+                if ((*it)->done.load(std::memory_order_acquire)) {
+                    done.push_back(std::move(*it));
+                    it = measure_threads_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        for (auto& t : done) {
+            if (t && t->th.joinable()) t->th.join();
         }
     }
 
     // ----- イベントハンドラ -----
     void on_open(ConnHandle h) {
-        auto con = server_ptr_->get_con_from_hdl(h);
+        std::shared_ptr<WsServer> srv;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            srv = server_ptr_;
+        }
+        if (!srv) return;
+        auto con = srv->get_con_from_hdl(h);
         std::string path = con->get_resource();
         std::string sid; int ch;
         if (!parse_path(path, sid, ch)) {
@@ -384,7 +429,7 @@ private:
         snprintf(info, sizeof(info),
             "{\"type\":\"session_info\",\"stream_id\":\"%s\",\"ch\":%d}",
             sid.c_str(), ch + 1);
-        try { server_ptr_->send(h, std::string(info), websocketpp::frame::opcode::text); }
+        try { srv->send(h, std::string(info), websocketpp::frame::opcode::text); }
         catch (...) {}
     }
 
@@ -434,14 +479,15 @@ private:
                 std::lock_guard<std::mutex> lk(mtx_);
                 auto* cs = find_ch(sid, ch);
                 if (!cs || !cs->measuring) break;
-                if (!server_ptr_) break;
+                auto srv = server_ptr_;
+                if (!srv) break;
                 auto t_now = Ms(Clock::now().time_since_epoch()).count();
                 cs->ping_times[seq] = Clock::now();
                 char buf[128];
                 snprintf(buf, sizeof(buf),
                     "{\"type\":\"ping\",\"seq\":%d,\"t\":%.3f}", seq, t_now);
                 for (auto& hdl : cs->conns) {
-                    try { server_ptr_->send(hdl, std::string(buf),
+                    try { srv->send(hdl, std::string(buf),
                                        websocketpp::frame::opcode::text); }
                     catch (...) {}
                 }
@@ -483,7 +529,8 @@ private:
             cb = cs->on_result;
 
             // ブラウザへ結果通知
-            if (server_ptr_) {
+            auto srv = server_ptr_;
+            if (srv) {
                 char buf[256];
                 snprintf(buf, sizeof(buf),
                     "{\"type\":\"latency_result\","
@@ -492,7 +539,7 @@ private:
                     r.avg_rtt_ms, r.avg_one_way,
                     r.min_rtt_ms, r.max_rtt_ms, r.samples);
                 for (auto& hdl : cs->conns) {
-                    try { server_ptr_->send(hdl, std::string(buf),
+                    try { srv->send(hdl, std::string(buf),
                                        websocketpp::frame::opcode::text); }
                     catch (...) {}
                 }
@@ -505,14 +552,20 @@ private:
     void broadcast_text(const std::string& sid, int ch, const std::string& msg) {
         std::lock_guard<std::mutex> lk(mtx_);
         auto* cs = find_ch(sid, ch);
-        if (!cs || !server_ptr_) return;
+        auto srv = server_ptr_;
+        if (!cs || !srv) return;
         for (auto& hdl : cs->conns) {
-            try { server_ptr_->send(hdl, msg, websocketpp::frame::opcode::text); }
+            try { srv->send(hdl, msg, websocketpp::frame::opcode::text); }
             catch (...) {}
         }
     }
 
-    std::unique_ptr<WsServer> server_ptr_;
+    struct MeasureThread {
+        std::thread th;
+        std::atomic<bool> done{false};
+    };
+
+    std::shared_ptr<WsServer> server_ptr_;
     std::thread        thread_;
     mutable std::mutex mtx_;
     uint16_t           port_    = 0;
@@ -526,5 +579,5 @@ private:
 
     // 計測スレッド管理
     std::mutex measure_threads_mtx_;
-    std::vector<std::unique_ptr<std::thread>> measure_threads_;
+    std::vector<std::unique_ptr<MeasureThread>> measure_threads_;
 };

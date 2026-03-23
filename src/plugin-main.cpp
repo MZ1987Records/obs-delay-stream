@@ -325,8 +325,13 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
 
 static void ds_destroy(void* data) {
     auto* d = static_cast<DelayStreamData*>(data);
+    // 1. 各コンポーネントの停止（内部スレッドの join を含む）
+    d->flow.reset();
+    d->rtmp.prober.cancel();
+    d->tunnel.stop();
+    d->router.stop();
 
-    // 1. コールバックをnull化（Use-After-Free 防止）
+    // 2. コールバックをnull化（停止後なので競合しない）
     d->flow.on_update       = nullptr;
     d->flow.on_ch_measured  = nullptr;
     d->flow.on_apply_sub    = nullptr;
@@ -336,12 +341,6 @@ static void ds_destroy(void* data) {
     d->tunnel.on_error      = nullptr;
     d->tunnel.on_stopped    = nullptr;
     d->router.clear_callbacks();
-
-    // 2. 各コンポーネントの停止（内部スレッドの join を含む）
-    d->flow.reset();
-    d->rtmp.prober.cancel();
-    d->tunnel.stop();
-    d->router.stop();
 
     delete d;
 }

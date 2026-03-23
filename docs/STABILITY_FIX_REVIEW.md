@@ -392,13 +392,19 @@ while (!stop_requested_) {
 破棄済みの `d` を参照してクラッシュする可能性があった。
 
 **修正内容:**
-すべてのコールバックを先に `nullptr` 化してから各コンポーネントを停止:
+各コンポーネント停止（join）を先に実施し、その後コールバックを `nullptr` 化:
 
 ```cpp
 static void ds_destroy(void* data) {
     auto* d = static_cast<DelayStreamData*>(data);
 
-    // 1. コールバックをすべて無効化（デタッチスレッドからのアクセス防止）
+    // 1. 各コンポーネントを停止（スレッド join）
+    d->flow.reset();
+    d->rtmp.prober.cancel();
+    d->tunnel.stop();
+    d->router.stop();
+
+    // 2. コールバック無効化（停止後なので競合しない）
     d->flow.on_update       = nullptr;
     d->flow.on_ch_measured  = nullptr;
     d->flow.on_apply_sub    = nullptr;
@@ -408,12 +414,6 @@ static void ds_destroy(void* data) {
     d->tunnel.on_error      = nullptr;
     d->tunnel.on_stopped    = nullptr;
     d->router.clear_callbacks();
-
-    // 2. 各コンポーネントを停止（スレッド join）
-    d->flow.reset();
-    d->rtmp.prober.cancel();
-    d->tunnel.stop();
-    d->router.stop();
 
     // 3. 安全に破棄
     delete d;
@@ -425,9 +425,25 @@ static void ds_destroy(void* data) {
 
 ---
 
+## 追加修正（2026-03-24）
+
+### [CRITICAL-10] StreamRouter の停止/送信/計測の競合対策
+
+**対象:** `src/websocket-server.hpp`, `src/plugin-main.cpp`
+
+**修正内容:**
+- `server_ptr_` を `std::shared_ptr` 化し、`mtx_` 保護下でスナップショット取得
+  - `stop()`/`send_audio()`/各ハンドラの並行実行でも UAF/データ競合にならない
+- 計測スレッド管理に `MeasureThread` を導入
+  - `measure_threads_mtx_` で `push/erase` を同期
+  - 終了済みスレッドを回収してリスト肥大化を防止
+- `ds_destroy()` の順序を「停止 → コールバック無効化」に変更
+  - `std::function` の同時読み書き競合を回避
+
+---
+
 ## 未実施事項
 
 1. **ビルド確認**: OBS Studio ソースコード環境が当該マシンに存在しないため、コンパイル確認は未実施。OBS SDKのある環境でのビルドテストが必要。
-2. **`std::function` コールバックのスレッド安全性**: `on_result`, `on_update` 等の `std::function` メンバ自体は非アトミック。`ds_destroy()` でのnull化とワーカースレッドからの読み取りに微小な競合窓がある。現在は `null化 → cancel()/stop() (join)` の順序で緩和しているが、厳密には `std::atomic<std::shared_ptr<...>>` 等が必要。
-3. **ThreadSanitizer (TSan)** によるデータ競合の自動検出テスト。
-4. **負荷テスト**: 10CH同時接続 + ネットワーク遅延シミュレーション環境での音声途切れ確認。
+2. **ThreadSanitizer (TSan)** によるデータ競合の自動検出テスト。
+3. **負荷テスト**: 10CH同時接続 + ネットワーク遅延シミュレーション環境での音声途切れ確認。
