@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * websocket-server.hpp  v1.3.0
+ * websocket-server.hpp  v2.0.0
  *
  * StreamRouter: 単一ポート(19000)でパスルーティングを行う WebSocketサーバー
  *
@@ -20,6 +20,11 @@
  *   OBS → Browser: {"type":"latency_result","avg_rtt":X,"one_way":Y,"min":A,"max":B,"samples":N}
  *   OBS → Browser: {"type":"apply_delay","ms":X}
  *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N}  ← 接続直後に送信
+ *
+ * v2.0.0 changes:
+ *   - send_audio() を非ブロッキング化 (ASIO::post 経由で送信)
+ *   - .detach() を廃止、全計測スレッドを join() 管理
+ *   - stop() の正しい停止順序
  */
 
 #define ASIO_STANDALONE
@@ -62,6 +67,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cctype>
+#include <memory>
 
 using WsServer   = websocketpp::server<websocketpp::config::asio>;
 using ConnHandle = websocketpp::connection_hdl;
@@ -143,19 +149,36 @@ public:
     void stop() {
         if (!running_) return;
         running_ = false;
+
+        // 1. 全計測スレッドの停止を要求
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            for (auto& kv : ch_map_)
+                kv.second.measuring = false;
+        }
+
+        // 2. 全計測スレッドを join
+        join_all_measure_threads();
+
+        // 3. ASIO サーバーを停止
         if (server_ptr_) {
             try { server_ptr_->stop_listening(); } catch (...) {}
             try { server_ptr_->stop(); } catch (...) {}
         }
         if (thread_.joinable()) thread_.join();
+
+        // 4. 状態をクリア（サーバー停止後なのでハンドラは走らない）
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            conn_map_.clear();
+            ch_map_.clear();
+        }
+
+        // 5. サーバーオブジェクト破棄
         server_ptr_.reset();
-        std::lock_guard<std::mutex> lk(mtx_);
-        conn_map_.clear();
-        ch_map_.clear();
     }
 
     // ----- 配信ID設定 -----
-    // 変更時は既存接続の配信IDと一致するものだけ有効になる
     void set_stream_id(const std::string& id) {
         std::lock_guard<std::mutex> lk(mtx_);
         stream_id_ = sanitize_id(id);
@@ -166,25 +189,43 @@ public:
     }
 
     // ----- 音声送信 (ch: 0-indexed) -----
+    // 音声スレッドから呼ばれる。非ブロッキング: ASIO スレッドに委譲。
     void send_audio(int ch, const float* data, size_t frames,
                     uint32_t sample_rate, uint32_t channels)
     {
+        if (!running_) return;
+
+        // パケットを構築（音声スレッドで行う、軽量な処理）
         size_t pcm_bytes = frames * channels * sizeof(float);
-        std::string pkt(16 + pcm_bytes, '\0');
-        uint32_t* hdr = reinterpret_cast<uint32_t*>(&pkt[0]);
+        auto pkt = std::make_shared<std::string>(16 + pcm_bytes, '\0');
+        uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
         hdr[0] = 0x41554449u; // 'AUDI'
         hdr[1] = sample_rate;
         hdr[2] = channels;
         hdr[3] = static_cast<uint32_t>(frames);
-        std::memcpy(&pkt[16], data, pcm_bytes);
+        std::memcpy(&(*pkt)[16], data, pcm_bytes);
 
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto* cs = find_ch(stream_id_, ch);
-        if (!cs) return;
-        for (auto& hdl : cs->conns) {
-            try { server_ptr_->send(hdl, pkt, websocketpp::frame::opcode::binary); }
-            catch (...) {}
+        // 送信先ハンドルのスナップショットを取得（短時間ロック）
+        std::vector<ConnHandle> targets;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto* cs = find_ch(stream_id_, ch);
+            if (!cs || cs->conns.empty()) return;
+            targets.assign(cs->conns.begin(), cs->conns.end());
         }
+
+        // ASIO スレッドに送信を委譲（音声スレッドはブロックしない）
+        auto srv = server_ptr_.get();
+        if (!srv) return;
+        try {
+            srv->get_io_service().post([srv, targets = std::move(targets),
+                                        pkt = std::move(pkt)]() {
+                for (auto& hdl : targets) {
+                    try { srv->send(hdl, *pkt, websocketpp::frame::opcode::binary); }
+                    catch (...) {}
+                }
+            });
+        } catch (...) {}
     }
 
     // ----- RTT計測 (ch: 0-indexed) -----
@@ -197,11 +238,13 @@ public:
         cs->ping_times.clear();
         cs->rtt_samples.clear();
 
-        // 別スレッドで計測
+        // 管理されたスレッドで計測
         std::string sid = stream_id_;
-        std::thread([this, sid, ch, num_pings, interval_ms]() {
-            measure_loop(sid, ch, num_pings, interval_ms);
-        }).detach();
+        auto t = std::make_unique<std::thread>(
+            [this, sid, ch, num_pings, interval_ms]() {
+                measure_loop(sid, ch, num_pings, interval_ms);
+            });
+        measure_threads_.push_back(std::move(t));
         return true;
     }
 
@@ -226,6 +269,13 @@ public:
         cs.on_result = std::move(cb);
     }
 
+    // 全コールバックをクリア（破棄前に呼ぶ）
+    void clear_callbacks() {
+        std::lock_guard<std::mutex> lk(mtx_);
+        for (auto& kv : ch_map_)
+            kv.second.on_result = nullptr;
+    }
+
     // 遅延反映通知
     void notify_apply_delay(int ch, double ms) {
         char buf[64];
@@ -241,7 +291,6 @@ public:
     }
 
     // 受信URLを生成
-    // host: OBSのPCのIPアドレス表示用文字列
     std::string make_url(const std::string& host, int ch_1indexed) const {
         std::lock_guard<std::mutex> lk(mtx_);
         char buf[256];
@@ -272,11 +321,9 @@ private:
     }
 
     // ----- WebSocketパスから (stream_id, ch) を解析 -----
-    // パス例: /myshow2024/1  → ("myshow2024", 0)
     static bool parse_path(const std::string& path,
                             std::string& stream_id, int& ch_0idx)
     {
-        // 先頭の '/' を除去
         std::string p = path;
         if (!p.empty() && p[0] == '/') p = p.substr(1);
 
@@ -285,7 +332,6 @@ private:
 
         stream_id = sanitize_id(p.substr(0, slash));
         std::string ch_str = p.substr(slash + 1);
-        // クエリ文字列などを除去
         auto q = ch_str.find_first_of("?#");
         if (q != std::string::npos) ch_str = ch_str.substr(0, q);
 
@@ -295,7 +341,7 @@ private:
         return !stream_id.empty();
     }
 
-    // ----- ch_map_検索（const版・非const版） -----
+    // ----- ch_map_検索 -----
     ChannelState* find_ch(const std::string& sid, int ch) {
         auto it = ch_map_.find(make_key(sid, ch));
         return it != ch_map_.end() ? &it->second : nullptr;
@@ -305,14 +351,24 @@ private:
         return it != ch_map_.end() ? &it->second : nullptr;
     }
 
+    // ----- 全計測スレッドを join -----
+    void join_all_measure_threads() {
+        std::vector<std::unique_ptr<std::thread>> threads;
+        {
+            std::lock_guard<std::mutex> lk(measure_threads_mtx_);
+            threads.swap(measure_threads_);
+        }
+        for (auto& t : threads) {
+            if (t && t->joinable()) t->join();
+        }
+    }
+
     // ----- イベントハンドラ -----
     void on_open(ConnHandle h) {
-        // 接続URLのパスを解析
         auto con = server_ptr_->get_con_from_hdl(h);
-        std::string path = con->get_resource(); // "/stream_id/ch"
+        std::string path = con->get_resource();
         std::string sid; int ch;
         if (!parse_path(path, sid, ch)) {
-            // パス不正 → 切断
             con->close(websocketpp::close::status::policy_violation,
                        "invalid path: use /stream_id/ch");
             return;
@@ -324,7 +380,6 @@ private:
             ch_map_[make_key(sid, ch)].conns.insert(h);
         }
 
-        // 接続直後にセッション情報を送信
         char info[256];
         snprintf(info, sizeof(info),
             "{\"type\":\"session_info\",\"stream_id\":\"%s\",\"ch\":%d}",
@@ -374,10 +429,12 @@ private:
                       int num_pings, int interval_ms)
     {
         for (int seq = 0; seq < num_pings; ++seq) {
+            if (!running_) break;
             {
                 std::lock_guard<std::mutex> lk(mtx_);
                 auto* cs = find_ch(sid, ch);
                 if (!cs || !cs->measuring) break;
+                if (!server_ptr_) break;
                 auto t_now = Ms(Clock::now().time_since_epoch()).count();
                 cs->ping_times[seq] = Clock::now();
                 char buf[128];
@@ -389,10 +446,13 @@ private:
                     catch (...) {}
                 }
             }
-            for (int t = 0; t < interval_ms; ++t)
+            // 中断可能なスリープ
+            for (int t = 0; t < interval_ms && running_; ++t)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        // 中断可能な待機（pong受信を待つ）
+        for (int t = 0; t < 600 && running_; ++t)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         finalize_result(sid, ch);
     }
 
@@ -423,26 +483,29 @@ private:
             cb = cs->on_result;
 
             // ブラウザへ結果通知
-            char buf[256];
-            snprintf(buf, sizeof(buf),
-                "{\"type\":\"latency_result\","
-                "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
-                "\"min\":%.1f,\"max\":%.1f,\"samples\":%d}",
-                r.avg_rtt_ms, r.avg_one_way,
-                r.min_rtt_ms, r.max_rtt_ms, r.samples);
-            for (auto& hdl : cs->conns) {
-                try { server_ptr_->send(hdl, std::string(buf),
-                                   websocketpp::frame::opcode::text); }
-                catch (...) {}
+            if (server_ptr_) {
+                char buf[256];
+                snprintf(buf, sizeof(buf),
+                    "{\"type\":\"latency_result\","
+                    "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
+                    "\"min\":%.1f,\"max\":%.1f,\"samples\":%d}",
+                    r.avg_rtt_ms, r.avg_one_way,
+                    r.min_rtt_ms, r.max_rtt_ms, r.samples);
+                for (auto& hdl : cs->conns) {
+                    try { server_ptr_->send(hdl, std::string(buf),
+                                       websocketpp::frame::opcode::text); }
+                    catch (...) {}
+                }
             }
         }
+        // コールバックはロック外で呼び出し
         if (cb) cb(sid, ch, r);
     }
 
     void broadcast_text(const std::string& sid, int ch, const std::string& msg) {
         std::lock_guard<std::mutex> lk(mtx_);
         auto* cs = find_ch(sid, ch);
-        if (!cs) return;
+        if (!cs || !server_ptr_) return;
         for (auto& hdl : cs->conns) {
             try { server_ptr_->send(hdl, msg, websocketpp::frame::opcode::text); }
             catch (...) {}
@@ -453,11 +516,15 @@ private:
     std::thread        thread_;
     mutable std::mutex mtx_;
     uint16_t           port_    = 0;
-    bool               running_ = false;
+    std::atomic<bool>  running_{false};
     std::string        stream_id_;
 
     // conn_handle → ConnInfo
     std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;
     // "stream_id/ch_0idx" → ChannelState
     std::map<std::string, ChannelState> ch_map_;
+
+    // 計測スレッド管理
+    std::mutex measure_threads_mtx_;
+    std::vector<std::unique_ptr<std::thread>> measure_threads_;
 };

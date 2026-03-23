@@ -162,17 +162,20 @@ public:
         if (on_update) on_update();
 
         prober_.on_result = [this](RtmpProbeResult r) {
-            std::lock_guard<std::mutex> lk(mtx_);
-            if (r.valid) {
-                result_.rtmp_valid      = true;
-                result_.rtmp_one_way_ms = r.avg_one_way;
-                // マスター遅延 = パフォーマー基準 + RTMP片道遅延
-                result_.master_delay_ms = result_.max_one_way_ms + r.avg_one_way;
-            } else {
-                result_.rtmp_valid = false;
-                result_.rtmp_error = r.error_msg;
+            {
+                std::lock_guard<std::mutex> lk(mtx_);
+                if (r.valid) {
+                    result_.rtmp_valid      = true;
+                    result_.rtmp_one_way_ms = r.avg_one_way;
+                    // マスター遅延 = パフォーマー基準 + RTMP片道遅延
+                    result_.master_delay_ms = result_.max_one_way_ms + r.avg_one_way;
+                } else {
+                    result_.rtmp_valid = false;
+                    result_.rtmp_error = r.error_msg;
+                }
+                phase_ = FlowPhase::Step3_Done;
             }
-            phase_ = FlowPhase::Step3_Done;
+            // コールバックはロック外で呼び出し（デッドロック防止）
             if (on_update) on_update();
         };
         prober_.start(rtmp_url, 10, 300);

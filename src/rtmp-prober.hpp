@@ -154,54 +154,55 @@ private:
         return !host.empty();
     }
 
+    // RAII guard for addrinfo
+    struct AddrInfoGuard {
+        addrinfo* p = nullptr;
+        ~AddrInfoGuard() { if (p) freeaddrinfo(p); }
+    };
+    // RAII guard for SOCKET
+    struct SocketGuard {
+        SOCKET s = INVALID_SOCKET;
+        ~SocketGuard() { if (s != INVALID_SOCKET) closesocket(s); }
+    };
+
     // ============================================================
     // 1回分の計測: TCP接続 + RTMP C0C1 送受信
     // 戻り値: RTT (ms) または -1.0 (失敗)
     // ============================================================
     double probe_once() {
         // --- アドレス解決 ---
-        addrinfo hints{}, *res = nullptr;
+        addrinfo hints{};
         hints.ai_family   = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
         char port_str[8];
         snprintf(port_str, sizeof(port_str), "%d", port_);
-        if (getaddrinfo(host_.c_str(), port_str, &hints, &res) != 0 || !res)
+        AddrInfoGuard ai;
+        if (getaddrinfo(host_.c_str(), port_str, &hints, &ai.p) != 0 || !ai.p)
             return -1.0;
 
-        SOCKET sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-        if (sock == INVALID_SOCKET) { freeaddrinfo(res); return -1.0; }
+        SocketGuard sg;
+        sg.s = socket(ai.p->ai_family, ai.p->ai_socktype, ai.p->ai_protocol);
+        if (sg.s == INVALID_SOCKET) return -1.0;
 
         // タイムアウト設定 (2秒)
         DWORD timeout_ms = 2000;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+        setsockopt(sg.s, SOL_SOCKET, SO_RCVTIMEO,
                    reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
-        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+        setsockopt(sg.s, SOL_SOCKET, SO_SNDTIMEO,
                    reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
 
         // --- TCP接続（ここがTCP RTTを含む） ---
         auto t0 = ProbeClk::now();
-        if (connect(sock, res->ai_addr, (int)res->ai_addrlen) != 0) {
-            closesocket(sock);
-            freeaddrinfo(res);
+        if (connect(sg.s, ai.p->ai_addr, (int)ai.p->ai_addrlen) != 0)
             return -1.0;
-        }
 
         // --- RTMP C0 + C1 送信 (1 + 1536 bytes) ---
-        // C0: version = 3
-        // C1: time(4B) + zeros(4B) + random(1528B)
         uint8_t c0c1[1 + 1536] = {};
         c0c1[0] = 3; // RTMP version
-        // C1 timestamp (4 bytes, big-endian) = 0
-        // C1 zeros (4 bytes) = 0
-        // C1 random data (1528 bytes) — すべて0でも仕様上問題ない
 
-        if (send(sock, reinterpret_cast<const char*>(c0c1), sizeof(c0c1), 0)
+        if (send(sg.s, reinterpret_cast<const char*>(c0c1), sizeof(c0c1), 0)
             != sizeof(c0c1))
-        {
-            closesocket(sock);
-            freeaddrinfo(res);
             return -1.0;
-        }
 
         // --- S0 + S1 + S2 受信 (1 + 1536 + 1536 bytes) ---
         // 最低 S0(1) + S1(1536) = 1537 bytes 来れば計測成立
@@ -209,16 +210,13 @@ private:
         int received = 0;
         int target   = 1 + 1536; // S0+S1
         while (received < target) {
-            int n = recv(sock, reinterpret_cast<char*>(s_buf + received),
+            int n = recv(sg.s, reinterpret_cast<char*>(s_buf + received),
                          target - received, 0);
             if (n <= 0) break;
             received += n;
         }
 
         auto t1 = ProbeClk::now();
-        closesocket(sock);
-        freeaddrinfo(res);
-
         if (received < target) return -1.0;
 
         return ProbeMs(t1 - t0).count();

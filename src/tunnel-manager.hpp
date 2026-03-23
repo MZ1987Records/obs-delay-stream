@@ -82,16 +82,19 @@ public:
                const std::string& token = "",
                int ws_port = 19000)
     {
-        if (state_ == TunnelState::Running ||
-            state_ == TunnelState::Starting) return false;
+        if (state_.load() == TunnelState::Running ||
+            state_.load() == TunnelState::Starting) return false;
 
         type_     = type;
         exe_path_ = exe_path;
         token_    = token;
         ws_port_  = ws_port;
-        url_      = "";
-        error_    = "";
-        state_    = TunnelState::Starting;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            url_      = "";
+            error_    = "";
+        }
+        state_ = TunnelState::Starting;
 
         if (worker_.joinable()) worker_.join();
         worker_ = std::thread([this]() { run_loop(); });
@@ -105,7 +108,9 @@ public:
         if (worker_.joinable()) worker_.join();
         state_ = TunnelState::Stopped;
         stop_requested_ = false;
-        if (on_stopped) on_stopped();
+        // コールバックは呼ばない（ds_destroy時にnull化されている可能性がある）
+        auto cb = on_stopped;
+        if (cb) cb();
     }
 
     // ----- 状態アクセス -----
@@ -178,13 +183,17 @@ private:
                  err, errmsg, exe_path.c_str());
             return false;
         }
-        proc_handle_   = pi.hProcess;
-        thread_handle_ = pi.hThread;
+        {
+            std::lock_guard<std::mutex> lk(proc_mtx_);
+            proc_handle_   = pi.hProcess;
+            thread_handle_ = pi.hThread;
+        }
         blog(LOG_INFO, "[obs-delay-stream] Process started, log: %s", log_file_path_.c_str());
         return true;
     }
 
     void kill_child() {
+        std::lock_guard<std::mutex> lk(proc_mtx_);
         if (proc_handle_ != INVALID_HANDLE_VALUE) {
             TerminateProcess(proc_handle_, 0);
             WaitForSingleObject(proc_handle_, 2000);
@@ -255,7 +264,13 @@ private:
         // プロセス終了を監視
         while (!stop_requested_) {
             DWORD exit_code = STILL_ACTIVE;
-            GetExitCodeProcess(proc_handle_, &exit_code);
+            {
+                std::lock_guard<std::mutex> lk(proc_mtx_);
+                if (proc_handle_ != INVALID_HANDLE_VALUE)
+                    GetExitCodeProcess(proc_handle_, &exit_code);
+                else
+                    break;
+            }
             if (exit_code != STILL_ACTIVE) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
@@ -392,7 +407,13 @@ private:
         // プロセス終了監視
         while (!stop_requested_) {
             DWORD exit_code = STILL_ACTIVE;
-            GetExitCodeProcess(proc_handle_, &exit_code);
+            {
+                std::lock_guard<std::mutex> lk(proc_mtx_);
+                if (proc_handle_ != INVALID_HANDLE_VALUE)
+                    GetExitCodeProcess(proc_handle_, &exit_code);
+                else
+                    break;
+            }
             if (exit_code != STILL_ACTIVE) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
@@ -424,6 +445,7 @@ private:
     std::atomic<bool>        stop_requested_{false};
     std::thread              worker_;
 
+    std::mutex           proc_mtx_;
     HANDLE proc_handle_   = INVALID_HANDLE_VALUE;
     HANDLE thread_handle_ = INVALID_HANDLE_VALUE;
     HANDLE pipe_read_     = INVALID_HANDLE_VALUE;

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake --build . --config RelWithDebInfo)",
+      "Bash(where cmake:*)",
+      "Bash(where cl:*)",
+      "Read(//c/Program Files/Microsoft Visual Studio/**)",
+      "Read(//c/Program Files \\(x86\\)/Microsoft Visual Studio/**)",
+      "Read(//c//**)",
+      "Read(//m//**)",
+      "Read(//m/mydocs/workspace/**)"
+    ]
+  }
+}

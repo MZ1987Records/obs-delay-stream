@@ -117,8 +117,9 @@ struct ChCtx { DelayStreamData* d; int ch; };
 
 struct DelayStreamData {
     obs_source_t* context      = nullptr;
-    bool          enabled      = true;
-    bool          ws_enabled   = true;
+    std::atomic<bool> enabled{true};
+    std::atomic<bool> ws_enabled{true};
+    mutable std::mutex stream_id_mtx;  // protects stream_id, host_ip
     std::string   stream_id;
     std::string   host_ip;
     std::string   auto_ip;
@@ -127,7 +128,7 @@ struct DelayStreamData {
     DelayBuffer   master_buf;
     RtmpMeasureState rtmp;
     StreamRouter  router;
-    bool          router_running = false;
+    std::atomic<bool> router_running{false};
     std::array<ChCtx, NUM_SUB_CH> btn_ctx;
     std::array<ChCtx, NUM_SUB_CH> copy_ctx;
     std::array<ChCtx, NUM_SUB_CH> tunnel_copy_ctx;
@@ -145,6 +146,20 @@ struct DelayStreamData {
     std::atomic<bool> create_done{false}; // set true after ds_create completes
     std::atomic<bool> in_get_props{false}; // true while ds_get_properties is running
     std::vector<float> work_buf;
+
+    // Thread-safe accessors for stream_id
+    std::string get_stream_id() const {
+        std::lock_guard<std::mutex> lk(stream_id_mtx);
+        return stream_id;
+    }
+    void set_stream_id(const std::string& id) {
+        std::lock_guard<std::mutex> lk(stream_id_mtx);
+        stream_id = id;
+    }
+    std::string get_host_ip() const {
+        std::lock_guard<std::mutex> lk(stream_id_mtx);
+        return host_ip;
+    }
 };
 
 static void request_properties_refresh(DelayStreamData* d) {
@@ -174,18 +189,20 @@ static void write_master_delay(DelayStreamData* d, double ms) {
     obs_data_t* s = obs_source_get_settings(d->context);
     obs_data_set_double(s, "master_delay_ms", ms);
     d->master_delay_ms = (float)ms;
-    if (d->enabled) d->master_buf.set_delay_ms((uint32_t)ms);
+    if (d->enabled.load()) d->master_buf.set_delay_ms((uint32_t)ms);
     obs_data_release(s);
 }
 
 static std::string make_sub_url(DelayStreamData* d, int ch1) {
-    if (d->stream_id.empty()) return "";
+    std::string sid = d->get_stream_id();
+    if (sid.empty()) return "";
     std::string turl = d->tunnel.url();
-    if (!turl.empty()) return d->tunnel.make_ch_url(d->stream_id, ch1);
-    std::string ip = d->host_ip.empty() ? d->auto_ip : d->host_ip;
+    if (!turl.empty()) return d->tunnel.make_ch_url(sid, ch1);
+    std::string ip = d->get_host_ip();
+    if (ip.empty()) ip = d->auto_ip;
     if (ip.empty()) return "";
     char buf[256];
-    snprintf(buf, sizeof(buf), "ws://%s:%d/%s/%d", ip.c_str(), WS_PORT, d->stream_id.c_str(), ch1);
+    snprintf(buf, sizeof(buf), "ws://%s:%d/%s/%d", ip.c_str(), WS_PORT, sid.c_str(), ch1);
     return buf;
 }
 
@@ -308,10 +325,24 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
 
 static void ds_destroy(void* data) {
     auto* d = static_cast<DelayStreamData*>(data);
+
+    // 1. コールバックをnull化（Use-After-Free 防止）
+    d->flow.on_update       = nullptr;
+    d->flow.on_ch_measured  = nullptr;
+    d->flow.on_apply_sub    = nullptr;
+    d->flow.on_apply_master = nullptr;
+    d->rtmp.prober.on_result = nullptr;
+    d->tunnel.on_url_ready  = nullptr;
+    d->tunnel.on_error      = nullptr;
+    d->tunnel.on_stopped    = nullptr;
+    d->router.clear_callbacks();
+
+    // 2. 各コンポーネントの停止（内部スレッドの join を含む）
     d->flow.reset();
     d->rtmp.prober.cancel();
     d->tunnel.stop();
     d->router.stop();
+
     delete d;
 }
 
@@ -330,15 +361,19 @@ static void ensure_init(DelayStreamData* d, uint32_t sr, uint32_t ch) {
 
 static void ds_update(void* data, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(data);
-    d->enabled    = obs_data_get_bool(settings, "enabled");
-    d->ws_enabled = obs_data_get_bool(settings, "ws_enabled");
+    d->enabled.store(obs_data_get_bool(settings, "enabled"));
+    d->ws_enabled.store(obs_data_get_bool(settings, "ws_enabled"));
     const char* raw = obs_data_get_string(settings, "stream_id");
-    d->stream_id = raw ? sanitize_stream_id(raw) : "";
-    d->router.set_stream_id(d->stream_id);
+    std::string sid = raw ? sanitize_stream_id(raw) : "";
+    d->set_stream_id(sid);
+    d->router.set_stream_id(sid);
     const char* hip = obs_data_get_string(settings, "host_ip_manual");
-    d->host_ip = (hip && *hip) ? hip : d->auto_ip;
+    {
+        std::lock_guard<std::mutex> lk(d->stream_id_mtx);
+        d->host_ip = (hip && *hip) ? hip : d->auto_ip;
+    }
     d->master_delay_ms = (float)obs_data_get_double(settings, "master_delay_ms");
-    d->master_buf.set_delay_ms(d->enabled ? (uint32_t)d->master_delay_ms : 0);
+    d->master_buf.set_delay_ms(d->enabled.load() ? (uint32_t)d->master_delay_ms : 0);
     d->sub_offset_ms = (float)obs_data_get_double(settings, "sub_offset_ms");
     for (int i = 0; i < NUM_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
@@ -346,7 +381,7 @@ static void ds_update(void* data, obs_data_t* settings) {
         // Apply base delay + global offset (clamp to 0)
         float effective = d->sub[i].delay_ms + d->sub_offset_ms;
         if (effective < 0.0f) effective = 0.0f;
-        d->sub[i].buf.set_delay_ms(d->enabled ? (uint32_t)effective : 0);
+        d->sub[i].buf.set_delay_ms(d->enabled.load() ? (uint32_t)effective : 0);
     }
 }
 
@@ -369,21 +404,26 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
         const float* src = reinterpret_cast<const float*>(audio->data[c]);
         for (size_t f = 0; f < frames; ++f) in[f*ch+c] = src[f];
     }
-    if (d->enabled) {
+    bool en = d->enabled.load(std::memory_order_relaxed);
+    bool ws = d->ws_enabled.load(std::memory_order_relaxed);
+    bool rr = d->router_running.load(std::memory_order_relaxed);
+    bool has_sid = !d->get_stream_id().empty();
+
+    if (en) {
         d->master_buf.process(in, out, frames);
         for (uint32_t c = 0; c < ch; ++c) {
             if (!audio->data[c]) continue;
             float* dst = reinterpret_cast<float*>(audio->data[c]);
             for (size_t f = 0; f < frames; ++f) dst[f] = out[f*ch+c];
         }
-        if (d->ws_enabled && d->router_running && !d->stream_id.empty()) {
+        if (ws && rr && has_sid) {
             for (int i = 0; i < NUM_SUB_CH; ++i) {
                 d->sub[i].buf.process(in, sub, frames);
                 d->router.send_audio(i, sub, frames, sr, ch);
             }
         }
     } else {
-        if (d->ws_enabled && d->router_running && !d->stream_id.empty())
+        if (ws && rr && has_sid)
             for (int i = 0; i < NUM_SUB_CH; ++i)
                 d->router.send_audio(i, in, frames, sr, ch);
     }
@@ -394,7 +434,7 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     auto* d = ctx->d; int i = ctx->ch;
-    if (d->stream_id.empty() || d->sub[i].measure.measuring) return false;
+    if (d->get_stream_id().empty() || d->sub[i].measure.measuring) return false;
     if (d->router.client_count(i) == 0) return false;
     d->sub[i].measure.measuring = true;
     d->router.start_measurement(i, PING_COUNT, PING_INTV_MS);
@@ -450,9 +490,9 @@ static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void* priv) {
 }
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
-    if (d->router_running) return false;
+    if (d->router_running.load()) return false;
     if (d->router.start(WS_PORT)) {
-        d->router_running = true;
+        d->router_running.store(true);
         blog(LOG_INFO, "[obs-delay-stream] WebSocket server started on port %d", WS_PORT);
     } else {
         blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", WS_PORT);
@@ -463,9 +503,9 @@ static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void* priv) {
 
 static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
-    if (!d->router_running) return false;
+    if (!d->router_running.load()) return false;
     d->router.stop();
-    d->router_running = false;
+    d->router_running.store(false);
     blog(LOG_INFO, "[obs-delay-stream] WebSocket server stopped");
     request_properties_refresh(d);
     return false;
@@ -492,7 +532,7 @@ static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void* priv) {
 }
 static bool cb_tunnel_copy_url(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
-    std::string url = ctx->d->tunnel.make_ch_url(ctx->d->stream_id, ctx->ch + 1);
+    std::string url = ctx->d->tunnel.make_ch_url(ctx->d->get_stream_id(), ctx->ch + 1);
     if (url.empty()) return false;
     copy_to_clipboard(url);
     return false;
@@ -511,8 +551,9 @@ static bool cb_tunnel_copy_host(obs_properties_t*, obs_property_t*, void* priv) 
 }
 static bool cb_flow_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
-    if (d->stream_id.empty()) return false;
-    d->flow.start_step1(d->router, d->stream_id);
+    std::string sid = d->get_stream_id();
+    if (sid.empty()) return false;
+    d->flow.start_step1(d->router, sid);
     return false;
 }
 static bool cb_flow_apply_step2(obs_properties_t*, obs_property_t*, void* priv) {
@@ -547,7 +588,7 @@ static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, o
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
     bool en = obs_data_get_bool(settings, "enabled");
-    d->enabled = en;
+    d->enabled.store(en);
     d->master_buf.set_delay_ms(en ? (uint32_t)d->master_delay_ms : 0);
     for (int i = 0; i < NUM_SUB_CH; ++i)
         d->sub[i].buf.set_delay_ms(en ? (uint32_t)d->sub[i].delay_ms : 0);
@@ -557,7 +598,7 @@ static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, o
 static bool cb_ws_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
-    d->ws_enabled = obs_data_get_bool(settings, "ws_enabled");
+    d->ws_enabled.store(obs_data_get_bool(settings, "ws_enabled"));
     request_properties_refresh(d);
     return false;
 }
@@ -668,12 +709,12 @@ static obs_properties_t* ds_get_properties(void* data) {
 
     // (1) ON/OFF
     obs_property_t* en_p = obs_properties_add_bool(props, "enabled",
-        d->enabled ? "Delay: ON" : "Delay: OFF (passthrough)");
+        d->enabled.load() ? "Delay: ON" : "Delay: OFF (passthrough)");
     obs_property_t* ws_p = obs_properties_add_bool(props, "ws_enabled",
-        d->ws_enabled ? "WebSocket: ON" : "WebSocket: OFF");
+        d->ws_enabled.load() ? "WebSocket: ON" : "WebSocket: OFF");
 
     // WebSocket Server start/stop
-    if (d->router_running) {
+    if (d->router_running.load()) {
         char ws_status[64];
         snprintf(ws_status, sizeof(ws_status), "WebSocket Server: Running (port %d)", WS_PORT);
         obs_properties_add_text(props, "ws_server_status", ws_status, OBS_TEXT_INFO);
@@ -714,10 +755,11 @@ static obs_properties_t* ds_get_properties(void* data) {
         if (ts == TunnelState::Running && !turl.empty()) {
             char bi[256]; snprintf(bi, sizeof(bi), "URL: %s", turl.c_str());
             obs_properties_add_text(props, "tunnel_url_info", bi, OBS_TEXT_INFO);
-            if (!d->stream_id.empty()) {
+            std::string sid_snap = d->get_stream_id();
+            if (!sid_snap.empty()) {
                 for (int i = 0; i < NUM_SUB_CH; ++i) {
                     d->tunnel_copy_ctx[i] = { d, i };
-                    std::string ch_url = d->tunnel.make_ch_url(d->stream_id, i+1);
+                    std::string ch_url = d->tunnel.make_ch_url(sid_snap, i+1);
                     char uk[32], ck[32], hk[32], ui[256], cl[32], hl[32];
                     snprintf(uk, sizeof(uk), "tch%d_url",  i);
                     snprintf(ck, sizeof(ck), "tch%d_copy", i);
