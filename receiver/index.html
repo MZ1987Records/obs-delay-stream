@@ -426,11 +426,29 @@ let actx     = null;
 let gainNode = null;
 let nextTime = 0;
 const AHEAD  = 0.12;
+const MAGIC_AUDI = 0x41554449;
+const MAGIC_OPUS = 0x4f505553;
 let muted    = false;
 let connecting = false;
 let lastWsError = false;
 let connectTimer = null;
 const CONNECT_TIMEOUT_MS = 7000;
+
+// WebCodecs (Opus)
+let opusDecoder = null;
+let opusConfig = null;
+let opusInitPromise = null;
+let opusQueue = [];
+let opusTsUs = 0;
+let opusErrored = false;
+let opusErrorReported = false;
+
+function reportOpusError(msg) {
+  if (opusErrorReported) return;
+  opusErrorReported = true;
+  setStatus(msg, 'err');
+  try { console.warn('[Opus]', msg); } catch {}
+}
 
 // VUメーター
 const NUM_BARS = 20;
@@ -623,22 +641,21 @@ function resetBadge() {
 function handleAudio(buf) {
   if (buf.byteLength < 16) return;
   const u32 = new Uint32Array(buf, 0, 4);
-  if (u32[0] !== 0x41554449) return;
-
+  const magic = u32[0];
   const sampleRate = u32[1], channels = u32[2], frameCount = u32[3];
-  document.getElementById('infoSR').textContent = sampleRate + ' Hz';
-  document.getElementById('infoCH').textContent = channels + 'ch';
 
-  const pcm  = new Float32Array(buf, 16);
-  const abuf = actx.createBuffer(channels, frameCount, sampleRate);
-  for (let c = 0; c < channels; c++) {
-    const d = abuf.getChannelData(c);
-    for (let f = 0; f < frameCount; f++) d[f] = pcm[f * channels + c];
+  if (magic === MAGIC_AUDI) {
+    handlePcm16(buf, sampleRate, channels, frameCount);
+  } else if (magic === MAGIC_OPUS) {
+    handleOpus(buf, sampleRate, channels, frameCount);
   }
+}
 
+function playBuffer(abuf) {
+  if (!abuf) return;
   const src = actx.createBufferSource();
   src.buffer = abuf;
-  src.connect(gainNode);  // gainNode経由で出力
+  src.connect(gainNode);
 
   const now = actx.currentTime;
   if (nextTime < now + 0.01) nextTime = now + AHEAD;
@@ -648,6 +665,144 @@ function handleAudio(buf) {
   const bufMs = Math.round((nextTime - actx.currentTime) * 1000);
   document.getElementById('infoBuf').textContent = bufMs + ' ms';
   updateMeter(abuf.getChannelData(0));
+}
+
+function handlePcm16(buf, sampleRate, channels, frameCount) {
+  if (!actx) return;
+  document.getElementById('infoSR').textContent = sampleRate + ' Hz';
+  document.getElementById('infoCH').textContent = channels + 'ch';
+
+  const pcm = new Int16Array(buf, 16);
+  const abuf = actx.createBuffer(channels, frameCount, sampleRate);
+  for (let c = 0; c < channels; c++) {
+    const d = abuf.getChannelData(c);
+    for (let f = 0; f < frameCount; f++) {
+      d[f] = pcm[f * channels + c] / 32768;
+    }
+  }
+  playBuffer(abuf);
+}
+
+function handleOpus(buf, sampleRate, channels, frameCount) {
+  if (opusErrored) return;
+  if (!ensureOpusDecoder(sampleRate, channels)) {
+    opusQueue.push({ buf, sampleRate, channels, frameCount });
+    return;
+  }
+  decodeOpusPacket(buf, sampleRate, channels, frameCount);
+}
+
+function ensureOpusDecoder(sampleRate, channels) {
+  if (opusDecoder &&
+      opusConfig &&
+      opusConfig.sampleRate === sampleRate &&
+      opusConfig.numberOfChannels === channels) return true;
+  if (opusInitPromise) return false;
+  if (!window.isSecureContext) {
+    opusErrored = true;
+    reportOpusError('❌ Opus再生にはHTTPS/localhostが必要です');
+    return false;
+  }
+  if (typeof AudioDecoder === 'undefined') {
+    opusErrored = true;
+    reportOpusError('❌ この環境はAudioDecoder未対応です');
+    return false;
+  }
+  const config = { codec: 'opus', sampleRate, numberOfChannels: channels };
+  opusInitPromise = AudioDecoder.isConfigSupported(config).then(s => {
+    if (!s.supported) { opusErrored = true; reportOpusError('❌ Opusデコーダ非対応です'); return false; }
+    opusDecoder = new AudioDecoder({
+      output: onOpusDecoded,
+      error: () => { opusErrored = true; reportOpusError('❌ Opusデコードエラー'); }
+    });
+    opusDecoder.configure(config);
+    opusConfig = config;
+    opusTsUs = 0;
+    return true;
+  }).then(ok => {
+    if (ok) flushOpusQueue();
+    else opusQueue = [];
+    return ok;
+  }).catch(() => {
+    opusErrored = true;
+    reportOpusError('❌ Opusデコーダ初期化に失敗');
+    return false;
+  });
+  return false;
+}
+
+function flushOpusQueue() {
+  const q = opusQueue;
+  opusQueue = [];
+  for (const pkt of q) decodeOpusPacket(pkt.buf, pkt.sampleRate, pkt.channels, pkt.frameCount);
+}
+
+function decodeOpusPacket(buf, sampleRate, channels, frameCount) {
+  if (!opusDecoder) return;
+  document.getElementById('infoSR').textContent = sampleRate + ' Hz';
+  document.getElementById('infoCH').textContent = channels + 'ch';
+
+  const payload = new Uint8Array(buf, 16);
+  const durationUs = frameCount > 0 ? Math.round(frameCount * 1000000 / sampleRate) : 0;
+  const chunk = new EncodedAudioChunk({
+    type: 'key',
+    timestamp: opusTsUs,
+    duration: durationUs,
+    data: payload
+  });
+  opusDecoder.decode(chunk);
+  if (durationUs > 0) opusTsUs += durationUs;
+}
+
+function onOpusDecoded(ad) {
+  const abuf = audioDataToBuffer(ad);
+  if (abuf) playBuffer(abuf);
+  ad.close();
+}
+
+function audioDataToBuffer(ad) {
+  if (!actx) return null;
+  const frames = ad.numberOfFrames;
+  const channels = ad.numberOfChannels;
+  const sampleRate = ad.sampleRate;
+  const fmt = ad.format || '';
+  const planar = fmt.endsWith('-planar');
+  const f32 = fmt.startsWith('f32');
+  const s16 = fmt.startsWith('s16');
+  if (!f32 && !s16) return null;
+
+  const abuf = actx.createBuffer(channels, frames, sampleRate);
+  if (planar) {
+    for (let c = 0; c < channels; c++) {
+      if (f32) {
+        const tmp = new Float32Array(frames);
+        ad.copyTo(tmp, { planeIndex: c });
+        abuf.getChannelData(c).set(tmp);
+      } else {
+        const tmp = new Int16Array(frames);
+        ad.copyTo(tmp, { planeIndex: c });
+        const out = abuf.getChannelData(c);
+        for (let i = 0; i < frames; i++) out[i] = tmp[i] / 32768;
+      }
+    }
+  } else {
+    if (f32) {
+      const tmp = new Float32Array(frames * channels);
+      ad.copyTo(tmp, { planeIndex: 0 });
+      for (let c = 0; c < channels; c++) {
+        const out = abuf.getChannelData(c);
+        for (let i = 0; i < frames; i++) out[i] = tmp[i * channels + c];
+      }
+    } else {
+      const tmp = new Int16Array(frames * channels);
+      ad.copyTo(tmp, { planeIndex: 0 });
+      for (let c = 0; c < channels; c++) {
+        const out = abuf.getChannelData(c);
+        for (let i = 0; i < frames; i++) out[i] = tmp[i * channels + c] / 32768;
+      }
+    }
+  }
+  return abuf;
 }
 
 // ============================================================

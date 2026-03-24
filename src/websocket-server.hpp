@@ -12,7 +12,8 @@
  * 配信IDが異なる接続は別セッションとして完全に分離される。
  *
  * 【音声バイナリフォーマット】
- *   [4B magic=0x41554449][4B SR][4B CH][4B frames][float32*frames*CH]
+ *   PCM16: [4B magic=0x41554449][4B SR][4B CH][4B frames][int16*frames*CH]
+ *   OPUS : [4B magic=0x4F505553][4B SR][4B CH][4B frames][Opus packet bytes]
  *
  * 【制御メッセージ (テキストJSON)】
  *   OBS → Browser: {"type":"ping","seq":N,"t":T}
@@ -52,6 +53,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
@@ -69,10 +71,28 @@
 #include <cctype>
 #include <memory>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+#include <libavcodec/avcodec.h>
+#include <libavutil/avutil.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/error.h>
+#include <libavutil/frame.h>
+#include <libavutil/opt.h>
+#include <libavutil/samplefmt.h>
+#include <libswresample/swresample.h>
+#ifdef __cplusplus
+}
+#endif
+
 using WsServer   = websocketpp::server<websocketpp::config::asio>;
 using ConnHandle = websocketpp::connection_hdl;
 using Clock      = std::chrono::steady_clock;
 using Ms         = std::chrono::duration<double, std::milli>;
+
+static constexpr uint32_t MAGIC_AUDI = 0x41554449u; // "AUDI"
+static constexpr uint32_t MAGIC_OPUS = 0x4F505553u; // "OPUS"
 
 // ============================================================
 // LatencyResult
@@ -188,6 +208,7 @@ public:
             std::lock_guard<std::mutex> lk(mtx_);
             conn_map_.clear();
             ch_map_.clear();
+            reset_opus_state();
         }
 
         // 5. サーバーオブジェクト破棄
@@ -211,17 +232,9 @@ public:
                     uint32_t sample_rate, uint32_t channels)
     {
         if (!running_) return;
-
-        // パケットを構築（音声スレッドで行う、軽量な処理）
-        size_t pcm_bytes = frames * channels * sizeof(float);
-        auto pkt = std::make_shared<std::string>(16 + pcm_bytes, '\0');
-        uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
-        hdr[0] = 0x41554449u; // 'AUDI'
-        hdr[1] = sample_rate;
-        hdr[2] = channels;
-        hdr[3] = static_cast<uint32_t>(frames);
-        std::memcpy(&(*pkt)[16], data, pcm_bytes);
-
+        if (opus_reset_pending_.exchange(false, std::memory_order_acq_rel)) {
+            reset_opus_state();
+        }
         // 送信先ハンドルのスナップショットを取得（短時間ロック）
         std::vector<ConnHandle> targets;
         std::shared_ptr<WsServer> srv;
@@ -232,9 +245,48 @@ public:
             targets.assign(cs->conns.begin(), cs->conns.end());
             srv = server_ptr_;
         }
+        if (!srv) return;
+
+        // --- Opus 優先、失敗時 PCM16 ---
+        if (audio_codec_.load(std::memory_order_relaxed) == 0) {
+            std::vector<std::shared_ptr<std::string>> pkts;
+            if (encode_opus_packets(ch, data, frames, sample_rate, channels, pkts)) {
+                if (!pkts.empty()) {
+                    try {
+                        srv->get_io_service().post([srv, targets = std::move(targets),
+                                                    pkts = std::move(pkts)]() mutable {
+                            for (auto& pkt : pkts) {
+                                for (auto& hdl : targets) {
+                                    try { srv->send(hdl, *pkt, websocketpp::frame::opcode::binary); }
+                                    catch (...) {}
+                                }
+                            }
+                        });
+                    } catch (...) {}
+                }
+                return; // Opus選択時はPCMにフォールバックしない
+            }
+        }
+
+        // パケットを構築（PCM16フォールバック）
+        size_t samples = frames * channels;
+        size_t pcm_bytes = samples * sizeof(int16_t);
+        auto pkt = std::make_shared<std::string>(16 + pcm_bytes, '\0');
+        uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
+        hdr[0] = MAGIC_AUDI;
+        hdr[1] = sample_rate;
+        hdr[2] = channels;
+        hdr[3] = static_cast<uint32_t>(frames);
+        int16_t* dst = reinterpret_cast<int16_t*>(&(*pkt)[16]);
+        for (size_t i = 0; i < samples; ++i) {
+            float v = data[i];
+            if (!std::isfinite(v)) v = 0.0f;
+            if (v > 1.0f) v = 1.0f;
+            if (v < -1.0f) v = -1.0f;
+            dst[i] = static_cast<int16_t>(std::lrintf(v * 32767.0f));
+        }
 
         // ASIO スレッドに送信を委譲（音声スレッドはブロックしない）
-        if (!srv) return;
         try {
             srv->get_io_service().post([srv, targets = std::move(targets),
                                         pkt = std::move(pkt)]() {
@@ -338,7 +390,139 @@ public:
     uint16_t port() const { return port_; }
     bool     is_running() const { return running_; }
 
+    // ----- 音声コーデック設定 -----
+    // 0: Opus, 1: PCM16
+    void set_audio_codec(int mode) {
+        if (mode != 0 && mode != 1) mode = 0;
+        audio_codec_.store(mode, std::memory_order_relaxed);
+        opus_reset_pending_.store(true, std::memory_order_release);
+    }
+
 private:
+    // ----- Opus Encoder (per channel) -----
+    struct OpusEnc {
+        bool disabled = false; // 初期化失敗で無効化
+        int  sample_rate = 0;
+        int  channels = 0;
+        int  frame_size = 0;   // samples per channel
+        int64_t pts = 0;
+
+        size_t in_offset_frames = 0;
+        std::vector<float> in_buf; // interleaved float
+
+        AVCodecContext* ctx = nullptr;
+        SwrContext*     swr = nullptr;
+        AVFrame*        frame = nullptr;
+        AVPacket*       pkt = nullptr;
+
+        void reset() {
+            if (pkt)   { av_packet_free(&pkt); }
+            if (frame) { av_frame_free(&frame); }
+            if (swr)   { swr_free(&swr); }
+            if (ctx)   { avcodec_free_context(&ctx); }
+            in_buf.clear();
+            in_offset_frames = 0;
+            sample_rate = 0;
+            channels = 0;
+            frame_size = 0;
+            pts = 0;
+            disabled = false;
+        }
+
+        bool init(int sr, int ch, int bitrate_kbps) {
+            reset();
+            const AVCodec* codec = avcodec_find_encoder_by_name("libopus");
+            if (!codec) codec = avcodec_find_encoder_by_name("opus");
+            if (!codec) {
+                blog(LOG_WARNING, "[obs-delay-stream] Opus encoder not found (libopus/opus)");
+                disabled = true;
+                return false;
+            }
+
+            ctx = avcodec_alloc_context3(codec);
+            if (!ctx) { disabled = true; return false; }
+
+            ctx->sample_rate = sr;
+            av_channel_layout_default(&ctx->ch_layout, ch);
+            ctx->bit_rate = (bitrate_kbps > 0) ? (int64_t)bitrate_kbps * 1000 : 0;
+            ctx->time_base = AVRational{1, sr};
+            ctx->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
+
+            // prefer packed float if available
+            const enum AVSampleFormat* sample_fmts = nullptr;
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 13, 100)
+            sample_fmts = codec->sample_fmts;
+#else
+            avcodec_get_supported_config(ctx, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+                                         (const void**)&sample_fmts, NULL);
+#endif
+            ctx->sample_fmt = AV_SAMPLE_FMT_NONE;
+            if (sample_fmts) {
+                for (const enum AVSampleFormat* fmt = sample_fmts; *fmt != AV_SAMPLE_FMT_NONE; ++fmt) {
+                    if (*fmt == AV_SAMPLE_FMT_FLT) { ctx->sample_fmt = *fmt; break; }
+                }
+                if (ctx->sample_fmt == AV_SAMPLE_FMT_NONE)
+                    ctx->sample_fmt = sample_fmts[0];
+            } else {
+                ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;
+            }
+
+            if (avcodec_open2(ctx, codec, nullptr) < 0) {
+                blog(LOG_WARNING, "[obs-delay-stream] Opus encoder open failed");
+                disabled = true;
+                return false;
+            }
+
+            frame_size = ctx->frame_size;
+            if (frame_size <= 0) {
+                // Opus は通常 frame_size が設定される。未設定なら無効化。
+                blog(LOG_WARNING, "[obs-delay-stream] Opus frame_size unavailable");
+                disabled = true;
+                return false;
+            }
+
+            frame = av_frame_alloc();
+            pkt   = av_packet_alloc();
+            if (!frame || !pkt) { disabled = true; return false; }
+
+            frame->nb_samples = frame_size;
+            frame->format = ctx->sample_fmt;
+            frame->sample_rate = ctx->sample_rate;
+            if (av_channel_layout_copy(&frame->ch_layout, &ctx->ch_layout) < 0) {
+                disabled = true;
+                return false;
+            }
+            if (av_frame_get_buffer(frame, 0) < 0) {
+                blog(LOG_WARNING, "[obs-delay-stream] Opus frame buffer alloc failed");
+                disabled = true;
+                return false;
+            }
+
+            if (ctx->sample_fmt != AV_SAMPLE_FMT_FLT) {
+                AVChannelLayout in_layout;
+                av_channel_layout_default(&in_layout, ch);
+                if (swr_alloc_set_opts2(&swr,
+                        &ctx->ch_layout, ctx->sample_fmt, ctx->sample_rate,
+                        &in_layout, AV_SAMPLE_FMT_FLT, ctx->sample_rate,
+                        0, nullptr) < 0 || !swr) {
+                    blog(LOG_WARNING, "[obs-delay-stream] Opus swr_alloc failed");
+                    disabled = true;
+                    return false;
+                }
+                if (swr_init(swr) < 0) {
+                    blog(LOG_WARNING, "[obs-delay-stream] Opus swr_init failed");
+                    disabled = true;
+                    return false;
+                }
+            }
+
+            sample_rate = sr;
+            channels = ch;
+            pts = 0;
+            return true;
+        }
+    };
+
     // ----- キー生成 -----
     static std::string make_key(const std::string& sid, int ch) {
         return sid + "/" + std::to_string(ch);
@@ -413,6 +597,109 @@ private:
         for (auto& t : done) {
             if (t && t->th.joinable()) t->th.join();
         }
+    }
+
+    bool ensure_opus_encoder(int ch, uint32_t sample_rate, uint32_t channels) {
+        if (ch < 0 || channels == 0 || sample_rate == 0) return false;
+        if ((size_t)(ch + 1) > opus_.size()) opus_.resize(ch + 1);
+        OpusEnc& enc = opus_[ch];
+        if (enc.disabled) return false;
+        if (enc.ctx &&
+            enc.sample_rate == (int)sample_rate &&
+            enc.channels == (int)channels) return true;
+        return enc.init((int)sample_rate, (int)channels,
+                        opus_bitrate_kbps_.load(std::memory_order_relaxed));
+    }
+
+    void reset_opus_state() {
+        for (auto& enc : opus_) enc.reset();
+        opus_.clear();
+    }
+
+    bool encode_opus_packets(int ch, const float* data, size_t frames,
+                             uint32_t sample_rate, uint32_t channels,
+                             std::vector<std::shared_ptr<std::string>>& out)
+    {
+        if (!ensure_opus_encoder(ch, sample_rate, channels)) return false;
+        OpusEnc& enc = opus_[ch];
+        if (!enc.ctx || enc.disabled) return false;
+
+        const size_t samples = frames * channels;
+        enc.in_buf.insert(enc.in_buf.end(), data, data + samples);
+
+        size_t total_frames = (enc.in_buf.size() / channels);
+        if (total_frames <= enc.in_offset_frames) return true;
+        size_t avail_frames = total_frames - enc.in_offset_frames;
+
+        while (avail_frames >= (size_t)enc.frame_size) {
+            const float* in = enc.in_buf.data() + enc.in_offset_frames * channels;
+            if (av_frame_make_writable(enc.frame) < 0) {
+                enc.disabled = true;
+                return false;
+            }
+            enc.frame->nb_samples = enc.frame_size;
+            enc.frame->pts = enc.pts;
+            enc.pts += enc.frame_size;
+
+            if (enc.ctx->sample_fmt == AV_SAMPLE_FMT_FLT) {
+                std::memcpy(enc.frame->data[0], in,
+                            (size_t)enc.frame_size * channels * sizeof(float));
+            } else {
+                const uint8_t* in_data[1] = {
+                    reinterpret_cast<const uint8_t*>(in)
+                };
+                int conv = swr_convert(enc.swr, enc.frame->data, enc.frame_size,
+                                       in_data, enc.frame_size);
+                if (conv < 0) {
+                    enc.disabled = true;
+                    return false;
+                }
+            }
+
+            int ret = avcodec_send_frame(enc.ctx, enc.frame);
+            if (ret < 0) {
+                enc.disabled = true;
+                return false;
+            }
+
+            while (ret >= 0) {
+                ret = avcodec_receive_packet(enc.ctx, enc.pkt);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
+                if (ret < 0) {
+                    enc.disabled = true;
+                    return false;
+                }
+                uint32_t pkt_frames = (enc.pkt->duration > 0)
+                    ? (uint32_t)enc.pkt->duration
+                    : (uint32_t)enc.frame_size;
+                auto pkt = std::make_shared<std::string>(16 + enc.pkt->size, '\0');
+                uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
+                hdr[0] = MAGIC_OPUS;
+                hdr[1] = sample_rate;
+                hdr[2] = channels;
+                hdr[3] = pkt_frames;
+                std::memcpy(&(*pkt)[16], enc.pkt->data, enc.pkt->size);
+                out.push_back(std::move(pkt));
+                av_packet_unref(enc.pkt);
+            }
+
+            enc.in_offset_frames += enc.frame_size;
+            avail_frames -= enc.frame_size;
+        }
+
+        // バッファ消費分を詰める
+        if (enc.in_offset_frames > 0) {
+            size_t consumed_samples = enc.in_offset_frames * channels;
+            if (consumed_samples >= enc.in_buf.size()) {
+                enc.in_buf.clear();
+                enc.in_offset_frames = 0;
+            } else if (enc.in_offset_frames >= (size_t)enc.frame_size * 4) {
+                enc.in_buf.erase(enc.in_buf.begin(),
+                                 enc.in_buf.begin() + consumed_samples);
+                enc.in_offset_frames = 0;
+            }
+        }
+        return true;
     }
 
     // ----- イベントハンドラ -----
@@ -646,6 +933,10 @@ private:
     std::atomic<bool>  running_{false};
     std::string        stream_id_;
     std::string        http_index_html_;
+    std::atomic<int>   audio_codec_{0}; // 0: Opus, 1: PCM16
+    std::atomic<bool>  opus_reset_pending_{false};
+    std::atomic<int>   opus_bitrate_kbps_{96};
+    std::vector<OpusEnc> opus_;
 
     // conn_handle → ConnInfo
     std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;

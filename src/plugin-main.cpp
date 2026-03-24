@@ -420,6 +420,8 @@ static void ds_update(void* data, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(data);
     d->enabled.store(obs_data_get_bool(settings, "enabled"));
     d->ws_enabled.store(obs_data_get_bool(settings, "ws_enabled"));
+    int audio_codec = (int)obs_data_get_int(settings, "audio_codec");
+    d->router.set_audio_codec(audio_codec);
     const char* raw = obs_data_get_string(settings, "stream_id");
     std::string sid = raw ? sanitize_stream_id(raw) : "";
     d->set_stream_id(sid);
@@ -779,6 +781,12 @@ static obs_properties_t* ds_get_properties(void* data) {
         obs_properties_add_bool(grp, "ws_enabled",
             d->ws_enabled.load() ? "WebSocket: ON" : "WebSocket: OFF");
 
+        obs_property_t* codec_p = obs_properties_add_list(
+            grp, "audio_codec", "音声コーデック",
+            OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+        obs_property_list_add_int(codec_p, "Opus (WebCodecs)", 0);
+        obs_property_list_add_int(codec_p, "PCM16 (互換/検証用)", 1);
+
         if (d->router_running.load()) {
             obs_properties_add_button2(grp, "ws_server_stop_btn",
                 "WebSocket サーバー停止", cb_ws_server_stop, d);
@@ -987,6 +995,7 @@ static obs_properties_t* ds_get_properties(void* data) {
 static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_bool  (settings, "enabled",               true);
     obs_data_set_default_bool  (settings, "ws_enabled",            true);
+    obs_data_set_default_int   (settings, "audio_codec",           0);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");
     obs_data_set_default_double(settings, "master_delay_ms",       0.0);

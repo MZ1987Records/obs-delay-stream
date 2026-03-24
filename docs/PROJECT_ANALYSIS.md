@@ -59,7 +59,8 @@ obs-delay-stream/
 
 ### 3.3 音声処理
 
-- **形式:** Interleaved float32 PCM
+- **形式（内部処理）:** Interleaved float32 PCM
+- **WebSocket配信:** PCM16（フォールバック） / Opus
 - **サンプルレート:** 48kHz (OBSデフォルト)
 - **チャンネル数:** 2 (ステレオ)
 - **遅延処理:** リングバッファ方式 (`DelayBuffer` クラス)
@@ -103,11 +104,19 @@ ds_filter_audio()  [Audio Thread, ~48kHz]
 ### 4.2 WebSocket バイナリプロトコル
 
 ```
+PCM16:
 [4B magic: 0x41554449 "AUDI"]
 [4B sample_rate: uint32]
 [4B channels: uint32]
 [4B frames: uint32]
-[float32 × frames × channels: PCM data]
+[int16 × frames × channels: PCM data]
+
+OPUS:
+[4B magic: 0x4F505553 "OPUS"]
+[4B sample_rate: uint32]
+[4B channels: uint32]
+[4B frames: uint32]
+[Opus packet bytes]
 ```
 
 ### 4.3 WebSocket JSON 制御メッセージ
@@ -157,7 +166,7 @@ VRChat上での全員同期を実現するための自動遅延計算:
 ブラウザ上で動作する完全自己完結型 HTML5 アプリケーション:
 
 - **Web Audio API:** `AudioContext` + `AudioBufferSourceNode` でリアルタイム再生
-- **WebSocket:** バイナリフレームからPCMデコード
+- **WebSocket:** バイナリフレームからPCM16/Opusデコード
 - **VUメーター:** リアルタイム音量表示
 - **ボリュームコントロール:** dB単位での調整
 - **遅延計測:** ping/pong による RTT 表示

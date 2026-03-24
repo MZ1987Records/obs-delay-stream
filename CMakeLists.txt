@@ -66,6 +66,15 @@ target_include_directories(obs-delay-stream PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
 
+if(OBS_DEPS_DIR)
+  target_include_directories(obs-delay-stream PRIVATE
+    "${OBS_DEPS_DIR}/include"
+  )
+  target_link_directories(obs-delay-stream PRIVATE
+    "${OBS_DEPS_DIR}/lib"
+  )
+endif()
+
 # IMPORTANT: websocketpp and asio include dirs must come BEFORE OBS/SIMDe
 # to ensure their uint32_t usage resolves from <cstdint> not SIMDe
 target_include_directories(obs-delay-stream BEFORE PRIVATE
@@ -78,6 +87,9 @@ target_include_directories(obs-delay-stream BEFORE PRIVATE
 # OBS include dirs come AFTER (added via target_link_libraries OBS::libobs)
 target_link_libraries(obs-delay-stream
   OBS::libobs
+  avcodec
+  avutil
+  swresample
   ws2_32
   mswsock
   iphlpapi

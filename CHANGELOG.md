@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-03-24
+- dfb437e Add Opus/PCM toggle and Opus WebSocket encoding
 - 604231a Embed receiver HTML and improve connection UX
 - d110cc3 Improve tunnel UX and localize settings
 - 63a662b Serve receiver index on websocket port
