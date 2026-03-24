@@ -988,6 +988,10 @@ static obs_properties_t* ds_get_properties(void* data) {
         }
         obs_properties_add_group(props, "grp_sub", "演者別チャンネル", OBS_GROUP_NORMAL, grp);
     }
+    obs_properties_add_text(props, "about_info",
+        "obs-delay-stream v2.0.0 | (C) 2026 Mazzn1987, Chigiri Tsutsumi | GPL 2.0+",
+        OBS_TEXT_INFO);
+
     d->in_get_props.store(false);
     return props;
 }
