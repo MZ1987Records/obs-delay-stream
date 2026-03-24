@@ -10,7 +10,7 @@
 - **プラットフォーム:** Windows x64 専用
 - **言語:** C++17
 - **ビルドシステム:** CMake 3.16+ / Visual Studio 2022 (MSVC)
-- **ライセンス:** 未記載
+- **ライセンス:** GPL-2.0
 
 ---
 
@@ -21,12 +21,14 @@ obs-delay-stream/
 ├── CMakeLists.txt          # ビルド定義
 ├── build.bat               # ビルドスクリプト
 ├── release_port.bat        # ポート解放スクリプト
+├── cmake/
+│   └── embed_html.cmake    # receiver/index.html をビルド時にC++ヘッダへ埋め込む
 ├── data/
 │   └── locale/
-│       └── en-US.ini       # OBSプラグイン表示名定義
+│       ├── en-US.ini       # OBSプラグイン表示名定義（英語）
+│       └── ja-JP.ini       # OBSプラグイン表示名定義（日本語）
 ├── receiver/
-│   ├── index.html          # ダンサー用受信クライアント (720行)
-│   └── Receiver_index.html # 同上（コピー）
+│   └── index.html          # ダンサー用受信クライアント（ビルド時にDLLへ埋め込まれる）
 ├── src/
 │   ├── plugin-main.cpp     # メインプラグインエントリ（OBS API統合、GUI、音声処理）
 │   ├── websocket-server.hpp# WebSocketサーバー（パスルーティング、音声配信）
@@ -80,6 +82,7 @@ obs-delay-stream/
 | websocketpp | - | WebSocket サーバー | third_party/ にヘッダ同梱 |
 | ASIO Standalone | - | 非同期I/O | third_party/ にヘッダ同梱 |
 | OBS libobs | - | OBS プラグインAPI | 外部参照 (OBS_SOURCE_DIR) |
+| FFmpeg (avcodec/avutil/swresample) | - | Opus エンコード・リサンプル | OBS deps 同梱 |
 | ws2_32/mswsock/iphlpapi | Windows SDK | ネットワーク | システムライブラリ |
 
 ---
@@ -171,6 +174,7 @@ VRChat上での全員同期を実現するための自動遅延計算:
 - **ボリュームコントロール:** dB単位での調整
 - **遅延計測:** ping/pong による RTT 表示
 - **ダークテーマ:** レスポンシブデザイン
+- **DLL内蔵配信:** ビルド時に `cmake/embed_html.cmake` でC++ヘッダへ変換し、WebSocketサーバーが `/receiver` パスで直接配信する（外部ファイル不要）
 
 ---
 
@@ -206,23 +210,7 @@ OBSのプロパティシステムで構築された設定パネル:
 
 ## 7. ビルド手順
 
-### 前提条件
-- Windows 10 1909+ / Windows 11
-- Visual Studio 2022 17.13.2+ (MSVC v143 / Windows 11 SDK 10.0.22621.0 以上)
-- CMake 3.28+
-- OBS Studio ソースコード（ビルド済み、サブモジュール含む）
-
-### ビルド
-```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 ^
-  -DOBS_SOURCE_DIR=C:\obs-delay-stream\third_party\obs-studio ^
-  -DOBS_PLUGIN_LEGACY_INSTALL=OFF
-cmake --build build --config RelWithDebInfo
-```
-
-### インストール先
-- `C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\obs-delay-stream.dll`
-- `C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\en-US.ini`
+詳細は [docs/BUILDING.md](BUILDING.md) を参照。
 
 ---
 
