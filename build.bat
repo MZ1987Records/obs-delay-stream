@@ -8,9 +8,19 @@ echo  obs-delay-stream v1.7.0  Build Script
 echo ================================================================
 echo.
 
-set PLUGIN_DIR=C:\CC\obs-delay-stream
-set OBS_SOURCE_DIR=C:\obs-studio
-set OBS_INSTALL_DIR=C:\Program Files\obs-studio
+rem 環境変数の説明:
+rem - OBS_SOURCE_DIR: OBS Studio のソースパス（例: D:\dev\obs-studio）。未指定なら third_party\obs-studio を使用
+rem - OBS_LEGACY_INSTALL: 1=Program Files のレガシー配置, 0=ProgramData の推奨配置（未指定は0）
+
+for %%I in ("%~dp0.") do set "PLUGIN_DIR=%%~fI"
+if not "%~1"=="" (
+    set OBS_SOURCE_DIR=%~1
+) else if "%OBS_SOURCE_DIR%"=="" (
+    set OBS_SOURCE_DIR=%PLUGIN_DIR%\third_party\obs-studio
+)
+set OBS_INSTALL_DIR=C:\ProgramData\obs-studio
+if "%OBS_LEGACY_INSTALL%"=="" set OBS_LEGACY_INSTALL=0
+if "%OBS_LEGACY_INSTALL%"=="1" set OBS_INSTALL_DIR=C:\Program Files\obs-studio
 set BUILD_DIR=%PLUGIN_DIR%\build
 
 echo [Step 0] Checking environment...
@@ -51,15 +61,17 @@ echo   OBS library: found at %OBS_SOURCE_DIR%
 goto :step1_libs
 
 :build_obs
+if not exist "%PLUGIN_DIR%\third_party" mkdir "%PLUGIN_DIR%\third_party"
 if not exist "%OBS_SOURCE_DIR%\CMakeLists.txt" (
     echo   Cloning OBS Studio...
     git clone --recursive https://github.com/obsproject/obs-studio.git "%OBS_SOURCE_DIR%"
     if errorlevel 1 goto :error
 )
 cd /d "%OBS_SOURCE_DIR%"
-cmake -S . -B build_x64 -G "Visual Studio 17 2022" -A x64 -DENABLE_BROWSER=OFF -DENABLE_VST=OFF -DENABLE_SCRIPTING=OFF -DENABLE_PLUGINS=OFF -DENABLE_UI=OFF
+cmake --list-presets
+cmake --preset windows-x64
 if errorlevel 1 goto :error
-cmake --build build_x64 --config RelWithDebInfo --target libobs obs-frontend-api --parallel
+cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
 if errorlevel 1 goto :error
 echo   OBS build complete.
 cd /d "%PLUGIN_DIR%"
@@ -107,7 +119,10 @@ cd /d "%PLUGIN_DIR%"
 if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
 mkdir "%BUILD_DIR%"
 
-cmake -S "%PLUGIN_DIR%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="%OBS_SOURCE_DIR%"
+set OBS_PLUGIN_LEGACY_INSTALL=OFF
+if "%OBS_LEGACY_INSTALL%"=="1" set OBS_PLUGIN_LEGACY_INSTALL=ON
+
+cmake -S "%PLUGIN_DIR%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="%OBS_SOURCE_DIR%" -DOBS_PLUGIN_LEGACY_INSTALL=%OBS_PLUGIN_LEGACY_INSTALL%
 if errorlevel 1 (
     echo.
     echo [ERROR] CMake configure failed.
@@ -138,8 +153,14 @@ echo ================================================================
 echo  [Step 4] Installing to OBS...
 echo ================================================================
 
+if "%OBS_LEGACY_INSTALL%"=="1" goto :legacy_paths
+set PLUGIN_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\bin\64bit
+set LOCALE_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\data\locale
+goto :paths_set
+:legacy_paths
 set PLUGIN_DEST=%OBS_INSTALL_DIR%\obs-plugins\64bit
 set LOCALE_DEST=%OBS_INSTALL_DIR%\data\obs-plugins\obs-delay-stream\locale
+:paths_set
 
 if not exist "%PLUGIN_DEST%" mkdir "%PLUGIN_DEST%"
 if not exist "%LOCALE_DEST%" mkdir "%LOCALE_DEST%"

@@ -198,20 +198,22 @@ OBSのプロパティシステムで構築された設定パネル:
 ## 7. ビルド手順
 
 ### 前提条件
-- Visual Studio 2022 (MSVC)
-- CMake 3.16+
-- OBS Studio ソースコード（ビルド済み）
+- Windows 10 1909+ / Windows 11
+- Visual Studio 2022 17.13.2+ (MSVC v143 / Windows 11 SDK 10.0.22621.0 以上)
+- CMake 3.28+
+- OBS Studio ソースコード（ビルド済み、サブモジュール含む）
 
 ### ビルド
 ```bat
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 ^
-  -DOBS_SOURCE_DIR=C:\obs-studio
+  -DOBS_SOURCE_DIR=C:\obs-delay-stream\third_party\obs-studio ^
+  -DOBS_PLUGIN_LEGACY_INSTALL=OFF
 cmake --build build --config RelWithDebInfo
 ```
 
 ### インストール先
-- `obs-plugins/64bit/obs-delay-stream.dll`
-- `data/obs-plugins/obs-delay-stream/locale/en-US.ini`
+- `C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\obs-delay-stream.dll`
+- `C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\en-US.ini`
 
 ---
 
