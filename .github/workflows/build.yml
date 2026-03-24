@@ -36,7 +36,7 @@ jobs:
         run: |
           Set-Location third_party/obs-studio
           cmake --list-presets
-          cmake --preset windows-x64 -D CMAKE_SYSTEM_VERSION=$env:WINSDK_VERSION
+          cmake --preset windows-x64 -DCMAKE_SYSTEM_VERSION=$env:WINSDK_VERSION -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=$env:WINSDK_VERSION
           cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
 
       - name: Clone websocketpp
