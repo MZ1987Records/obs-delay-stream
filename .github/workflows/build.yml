@@ -9,6 +9,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect Windows SDK
+        shell: pwsh
+        run: |
+          $sdkRoot = "C:\\Program Files (x86)\\Windows Kits\\10\\Lib"
+          $dirs = Get-ChildItem $sdkRoot -Directory | Select-Object -ExpandProperty Name
+          if (-Not $dirs) { throw "Windows SDK not found: $sdkRoot" }
+          $ver = $dirs | ForEach-Object { [version]$_ } | Sort-Object -Descending | Select-Object -First 1
+          $verStr = $ver.ToString()
+          Add-Content $env:GITHUB_ENV "WINSDK_VERSION=$verStr"
+
       - name: Prepare third_party
         shell: pwsh
         run: |
@@ -26,8 +36,8 @@ jobs:
         run: |
           Set-Location third_party/obs-studio
           cmake --list-presets
-          cmake --preset windows-ci-x64
-          cmake --build --preset windows-ci-x64 --config RelWithDebInfo --parallel
+          cmake --preset windows-x64 -D CMAKE_SYSTEM_VERSION=$env:WINSDK_VERSION
+          cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
 
       - name: Clone websocketpp
         shell: pwsh
