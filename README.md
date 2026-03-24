@@ -44,6 +44,7 @@ cd C:\obs-delay-stream
 ```
 OBS_SOURCE_DIR=D:\dev\obs-studio
 OBS_LEGACY_INSTALL=0
+OBS_CI=1
 ```
 
 > **補足:** インストール先はデフォルトで `C:\ProgramData\obs-studio` です。  

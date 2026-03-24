@@ -11,11 +11,13 @@ echo.
 rem 環境変数の説明:
 rem - OBS_SOURCE_DIR: OBS Studio のソースパス（例: D:\dev\obs-studio）。未指定なら third_party\obs-studio を使用
 rem - OBS_LEGACY_INSTALL: 1=Program Files のレガシー配置, 0=ProgramData の推奨配置（未指定は0）
+rem - OBS_CI: 1=CIモード（インストールとpauseを無効化）
 rem - build.env に KEY=VALUE 形式で記述（空白を入れない）。例は build.env.sample
 
 for %%I in ("%~dp0.") do set "PLUGIN_DIR=%%~fI"
 set "OBS_SOURCE_DIR="
 set "OBS_LEGACY_INSTALL="
+set "OBS_CI="
 set "ENV_FILE=%PLUGIN_DIR%\build.env"
 if exist "%ENV_FILE%" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
@@ -24,6 +26,9 @@ if exist "%ENV_FILE%" (
         )
         if /I "%%A"=="OBS_LEGACY_INSTALL" if not "%%B"=="" (
             set "OBS_LEGACY_INSTALL=%%B"
+        )
+        if /I "%%A"=="OBS_CI" if not "%%B"=="" (
+            set "OBS_CI=%%B"
         )
     )
 )
@@ -36,6 +41,10 @@ set OBS_INSTALL_DIR=C:\ProgramData\obs-studio
 if "%OBS_LEGACY_INSTALL%"=="" set OBS_LEGACY_INSTALL=0
 if "%OBS_LEGACY_INSTALL%"=="1" set OBS_INSTALL_DIR=C:\Program Files\obs-studio
 set BUILD_DIR=%PLUGIN_DIR%\build
+set CI_MODE=0
+if /I "%OBS_CI%"=="1" set CI_MODE=1
+if /I "%CI%"=="true" set CI_MODE=1
+if /I "%CI%"=="1" set CI_MODE=1
 
 echo [Step 0] Checking environment...
 
@@ -167,6 +176,8 @@ echo ================================================================
 echo  [Step 4] Installing to OBS...
 echo ================================================================
 
+if "%CI_MODE%"=="1" goto :skip_install
+
 if "%OBS_LEGACY_INSTALL%"=="1" goto :legacy_paths
 set PLUGIN_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\bin\64bit
 set LOCALE_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\data\locale
@@ -209,11 +220,22 @@ echo.
 pause
 exit /b 0
 
+:skip_install
+echo.
+echo ================================================================
+echo  SUCCESS: Build complete (CI mode, install skipped).
+echo ================================================================
+echo.
+if "%CI_MODE%"=="1" exit /b 0
+pause
+exit /b 0
+
 :error
 echo.
 echo ================================================================
 echo  ERROR: Build failed.
 echo ================================================================
 echo.
+if "%CI_MODE%"=="1" exit /b 1
 pause
 exit /b 1
