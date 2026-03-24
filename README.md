@@ -21,17 +21,52 @@ OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネ
 
 ## ビルド手順（Windows）
 
+### 最短手順（推奨）: `build.bat` を実行
+
+`build.bat` は **OBS Studio の自動ダウンロード・自動ビルド** と  
+`websocketpp/asio` の取得、プラグインのビルドとインストールまで **一括** で行います。  
+そのため通常は手動のビルド手順は不要です。
+
+```powershell
+# このREADMEがあるフォルダで実行
+cd C:\obs-delay-stream
+.\build.bat
+```
+
+既存の OBS ソースを使いたい場合は、パスを指定できます。
+
+```powershell
+.\build.bat D:\dev\obs-studio
+```
+
+設定は `build.env` でも指定できます（`build.env.sample` 参照）。
+
+```
+OBS_SOURCE_DIR=D:\dev\obs-studio
+OBS_LEGACY_INSTALL=0
+```
+
+> **補足:** インストール先はデフォルトで `C:\ProgramData\obs-studio` です。  
+> レガシー配置（`C:\Program Files\obs-studio`）に入れる場合は `OBS_LEGACY_INSTALL=1` を指定してください。  
+> コピーに失敗する場合は管理者権限で実行してください。
+
 ### 必要なもの（公式準拠）
 
 - OS: Windows 10 1909+ / Windows 11
 - Visual Studio 2022 17.13.2 以上（https://visualstudio.microsoft.com/）「C++によるデスクトップ開発」、Windows 11 SDK 10.0.22621.0 以上、C++ ATL for v143、MSVC v143 を含める
 - CMake 3.28 以上（https://cmake.org/download/）
 - Git for Windows（https://gitforwindows.org/）
-- OBS Studio ソースコード（サブモジュール含む、https://github.com/obsproject/obs-studio）
+- OBS Studio ソースコード（手動ビルドの場合のみ。`build.bat` は自動取得）
 
 ---
 
-### Step 1 — OBS Studioのビルド
+### 手動ビルド手順（必要な場合のみ）
+
+#### Step 1 — OBS Studioのビルド
+
+> **重要:** `build.bat` はデフォルトで OBS Studio を **自動ダウンロード・自動ビルド** します。  
+> そのため、通常はユーザが手動で OBS をビルドする必要はありません。  
+> 既存の OBS ソースを使いたい場合のみ、手動ビルドや `OBS_SOURCE_DIR` の指定を行ってください。
 
 OBS公式ドキュメント（https://github.com/obsproject/obs-studio/wiki/build-instructions-for-windows）に従ってOBSをビルドします。
 
@@ -56,7 +91,7 @@ cmake --build --preset windows-x64 --config RelWithDebInfo
 
 ---
 
-### Step 2 — サードパーティライブラリの取得（header-only）
+#### Step 2 — サードパーティライブラリの取得（header-only）
 
 ```powershell
 # プラグインのフォルダへ移動 (このREADMEがあるフォルダ)
@@ -70,7 +105,7 @@ cd third_party
 git clone https://github.com/zaphoyd/websocketpp.git
 
 # asio (Boostなしで使えるネットワークライブラリ)
-git clone https://github.com/chriskohlhoff/asio.git
+git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git
 
 cd ..
 ```
@@ -92,7 +127,7 @@ obs-delay-stream/
 
 ---
 
-### Step 3 — プラグインのビルド
+#### Step 3 — プラグインのビルド
 
 ```powershell
 # プラグインのフォルダで実行
@@ -111,16 +146,16 @@ cmake --build build --config RelWithDebInfo
 
 ---
 
-### Step 4 — OBSへのインストール
+#### Step 4 — OBSへのインストール
 
-#### 方法A: cmake --install（推奨）
+方法A: cmake --install（手動ビルド時の推奨）
 
 ```powershell
 cmake --install build --config RelWithDebInfo `
   --prefix "C:\ProgramData\obs-studio"
 ```
 
-#### 方法B: 手動コピー
+方法B: 手動コピー
 
 ```
 build\RelWithDebInfo\obs-delay-stream.dll
@@ -135,7 +170,7 @@ data\locale\en-US.ini
 
 ---
 
-### Step 5 — 動作確認
+#### Step 5 — 動作確認
 
 1. OBS Studioを起動
 2. 音声ソース（マイク・デスクトップ音声など）を右クリック
@@ -206,6 +241,9 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64 ...
 2. 「トンネルを起動」ボタンを押す（デフォルトでは初回に exe が自動ダウンロードされる）
 3. `https://xxxx.trycloudflare.com` 形式のURLが発行される
 4. CH別URL（`https://.../#!/{sid}/{ch}`）をコピーしてパフォーマーに共有
+
+> **注意:** セキュリティソフトが `api.trycloudflare.com` をブロックしてトンネル接続に失敗することがあります。  
+> その場合は `api.trycloudflare.com` を例外（許可）に追加してください。
 
 ※ 自動ダウンロードの保存先:
 `%LOCALAPPDATA%\\obs-delay-stream\\bin\\cloudflared.exe`
