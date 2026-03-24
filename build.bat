@@ -196,9 +196,9 @@ if errorlevel 1 (
     goto :error
 )
 
-copy /Y "%PLUGIN_DIR%\data\locale\en-US.ini" "%LOCALE_DEST%\"
+copy /Y "%PLUGIN_DIR%\data\locale\*.ini" "%LOCALE_DEST%\"
 if errorlevel 1 (
-    echo [ERROR] Failed to copy locale file.
+    echo [ERROR] Failed to copy locale files.
     goto :error
 )
 
