@@ -1,6 +1,6 @@
 #pragma once
 /*
- * tunnel-manager.hpp  v1.7.0
+ * tunnel-manager.hpp  v2.0.0
  *
  * ngrok または cloudflared を子プロセスとして起動し、
  * 取得したパブリックURL (wss://) を返す。
@@ -30,7 +30,11 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <ShlObj.h>
+#include <urlmon.h>
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "Urlmon.lib")
 
 #include <cstdint>
 #include <cstdio>
@@ -86,7 +90,6 @@ public:
             state_.load() == TunnelState::Starting) return false;
 
         type_     = type;
-        exe_path_ = exe_path;
         token_    = token;
         ws_port_  = ws_port;
         {
@@ -94,6 +97,19 @@ public:
             url_      = "";
             error_    = "";
         }
+
+        if (type_ == TunnelType::Cloudflared) {
+            std::string resolved;
+            std::string err;
+            if (!resolve_cloudflared_path(exe_path, resolved, err)) {
+                set_error(err);
+                return false;
+            }
+            exe_path_ = resolved;
+        } else {
+            exe_path_ = exe_path;
+        }
+
         state_ = TunnelState::Starting;
 
         if (worker_.joinable()) worker_.join();
@@ -107,6 +123,11 @@ public:
         kill_child();
         if (worker_.joinable()) worker_.join();
         state_ = TunnelState::Stopped;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            url_.clear();
+            error_.clear();
+        }
         stop_requested_ = false;
         // コールバックは呼ばない（ds_destroy時にnull化されている可能性がある）
         auto cb = on_stopped;
@@ -130,12 +151,72 @@ public:
     }
 
 private:
+    static bool file_exists(const std::string& path) {
+        DWORD attr = GetFileAttributesA(path.c_str());
+        if (attr == INVALID_FILE_ATTRIBUTES) return false;
+        return (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    }
+
+    static std::string get_default_cloudflared_path() {
+        char base[MAX_PATH] = {};
+        if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, base))) {
+            std::string dir = std::string(base) + "\\obs-delay-stream\\bin";
+            SHCreateDirectoryExA(nullptr, dir.c_str(), nullptr);
+            return dir + "\\cloudflared.exe";
+        }
+        char tmp_path[MAX_PATH] = {};
+        GetTempPathA(MAX_PATH, tmp_path);
+        std::string dir = std::string(tmp_path) + "obs-delay-stream\\bin";
+        SHCreateDirectoryExA(nullptr, dir.c_str(), nullptr);
+        return dir + "\\cloudflared.exe";
+    }
+
+    static bool download_cloudflared(const std::string& path, std::string& err) {
+        static const char* kUrl =
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
+        HRESULT hr = URLDownloadToFileA(nullptr, kUrl, path.c_str(), 0, nullptr);
+        if (FAILED(hr)) {
+            char buf[64] = {};
+            snprintf(buf, sizeof(buf), "0x%08lx", (unsigned long)hr);
+            err = std::string("cloudflared の自動ダウンロードに失敗しました (") + buf +
+                  ")。ネットワーク接続を確認するか、手動でパスを指定してください。";
+            return false;
+        }
+        if (!file_exists(path)) {
+            err = "cloudflared のダウンロード後にファイルが見つかりませんでした。";
+            return false;
+        }
+        return true;
+    }
+
+    static bool resolve_cloudflared_path(const std::string& requested,
+                                         std::string& out,
+                                         std::string& err)
+    {
+        bool is_auto = requested.empty() || _stricmp(requested.c_str(), "auto") == 0;
+        if (!is_auto) {
+            if (file_exists(requested)) {
+                out = requested;
+                return true;
+            }
+            err = "cloudflared.exe が見つかりません。パスを確認するか、空欄にして自動取得を使用してください。";
+            return false;
+        }
+
+        out = get_default_cloudflared_path();
+        if (file_exists(out)) return true;
+
+        blog(LOG_INFO, "[obs-delay-stream] cloudflared auto-download: %s", out.c_str());
+        return download_cloudflared(out, err);
+    }
+
     // ============================================================
     // 子プロセス起動
     // ============================================================
     // exe_path: 実行ファイルのフルパス
     // args: コマンドライン引数（exeパス部分は含まない）
     bool launch_process(const std::string& exe_path, const std::string& args) {
+        last_launch_error_.clear();
         // ファイルリダイレクト方式（パイプバッファ詰まりを完全回避）
         char tmp_path[MAX_PATH] = {};
         GetTempPathA(MAX_PATH, tmp_path);
@@ -152,6 +233,7 @@ private:
             &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (hFile == INVALID_HANDLE_VALUE) {
             blog(LOG_ERROR, "[obs-delay-stream] Failed to create log file: %s", log_file_path_.c_str());
+            last_launch_error_ = "ログファイル作成に失敗しました。";
             return false;
         }
 
@@ -181,6 +263,9 @@ private:
                 nullptr, err, 0, errmsg, sizeof(errmsg)-1, nullptr);
             blog(LOG_ERROR, "[obs-delay-stream] CreateProcess failed: err=%lu [%s] exe=[%s]",
                  err, errmsg, exe_path.c_str());
+            char buf[512] = {};
+            snprintf(buf, sizeof(buf), "CreateProcess failed: err=%lu [%s]", err, errmsg);
+            last_launch_error_ = buf;
             return false;
         }
         {
@@ -236,7 +321,10 @@ private:
                 "tcp %d --log stdout", ws_port_);
 
         if (!launch_process(exe_path_, args)) {
-            set_error("ngrok.exe launch failed. Check path and token.");
+            if (!last_launch_error_.empty())
+                set_error(std::string("ngrok.exe launch failed: ") + last_launch_error_);
+            else
+                set_error("ngrok.exe launch failed. Check path and token.");
             return false;
         }
 
@@ -325,7 +413,10 @@ private:
             "tunnel --url http://localhost:%d", ws_port_);
 
         if (!launch_process(exe_path_, args)) {
-            set_error("cloudflared.exe launch failed. Check path and permissions.");
+            if (!last_launch_error_.empty())
+                set_error(std::string("cloudflared.exe launch failed: ") + last_launch_error_);
+            else
+                set_error("cloudflared.exe launch failed. Check path and permissions.");
             return false;
         }
 
@@ -352,6 +443,15 @@ private:
             if (!r || bytes_read == 0) continue;
             fbuf.resize(bytes_read);
             accum = fbuf; // ファイル全体を処理
+
+            // エラーログ検出
+            {
+                std::string emsg;
+                if (extract_cloudflared_error(accum, emsg)) {
+                    set_error(emsg);
+                    return false;
+                }
+            }
 
             // 行単位で解析
             size_t pos = 0;
@@ -380,12 +480,37 @@ private:
                 // trycloudflare.com を含むか再確認
                 if (candidate.find("trycloudflare.com") != std::string::npos
                     && candidate.length() > 25) {
+                    std::string host;
+                    if (candidate.rfind("https://", 0) == 0) {
+                        size_t he = candidate.find_first_of("/:?", 8);
+                        host = candidate.substr(8, he == std::string::npos ? std::string::npos : he - 8);
+                    } else if (candidate.rfind("http://", 0) == 0) {
+                        size_t he = candidate.find_first_of("/:?", 7);
+                        host = candidate.substr(7, he == std::string::npos ? std::string::npos : he - 7);
+                    }
+                    if (!_stricmp(host.c_str(), "api.trycloudflare.com")) {
+                        continue; // API URLは除外
+                    }
                     tunnel_url = candidate;
                     blog(LOG_INFO, "[obs-delay-stream] cloudflared URL found: %s", candidate.c_str());
                     break;
                 }
             }
             if (!tunnel_url.empty()) break;
+
+            // プロセス終了チェック
+            DWORD exit_code = STILL_ACTIVE;
+            {
+                std::lock_guard<std::mutex> lk(proc_mtx_);
+                if (proc_handle_ != INVALID_HANDLE_VALUE)
+                    GetExitCodeProcess(proc_handle_, &exit_code);
+                else
+                    break;
+            }
+            if (exit_code != STILL_ACTIVE) {
+                set_error("cloudflared が終了しました。ログを確認してください。");
+                return false;
+            }
         }
 
         if (tunnel_url.empty()) {
@@ -431,6 +556,36 @@ private:
         if (on_error) on_error(e);
     }
 
+    static bool extract_cloudflared_error(const std::string& text, std::string& out) {
+        size_t pos = 0;
+        while (pos < text.size()) {
+            size_t nl = text.find('\n', pos);
+            std::string line = text.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+            pos = (nl == std::string::npos) ? text.size() : nl + 1;
+            if (line.empty()) continue;
+
+            if (line.find("failed to request quick Tunnel") != std::string::npos) {
+                out = std::string("cloudflared エラー: ") + line;
+                return true;
+            }
+            if (line.find(" ERR ") != std::string::npos || line.find("\tERR\t") != std::string::npos) {
+                out = std::string("cloudflared エラー: ") + line;
+                return true;
+            }
+            if (line.find("failed to") != std::string::npos &&
+                (line.find("tunnel") != std::string::npos || line.find("Tunnel") != std::string::npos)) {
+                out = std::string("cloudflared エラー: ") + line;
+                return true;
+            }
+            if (line.find("error") != std::string::npos &&
+                (line.find("tunnel") != std::string::npos || line.find("Tunnel") != std::string::npos)) {
+                out = std::string("cloudflared エラー: ") + line;
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::string  log_file_path_;
     TunnelType   type_          = TunnelType::Ngrok;
     std::string  exe_path_;
@@ -439,6 +594,7 @@ private:
 
     std::string  url_;
     std::string  error_;
+    std::string  last_launch_error_;
     mutable std::mutex mtx_;
 
     std::atomic<TunnelState> state_{TunnelState::Idle};

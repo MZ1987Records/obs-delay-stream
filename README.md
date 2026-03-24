@@ -1,4 +1,4 @@
-# obs-delay-stream  v1.7.0
+# obs-delay-stream  v2.0.0
 
 OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネル機能を追加するプラグインです。
 
@@ -194,28 +194,26 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64 ...
 
 1. フィルターパネルを開く
 2. **配信ID** を設定（例: `myshow2024`）。他の配信者と重複しない英数字
-3. **IPアドレス** が自動取得されていることを確認（必要なら手動修正）
 
 ### パフォーマーへの接続案内
 
-`receiver/index.html` をChromeで開き、以下を入力してもらう:
-- IPアドレス（またはトンネルURL）
-- 配信ID
-- 担当CH番号（1〜10）
+配布用のURL（`https://.../#!/{sid}/{ch}`）を共有し、開いてもらう（入力不要）。
 
 ### トンネル使用時（IP隠蔽）
 
 **cloudflaredの場合（推奨・無料・認証不要）:**
-1. https://github.com/cloudflare/cloudflared/releases から `cloudflared-windows-amd64.exe` をダウンロード
-2. OBSのフィルターGUIで `cloudflared.exe` のパスを設定
-3. 「トンネルを起動」ボタンを押す
-4. `wss://xxxx.trycloudflare.com` 形式のURLが発行される
-5. CH別URLをコピーしてパフォーマーに共有
+1. `cloudflared.exe path` は未入力でOK（カスタム指定したい場合のみ exe のパスを入力）
+2. 「トンネルを起動」ボタンを押す（デフォルトでは初回に exe が自動ダウンロードされる）
+3. `https://xxxx.trycloudflare.com` 形式のURLが発行される
+4. CH別URL（`https://.../#!/{sid}/{ch}`）をコピーしてパフォーマーに共有
+
+※ 自動ダウンロードの保存先:
+`%LOCALAPPDATA%\\obs-delay-stream\\bin\\cloudflared.exe`
 
 **ngrokの場合:**
 1. https://ngrok.com でアカウント作成 → アクセストークンを取得
 2. https://ngrok.com/download から `ngrok.exe` をダウンロード
-3. OBSのフィルターGUIでパスとトークンを設定
+3. OBSのフィルターGUIでパスとトークンを設定（自動ダウンロード非対応）
 4. 「トンネルを起動」ボタンを押す
 
 ### 同期フロー（推奨手順）

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(obs-delay-stream VERSION 1.7.0)
+project(obs-delay-stream VERSION 2.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,6 +41,30 @@ find_package(libobs REQUIRED HINTS "${OBS_DIR}/build_x64/libobs" "${OBS_DIR}/bui
 
 # ---- Plugin target ----
 add_library(obs-delay-stream MODULE src/plugin-main.cpp)
+
+# ---- Embed receiver/index.html into the plugin ----
+set(RECEIVER_HTML_IN  "${CMAKE_CURRENT_SOURCE_DIR}/receiver/index.html")
+set(RECEIVER_HTML_OUT "${CMAKE_CURRENT_BINARY_DIR}/generated/receiver_index_html.hpp")
+
+add_custom_command(
+  OUTPUT "${RECEIVER_HTML_OUT}"
+  COMMAND ${CMAKE_COMMAND}
+    -DINPUT="${RECEIVER_HTML_IN}"
+    -DOUTPUT="${RECEIVER_HTML_OUT}"
+    -DVAR_NAME="kReceiverIndexHtml"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_html.cmake"
+  DEPENDS
+    "${RECEIVER_HTML_IN}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_html.cmake"
+  VERBATIM
+)
+
+add_custom_target(embed_receiver_html DEPENDS "${RECEIVER_HTML_OUT}")
+add_dependencies(obs-delay-stream embed_receiver_html)
+
+target_include_directories(obs-delay-stream PRIVATE
+  "${CMAKE_CURRENT_BINARY_DIR}/generated"
+)
 
 # IMPORTANT: websocketpp and asio include dirs must come BEFORE OBS/SIMDe
 # to ensure their uint32_t usage resolves from <cstdint> not SIMDe

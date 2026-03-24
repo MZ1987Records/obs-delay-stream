@@ -120,6 +120,11 @@ public:
     StreamRouter()  = default;
     ~StreamRouter() { stop(); }
 
+    // 接続数の変化通知 (sid, ch_0idx, count)
+    std::function<void(const std::string&, int, size_t)> on_conn_change;
+    // 計測結果通知（sid, ch_0idx, result）
+    std::function<void(const std::string&, int, LatencyResult)> on_any_latency_result;
+
     // ----- 起動 / 停止 -----
     bool start(uint16_t port) {
         if (running_) return true;
@@ -301,6 +306,8 @@ public:
         std::lock_guard<std::mutex> lk(mtx_);
         for (auto& kv : ch_map_)
             kv.second.on_result = nullptr;
+        on_conn_change = nullptr;
+        on_any_latency_result = nullptr;
     }
 
     // 遅延反映通知
@@ -425,11 +432,17 @@ private:
             return;
         }
 
+        std::function<void(const std::string&, int, size_t)> cb;
+        size_t count = 0;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             conn_map_[h] = { sid, ch };
-            ch_map_[make_key(sid, ch)].conns.insert(h);
+            auto& cs = ch_map_[make_key(sid, ch)];
+            cs.conns.insert(h);
+            count = cs.conns.size();
+            cb = on_conn_change;
         }
+        if (cb) cb(sid, ch, count);
 
         char info[256];
         snprintf(info, sizeof(info),
@@ -440,16 +453,26 @@ private:
     }
 
     void on_close(ConnHandle h) {
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto it = conn_map_.find(h);
-        if (it == conn_map_.end()) return;
-        auto& info = it->second;
-        auto* cs = find_ch(info.stream_id, info.ch);
-        if (cs) {
-            cs->conns.erase(h);
-            if (cs->conns.empty()) cs->measuring = false;
+        std::string sid;
+        int ch = -1;
+        size_t count = 0;
+        std::function<void(const std::string&, int, size_t)> cb;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto it = conn_map_.find(h);
+            if (it == conn_map_.end()) return;
+            sid = it->second.stream_id;
+            ch = it->second.ch;
+            auto* cs = find_ch(sid, ch);
+            if (cs) {
+                cs->conns.erase(h);
+                if (cs->conns.empty()) cs->measuring = false;
+                count = cs->conns.size();
+            }
+            conn_map_.erase(it);
+            cb = on_conn_change;
         }
-        conn_map_.erase(it);
+        if (cb) cb(sid, ch, count);
     }
 
     void on_message(ConnHandle h, WsServer::message_ptr msg) {
@@ -509,6 +532,8 @@ private:
     void measure_loop(const std::string& sid, int ch,
                       int num_pings, int interval_ms)
     {
+        blog(LOG_INFO, "[obs-delay-stream] latency measure start: sid=%s ch=%d pings=%d",
+             sid.c_str(), ch + 1, num_pings);
         for (int seq = 0; seq < num_pings; ++seq) {
             if (!running_) break;
             {
@@ -541,6 +566,8 @@ private:
     void finalize_result(const std::string& sid, int ch) {
         LatencyResult r;
         std::function<void(const std::string&, int, LatencyResult)> cb;
+        std::function<void(const std::string&, int, LatencyResult)> cb_any;
+        bool no_samples = false;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             auto* cs = find_ch(sid, ch);
@@ -560,9 +587,12 @@ private:
                 }
                 r.avg_rtt_ms  = sum / r.samples;
                 r.avg_one_way = r.avg_rtt_ms / 2.0;
+            } else {
+                no_samples = true;
             }
             cs->last_result = r;
             cb = cs->on_result;
+            cb_any = on_any_latency_result;
 
             // ブラウザへ結果通知
             auto srv = server_ptr_;
@@ -581,8 +611,16 @@ private:
                 }
             }
         }
+        if (no_samples) {
+            blog(LOG_WARNING, "[obs-delay-stream] latency measure failed: sid=%s ch=%d (no pong)",
+                 sid.c_str(), ch + 1);
+        } else {
+            blog(LOG_INFO, "[obs-delay-stream] latency measure done: sid=%s ch=%d samples=%d avg=%.1fms",
+                 sid.c_str(), ch + 1, r.samples, r.avg_rtt_ms);
+        }
         // コールバックはロック外で呼び出し
         if (cb) cb(sid, ch, r);
+        if (cb_any) cb_any(sid, ch, r);
     }
 
     void broadcast_text(const std::string& sid, int ch, const std::string& msg) {

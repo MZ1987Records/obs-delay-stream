@@ -64,7 +64,7 @@ input[type=text], input[type=number] {
 input:focus { outline: none; border-color: #2563eb; }
 .row { display: flex; gap: 10px; }
 .row .field { flex: 1; }
-.row .field.narrow { flex: 0 0 90px; }
+.row .field.narrow { flex: 0 0 135px; }
 
 /* ボタン */
 .btn {
@@ -74,8 +74,10 @@ input:focus { outline: none; border-color: #2563eb; }
 }
 .btn-primary  { background: #2563eb; color: #fff; }
 .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
-.btn-danger   { background: #1a1a1a; color: #888; }
-.btn-danger:hover:not(:disabled) { background: #7f1d1d; color: #fca5a5; }
+.btn-danger   { background: #7f1d1d; color: #fca5a5; box-shadow: 0 0 0 1px #b91c1c inset; }
+.btn-danger:hover:not(:disabled) { background: #991b1b; color: #fee2e2; }
+.btn-danger:active:not(:disabled) { transform: translateY(1px); }
+.btn-danger:disabled { background: #1a1a1a; color: #666; box-shadow: none; }
 .btn:disabled { opacity: .35; cursor: default; }
 
 /* ステータス */
@@ -205,7 +207,7 @@ input[type=range].muted-range::-webkit-slider-thumb { background: #555; }
 <!-- ヘッダー -->
 <div class="header">
   <h1>🎵 Delay Stream Receiver</h1>
-  <span class="version">v1.4.0</span>
+  <span class="version">v2.0.0</span>
 </div>
 
 <!-- セッションバッジ -->
@@ -224,10 +226,6 @@ input[type=range].muted-range::-webkit-slider-thumb { background: #555; }
 <div class="card">
   <div class="card-title">接続設定</div>
 
-  <div class="field">
-    <label>接続先（IPアドレス または cloudflaredドメイン）</label>
-    <input type="text" id="ipInput" placeholder="192.168.1.10 または xxxx.trycloudflare.com" value="localhost">
-  </div>
   <div class="row">
     <div class="field">
       <label>配信ID (半角英数字)</label>
@@ -326,17 +324,22 @@ input[type=range].muted-range::-webkit-slider-thumb { background: #555; }
 <p class="tip">
   ※ Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。<br>
   ※ LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。<br>
-  ※ cloudflaredトンネル使用時: ファイアウォール設定不要。IPアドレス欄にxxxx.trycloudflare.comを入力してください。
+  ※ トンネル使用時: このページのドメインが接続先になります（例: xxxx.trycloudflare.com）。
 </p>
 
 <script>
 // ============================================================
 // URL プレビュー
 // ============================================================
+function getHostDomain() {
+  return location.hostname || 'localhost';
+}
+
 function buildUrl(ip, sid, ch) {
-  // cloudflaredドメイン (trycloudflare.com) またはhttps/wssスキームの場合はポートなしwss://
+  // cloudflared/ngrok/https時はポートなしwss://
+  const hasScheme = /^(wss?|https?):\/\//.test(ip);
   const isTunnel = ip.includes('trycloudflare.com') || ip.includes('ngrok.io')
-                || ip.startsWith('wss://') || ip.startsWith('https://');
+                || hasScheme || location.protocol === 'https:';
   const cleanIp = ip.replace(/^(wss?|https?):\/\//, '').replace(/\/.*$/, '');
   if (isTunnel) {
     return sid ? `wss://${cleanIp}/${sid}/${ch}` : `wss://${cleanIp}/(配信ID未入力)/${ch}`;
@@ -345,13 +348,73 @@ function buildUrl(ip, sid, ch) {
   }
 }
 
-function updateUrlPreview() {
-  const ip  = document.getElementById('ipInput').value.trim() || 'localhost';
-  const sid = document.getElementById('sidInput').value.trim();
-  const ch  = document.getElementById('chInput').value || '1';
-  document.getElementById('urlPreview').textContent = buildUrl(ip, sid, ch);
+const hostDomain = getHostDomain();
+
+const sidInput = document.getElementById('sidInput');
+const chInput = document.getElementById('chInput');
+
+function parseShebangParams() {
+  if (!location.hash.startsWith('#!')) return null;
+  let raw = location.hash.slice(2);
+  if (raw.startsWith('/')) raw = raw.slice(1);
+  if (raw.startsWith('?')) raw = raw.slice(1);
+  if (!raw) return null;
+
+  const safeDecode = (val) => {
+    try { return decodeURIComponent(val); }
+    catch { return val; }
+  };
+
+  // 新形式: #!/{sid}/{ch}
+  const base = raw.split(/[?#]/)[0];
+  const parts = base.split('/');
+  return {
+    sid: parts[0] ? safeDecode(parts[0]) : null,
+    ch: parts.length >= 2 ? safeDecode(parts[1]) : null,
+  };
 }
-['ipInput','sidInput','chInput'].forEach(id =>
+
+function getInitialParams() {
+  const hashParams = parseShebangParams();
+  if (hashParams && (hashParams.sid || hashParams.ch)) return hashParams;
+  return null;
+}
+
+function applyUrlParams() {
+  const params = getInitialParams();
+  if (!params) return;
+  const sid = params.sid;
+  const ch = params.ch;
+  if (sid && sidInput) sidInput.value = sid;
+  if (ch && chInput) {
+    const chNum = parseInt(ch, 10);
+    if (!Number.isNaN(chNum) && chNum >= 1 && chNum <= 10) {
+      chInput.value = String(chNum);
+    }
+  }
+}
+applyUrlParams();
+
+function updateUrlPreview() {
+  const sid = sidInput.value.trim();
+  const ch  = chInput.value || '1';
+  document.getElementById('urlPreview').textContent = buildUrl(hostDomain, sid, ch);
+  updateShebang(sid, ch);
+}
+
+function updateShebang(sid, ch) {
+  if (sid) {
+    const sidEnc = encodeURIComponent(sid);
+    const chEnc = encodeURIComponent(ch || '1');
+    const newHash = `#!/${sidEnc}/${chEnc}`;
+    if (location.hash !== newHash) {
+      history.replaceState(null, '', newHash);
+    }
+  } else if (location.hash.startsWith('#!')) {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+}
+['sidInput','chInput'].forEach(id =>
   document.getElementById(id).addEventListener('input', updateUrlPreview));
 updateUrlPreview();
 
@@ -364,6 +427,10 @@ let gainNode = null;
 let nextTime = 0;
 const AHEAD  = 0.12;
 let muted    = false;
+let connecting = false;
+let lastWsError = false;
+let connectTimer = null;
+const CONNECT_TIMEOUT_MS = 7000;
 
 // VUメーター
 const NUM_BARS = 20;
@@ -433,7 +500,21 @@ function setStatus(msg, cls = '') {
   el.className = 'status ' + cls;
 }
 
+function clearConnectTimer() {
+  if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+}
+
+function setDisconnectedUi() {
+  document.getElementById('connectBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('syncBtn').disabled = true;
+  enableSyncOptions(false);
+  document.getElementById('latencyCard').classList.remove('active');
+  resetBadge();
+}
+
 function connect() {
+  if (connecting) return;
   if (ws) ws.close();
   if (!actx) {
     actx = new (window.AudioContext || window.webkitAudioContext)();
@@ -444,19 +525,46 @@ function connect() {
   }
   nextTime = actx.currentTime + AHEAD;
 
-  const ip  = document.getElementById('ipInput').value.trim() || 'localhost';
   const sid = document.getElementById('sidInput').value.trim();
   const ch  = parseInt(document.getElementById('chInput').value, 10);
 
   if (!sid) { setStatus('❌ 配信IDを入力してください', 'err'); return; }
   if (!/^[a-z0-9]+$/i.test(sid)) { setStatus('❌ 配信IDは半角英数字のみです', 'err'); return; }
+  if (!Number.isInteger(ch) || ch < 1 || ch > 10) {
+    setStatus('❌ CH番号は1〜10で入力してください', 'err');
+    return;
+  }
 
-  const url = buildUrl(ip, sid.toLowerCase(), ch);
+  const url = buildUrl(hostDomain, sid.toLowerCase(), ch);
   setStatus('接続中...', '');
-  ws = new WebSocket(url);
+  connecting = true;
+  lastWsError = false;
+  document.getElementById('connectBtn').disabled = true;
+  try {
+    ws = new WebSocket(url);
+  } catch (e) {
+    connecting = false;
+    setStatus('❌ 接続に失敗しました — URLを確認してください', 'err');
+    document.getElementById('connectBtn').disabled = false;
+    return;
+  }
   ws.binaryType = 'arraybuffer';
+  const wsLocal = ws;
 
-  ws.onopen  = () => {
+  clearConnectTimer();
+  connectTimer = setTimeout(() => {
+    if (ws !== wsLocal) return;
+    if (wsLocal.readyState !== WebSocket.OPEN) {
+      lastWsError = true;
+      setStatus('❌ 接続タイムアウト — 接続先を確認してください', 'err');
+      try { wsLocal.close(); } catch {}
+    }
+  }, CONNECT_TIMEOUT_MS);
+
+  wsLocal.onopen  = () => {
+    if (ws !== wsLocal) return;
+    clearConnectTimer();
+    connecting = false;
     setStatus(`✅ 受信中 — ${url}`, 'ok');
     document.getElementById('connectBtn').disabled = true;
     document.getElementById('stopBtn').disabled = false;
@@ -464,14 +572,22 @@ function connect() {
     enableSyncOptions(true);
     document.getElementById('latencyCard').classList.add('active');
   };
-  ws.onerror = () => setStatus('❌ 接続エラー — IP・配信ID・CH番号を確認してください', 'err');
-  ws.onclose = () => {
-    setStatus('切断されました', '');
-    document.getElementById('connectBtn').disabled = false;
-    document.getElementById('stopBtn').disabled = true;
-    resetBadge();
+  wsLocal.onerror = () => {
+    if (ws !== wsLocal) return;
+    lastWsError = true;
+    setStatus('❌ 接続エラー — 配信ID・CH番号を確認してください', 'err');
   };
-  ws.onmessage = ev => {
+  wsLocal.onclose = () => {
+    if (ws !== wsLocal) return;
+    clearConnectTimer();
+    connecting = false;
+    if (!lastWsError) setStatus('切断されました', '');
+    lastWsError = false;
+    setDisconnectedUi();
+    ws = null;
+  };
+  wsLocal.onmessage = ev => {
+    if (ws !== wsLocal) return;
     if (ev.data instanceof ArrayBuffer) handleAudio(ev.data);
     else handleControl(ev.data);
   };
@@ -479,9 +595,17 @@ function connect() {
 
 function disconnect() {
   stopAutoSync();
+  clearConnectTimer();
+  connecting = false;
   document.getElementById('syncBtn').disabled = true;
   enableSyncOptions(false);
-  if (ws) { ws.close(); ws = null; }
+  const wsLocal = ws;
+  ws = null;
+  setDisconnectedUi();
+  setStatus('切断しました', '');
+  if (wsLocal) {
+    try { wsLocal.close(); } catch {}
+  }
 }
 
 function resetBadge() {
