@@ -135,6 +135,7 @@ public:
             srv->set_message_handler([this](ConnHandle h, WsServer::message_ptr m) {
                 on_message(h, m);
             });
+            srv->set_http_handler([this](ConnHandle h) { on_http(h); });
             srv->listen(port_);
             srv->start_accept();
             {
@@ -288,6 +289,11 @@ public:
         std::lock_guard<std::mutex> lk(mtx_);
         auto& cs = ch_map_[make_key(stream_id_, ch)];
         cs.on_result = std::move(cb);
+    }
+
+    void set_http_index_html(std::string html) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        http_index_html_ = std::move(html);
     }
 
     // 全コールバックをクリア（破棄前に呼ぶ）
@@ -469,6 +475,36 @@ private:
         }
     }
 
+    void on_http(ConnHandle h) {
+        std::shared_ptr<WsServer> srv;
+        std::string body;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            srv = server_ptr_;
+            body = http_index_html_;
+        }
+        if (!srv) return;
+        websocketpp::connection_hdl hdl = h;
+        try {
+            auto con = srv->get_con_from_hdl(hdl);
+            std::string path = con->get_resource();
+            auto q = path.find_first_of("?#");
+            if (q != std::string::npos) path = path.substr(0, q);
+            if (path.empty()) path = "/";
+            if ((path == "/" || path == "/index.html") && !body.empty()) {
+                con->set_status(websocketpp::http::status_code::ok);
+                con->replace_header("Content-Type", "text/html; charset=utf-8");
+                con->replace_header("Cache-Control", "no-store");
+                con->set_body(std::move(body));
+            } else {
+                con->set_status(websocketpp::http::status_code::not_found);
+                con->replace_header("Content-Type", "text/plain; charset=utf-8");
+                con->set_body("Not Found");
+            }
+        } catch (...) {
+        }
+    }
+
     // ----- 計測ループ -----
     void measure_loop(const std::string& sid, int ch,
                       int num_pings, int interval_ms)
@@ -571,6 +607,7 @@ private:
     uint16_t           port_    = 0;
     std::atomic<bool>  running_{false};
     std::string        stream_id_;
+    std::string        http_index_html_;
 
     // conn_handle → ConnInfo
     std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;

@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 #include <array>
@@ -90,6 +92,27 @@ static std::string sanitize_stream_id(const char* raw) {
         return !std::isalnum((unsigned char)c) && c != '-' && c != '_';
     }), s.end());
     return s;
+}
+
+static std::string read_file_to_string(const char* path) {
+    if (!path || !*path) return "";
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) return "";
+    return std::string((std::istreambuf_iterator<char>(ifs)),
+                       std::istreambuf_iterator<char>());
+}
+
+static std::string load_receiver_index_html() {
+    std::string html;
+    char* mod_path = obs_module_file("receiver/index.html");
+    if (mod_path) {
+        html = read_file_to_string(mod_path);
+        bfree(mod_path);
+    }
+    if (html.empty()) {
+        html = read_file_to_string("receiver/index.html");
+    }
+    return html;
 }
 
 static std::string get_obs_stream_url() {
@@ -269,6 +292,13 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     auto* d = new DelayStreamData();
     blog(LOG_INFO, "[obs-delay-stream] ds_create: DelayStreamData allocated at %p", (void*)d);
     d->context  = source;
+    {
+        auto html = load_receiver_index_html();
+        if (html.empty()) {
+            blog(LOG_WARNING, "[obs-delay-stream] receiver/index.html not found; HTTP top page disabled");
+        }
+        d->router.set_http_index_html(std::move(html));
+    }
     d->auto_ip  = get_local_ip();
     d->host_ip  = d->auto_ip;
     for (int i = 0; i < NUM_SUB_CH; ++i) {
