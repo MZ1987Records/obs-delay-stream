@@ -26,8 +26,8 @@ jobs:
         run: |
           Set-Location third_party/obs-studio
           cmake --list-presets
-          cmake --preset windows-x64
-          cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
+          cmake --preset windows-ci-x64
+          cmake --build --preset windows-ci-x64 --config RelWithDebInfo --parallel
 
       - name: Clone websocketpp
         shell: pwsh
