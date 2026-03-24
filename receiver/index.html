@@ -308,6 +308,7 @@ input[type=range].muted-range::-webkit-slider-thumb { background: #555; }
     <div>SR: <span id="infoSR">—</span></div>
     <div>CH: <span id="infoCH">—</span></div>
     <div>Buffer: <span id="infoBuf">—</span></div>
+    <div>Codec: <span id="infoCodec">—</span></div>
   </div>
 </div>
 
@@ -442,6 +443,15 @@ let opusQueue = [];
 let opusTsUs = 0;
 let opusErrored = false;
 let opusErrorReported = false;
+let opusMode = 'auto'; // 'auto' | 'webcodecs' | 'wasm'
+let opusWebCodecsState = 'idle'; // idle | pending | ready | failed
+let opusWasmState = 'idle'; // idle | pending | ready | failed
+let opusWasmDecoder = null;
+let opusWasmConfig = null;
+let opusWasmInitPromise = null;
+let opusWasmLibPromise = null;
+let opusWasmErrorStreak = 0;
+let opusWasmLastErrorTs = 0;
 let pcmFallbackRequested = false;
 let pcmFallbackReason = '';
 
@@ -466,6 +476,56 @@ function requestPcmFallback(reason) {
   pcmFallbackRequested = true;
   pcmFallbackReason = reason || '';
   sendPcmFallbackIfPossible();
+}
+
+function disableOpus(reason, msg) {
+  if (opusErrored) return;
+  opusErrored = true;
+  requestPcmFallback(reason);
+  reportOpusError(msg || '❌ Opusデコードに失敗しました（PCMに切替）');
+  opusQueue = [];
+}
+
+function markWebCodecsFailed(reason) {
+  if (opusWebCodecsState === 'failed') return;
+  opusWebCodecsState = 'failed';
+  if (reason) {
+    try { console.warn('[Opus][WebCodecs]', reason); } catch {}
+  }
+}
+
+function markWasmFailed(reason) {
+  if (opusWasmState === 'failed') return;
+  opusWasmState = 'failed';
+  if (reason) {
+    try { console.warn('[Opus][WASM]', reason); } catch {}
+  }
+}
+
+function noteWasmError() {
+  const now = Date.now();
+  if (now - opusWasmLastErrorTs > 2000) opusWasmErrorStreak = 0;
+  opusWasmLastErrorTs = now;
+  opusWasmErrorStreak++;
+  return opusWasmErrorStreak;
+}
+
+function clearWasmErrors() {
+  opusWasmErrorStreak = 0;
+  opusWasmLastErrorTs = 0;
+}
+
+function loadOpusWasmLibrary() {
+  if (opusWasmLibPromise) return opusWasmLibPromise;
+  opusWasmLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.async = true;
+    s.src = 'third_party/opus-decoder/opus-decoder.min.js';
+    s.onload = () => resolve(true);
+    s.onerror = () => reject(new Error('opus-decoder load failed'));
+    document.head.appendChild(s);
+  });
+  return opusWasmLibPromise;
 }
 
 // VUメーター
@@ -536,6 +596,11 @@ function setStatus(msg, cls = '') {
   el.className = 'status ' + cls;
 }
 
+function setCodecLabel(text) {
+  const el = document.getElementById('infoCodec');
+  if (el) el.textContent = text || '—';
+}
+
 function clearConnectTimer() {
   if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
 }
@@ -547,6 +612,7 @@ function setDisconnectedUi() {
   enableSyncOptions(false);
   document.getElementById('latencyCard').classList.remove('active');
   resetBadge();
+  setCodecLabel('—');
 }
 
 function connect() {
@@ -690,6 +756,7 @@ function handlePcm16(buf, sampleRate, channels, frameCount) {
   if (!actx) return;
   document.getElementById('infoSR').textContent = sampleRate + ' Hz';
   document.getElementById('infoCH').textContent = channels + 'ch';
+  setCodecLabel('PCM16');
 
   const pcm = new Int16Array(buf, 16);
   const abuf = actx.createBuffer(channels, frameCount, sampleRate);
@@ -704,62 +771,171 @@ function handlePcm16(buf, sampleRate, channels, frameCount) {
 
 function handleOpus(buf, sampleRate, channels, frameCount) {
   if (opusErrored) return;
-  if (!ensureOpusDecoder(sampleRate, channels)) {
+  if (opusMode === 'webcodecs') {
+    if (ensureWebCodecsDecoder(sampleRate, channels)) {
+      decodeOpusPacketWebCodecs(buf, sampleRate, channels, frameCount);
+      return;
+    }
+    if (opusWebCodecsState === 'failed') {
+      opusMode = 'auto';
+    } else {
+      opusQueue.push({ buf, sampleRate, channels, frameCount });
+      return;
+    }
+  }
+  if (opusMode === 'wasm') {
+    if (ensureWasmDecoder(sampleRate, channels)) {
+      decodeOpusPacketWasm(buf, sampleRate, channels, frameCount);
+      return;
+    }
+    if (opusWasmState === 'failed') {
+      opusMode = 'auto';
+    } else {
+      opusQueue.push({ buf, sampleRate, channels, frameCount });
+      return;
+    }
+  }
+
+  // auto: WebCodecs優先、失敗時WASM
+  if (ensureWebCodecsDecoder(sampleRate, channels)) {
+    opusMode = 'webcodecs';
+    decodeOpusPacketWebCodecs(buf, sampleRate, channels, frameCount);
+    return;
+  }
+  if (opusWebCodecsState === 'pending') {
     opusQueue.push({ buf, sampleRate, channels, frameCount });
     return;
   }
-  decodeOpusPacket(buf, sampleRate, channels, frameCount);
+  if (ensureWasmDecoder(sampleRate, channels)) {
+    opusMode = 'wasm';
+    decodeOpusPacketWasm(buf, sampleRate, channels, frameCount);
+    return;
+  }
+  if (opusWasmState === 'pending') {
+    opusQueue.push({ buf, sampleRate, channels, frameCount });
+    return;
+  }
+
+  disableOpus('opus_unavailable', '❌ Opusデコーダを利用できません（PCMに切替）');
 }
 
-function ensureOpusDecoder(sampleRate, channels) {
+function ensureWebCodecsDecoder(sampleRate, channels) {
+  if (opusWebCodecsState === 'failed') return false;
   if (opusDecoder &&
       opusConfig &&
       opusConfig.sampleRate === sampleRate &&
-      opusConfig.numberOfChannels === channels) return true;
+      opusConfig.numberOfChannels === channels) {
+    opusWebCodecsState = 'ready';
+    return true;
+  }
   if (opusInitPromise) return false;
+  if (opusDecoder) {
+    try { opusDecoder.close(); } catch {}
+  }
+  opusDecoder = null;
+  opusConfig = null;
+  opusTsUs = 0;
+
   if (!window.isSecureContext) {
-    opusErrored = true;
-    reportOpusError('❌ Opus再生にはHTTPS/localhostが必要です');
-    requestPcmFallback('insecure_context');
+    markWebCodecsFailed('insecure_context');
     return false;
   }
   if (typeof AudioDecoder === 'undefined') {
-    opusErrored = true;
-    reportOpusError('❌ この環境はAudioDecoder未対応です');
-    requestPcmFallback('no_audio_decoder');
+    markWebCodecsFailed('no_audio_decoder');
     return false;
   }
+
   const config = { codec: 'opus', sampleRate, numberOfChannels: channels };
+  opusWebCodecsState = 'pending';
   opusInitPromise = AudioDecoder.isConfigSupported(config).then(s => {
-    if (!s.supported) { opusErrored = true; reportOpusError('❌ Opusデコーダ非対応です'); requestPcmFallback('config_unsupported'); return false; }
+    if (!s.supported) {
+      markWebCodecsFailed('config_unsupported');
+      return false;
+    }
     opusDecoder = new AudioDecoder({
       output: onOpusDecoded,
-      error: () => { opusErrored = true; reportOpusError('❌ Opusデコードエラー'); requestPcmFallback('decode_error'); }
+      error: () => {
+        markWebCodecsFailed('decode_error');
+        opusMode = 'auto';
+      }
     });
     opusDecoder.configure(config);
     opusConfig = config;
     opusTsUs = 0;
+    opusWebCodecsState = 'ready';
     return true;
   }).then(ok => {
-    if (ok) flushOpusQueue();
-    else opusQueue = [];
-    return ok;
+    opusInitPromise = null;
+    if (ok) {
+      opusMode = 'webcodecs';
+      flushOpusQueue();
+      return true;
+    }
+    return false;
   }).catch(() => {
-    opusErrored = true;
-    reportOpusError('❌ Opusデコーダ初期化に失敗');
-    requestPcmFallback('init_failed');
+    opusInitPromise = null;
+    markWebCodecsFailed('init_failed');
+    return false;
+  });
+  return false;
+}
+
+function ensureWasmDecoder(sampleRate, channels) {
+  if (opusWasmState === 'failed') return false;
+  if (opusWasmDecoder &&
+      opusWasmConfig &&
+      opusWasmConfig.sampleRate === sampleRate &&
+      opusWasmConfig.numberOfChannels === channels) {
+    opusWasmState = 'ready';
+    return true;
+  }
+  if (opusWasmInitPromise) return false;
+  if (opusWasmDecoder) {
+    try { opusWasmDecoder.free(); } catch {}
+  }
+  opusWasmDecoder = null;
+  opusWasmConfig = null;
+
+  opusWasmState = 'pending';
+  opusWasmInitPromise = loadOpusWasmLibrary().then(() => {
+    const mod = window['opus-decoder'];
+    if (!mod || !mod.OpusDecoder) throw new Error('OpusDecoder missing');
+    opusWasmDecoder = new mod.OpusDecoder({ sampleRate, channels });
+    opusWasmConfig = { sampleRate, numberOfChannels: channels };
+    return opusWasmDecoder.ready;
+  }).then(() => {
+    opusWasmInitPromise = null;
+    opusWasmState = 'ready';
+    opusMode = 'wasm';
+    flushOpusQueue();
+    return true;
+  }).catch((e) => {
+    opusWasmInitPromise = null;
+    markWasmFailed(e && e.message ? e.message : 'init_failed');
+    if (opusWebCodecsState === 'failed') {
+      disableOpus('opus_unavailable', '❌ Opusデコーダを利用できません（PCMに切替）');
+    }
     return false;
   });
   return false;
 }
 
 function flushOpusQueue() {
+  if (opusErrored) { opusQueue = []; return; }
   const q = opusQueue;
   opusQueue = [];
-  for (const pkt of q) decodeOpusPacket(pkt.buf, pkt.sampleRate, pkt.channels, pkt.frameCount);
+  for (const pkt of q) {
+    if (opusMode === 'webcodecs') {
+      decodeOpusPacketWebCodecs(pkt.buf, pkt.sampleRate, pkt.channels, pkt.frameCount);
+    } else if (opusMode === 'wasm') {
+      decodeOpusPacketWasm(pkt.buf, pkt.sampleRate, pkt.channels, pkt.frameCount);
+    } else {
+      handleOpus(pkt.buf, pkt.sampleRate, pkt.channels, pkt.frameCount);
+    }
+  }
 }
 
-function decodeOpusPacket(buf, sampleRate, channels, frameCount) {
+function decodeOpusPacketWebCodecs(buf, sampleRate, channels, frameCount) {
   if (!opusDecoder) return;
   document.getElementById('infoSR').textContent = sampleRate + ' Hz';
   document.getElementById('infoCH').textContent = channels + 'ch';
@@ -778,7 +954,10 @@ function decodeOpusPacket(buf, sampleRate, channels, frameCount) {
 
 function onOpusDecoded(ad) {
   const abuf = audioDataToBuffer(ad);
-  if (abuf) playBuffer(abuf);
+  if (abuf) {
+    setCodecLabel('Opus (WebCodecs)');
+    playBuffer(abuf);
+  }
   ad.close();
 }
 
@@ -791,7 +970,10 @@ function audioDataToBuffer(ad) {
   const planar = fmt.endsWith('-planar');
   const f32 = fmt.startsWith('f32');
   const s16 = fmt.startsWith('s16');
-  if (!f32 && !s16) { requestPcmFallback('unsupported_audio_format'); return null; }
+  if (!f32 && !s16) {
+    markWebCodecsFailed('unsupported_audio_format');
+    return null;
+  }
 
   const abuf = actx.createBuffer(channels, frames, sampleRate);
   if (planar) {
@@ -825,6 +1007,56 @@ function audioDataToBuffer(ad) {
     }
   }
   return abuf;
+}
+
+function decodeOpusPacketWasm(buf, sampleRate, channels, frameCount) {
+  if (!opusWasmDecoder || !actx) return;
+  document.getElementById('infoSR').textContent = sampleRate + ' Hz';
+  document.getElementById('infoCH').textContent = channels + 'ch';
+
+  const payload = new Uint8Array(buf, 16);
+  let decoded;
+  try {
+    decoded = opusWasmDecoder.decodeFrame(payload);
+  } catch (e) {
+    const streak = noteWasmError();
+    try { console.warn('[Opus][WASM] decode_error'); } catch {}
+    if (streak >= 3) {
+      markWasmFailed('decode_error');
+      if (opusWebCodecsState === 'failed') {
+        disableOpus('opus_unavailable', '❌ Opusデコードに失敗しました（PCMに切替）');
+      } else {
+        opusMode = 'auto';
+      }
+    } else if (!opusWasmInitPromise && opusWasmDecoder && typeof opusWasmDecoder.reset === 'function') {
+      opusWasmState = 'pending';
+      opusWasmInitPromise = opusWasmDecoder.reset().then(() => {
+        opusWasmInitPromise = null;
+        opusWasmState = 'ready';
+      }).catch(() => {
+        opusWasmInitPromise = null;
+        markWasmFailed('reset_failed');
+      });
+    }
+    return;
+  }
+  if (!decoded || !decoded.channelData || !decoded.samplesDecoded) return;
+  if (decoded.errors && decoded.errors.length) {
+    try { console.warn('[Opus][WASM] decode errors', decoded.errors[0]); } catch {}
+  }
+  clearWasmErrors();
+
+  const outRate = decoded.sampleRate || sampleRate;
+  const outCh = decoded.channelData.length || channels;
+  const abuf = actx.createBuffer(outCh, decoded.samplesDecoded, outRate);
+  for (let c = 0; c < outCh; c++) {
+    const src = decoded.channelData[c];
+    const out = abuf.getChannelData(c);
+    if (src.length > decoded.samplesDecoded) out.set(src.subarray(0, decoded.samplesDecoded));
+    else out.set(src);
+  }
+  setCodecLabel('Opus (WASM)');
+  playBuffer(abuf);
 }
 
 // ============================================================

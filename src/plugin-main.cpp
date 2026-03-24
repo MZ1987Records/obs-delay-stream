@@ -120,6 +120,21 @@ static std::string load_receiver_index_html() {
     return html;
 }
 
+static std::string get_receiver_root_dir() {
+    std::string path;
+    char* mod_path = obs_module_file("receiver/index.html");
+    if (mod_path) {
+        path = mod_path;
+        bfree(mod_path);
+    }
+    if (path.empty()) {
+        path = "receiver/index.html";
+    }
+    auto pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) return "";
+    return path.substr(0, pos);
+}
+
 static std::string get_obs_stream_url() {
     return ""; // Set RTMP URL manually in the plugin panel
 }
@@ -312,6 +327,8 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
             blog(LOG_WARNING, "[obs-delay-stream] receiver/index.html not found; HTTP top page disabled");
         }
         d->router.set_http_index_html(std::move(html));
+        auto root = get_receiver_root_dir();
+        if (!root.empty()) d->router.set_http_root_dir(std::move(root));
     }
     d->auto_ip  = get_local_ip();
     d->host_ip  = d->auto_ip;

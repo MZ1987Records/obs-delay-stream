@@ -181,14 +181,17 @@ if "%CI_MODE%"=="1" goto :skip_install
 if "%OBS_LEGACY_INSTALL%"=="1" goto :legacy_paths
 set PLUGIN_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\bin\64bit
 set LOCALE_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\data\locale
+set RECEIVER_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\data\receiver
 goto :paths_set
 :legacy_paths
 set PLUGIN_DEST=%OBS_INSTALL_DIR%\obs-plugins\64bit
 set LOCALE_DEST=%OBS_INSTALL_DIR%\data\obs-plugins\obs-delay-stream\locale
+set RECEIVER_DEST=%OBS_INSTALL_DIR%\data\obs-plugins\obs-delay-stream\receiver
 :paths_set
 
 if not exist "%PLUGIN_DEST%" mkdir "%PLUGIN_DEST%"
 if not exist "%LOCALE_DEST%" mkdir "%LOCALE_DEST%"
+if not exist "%RECEIVER_DEST%" mkdir "%RECEIVER_DEST%"
 
 copy /Y "%BUILD_DIR%\RelWithDebInfo\obs-delay-stream.dll" "%PLUGIN_DEST%\"
 if errorlevel 1 (
@@ -200,6 +203,20 @@ copy /Y "%PLUGIN_DIR%\data\locale\*.ini" "%LOCALE_DEST%\"
 if errorlevel 1 (
     echo [ERROR] Failed to copy locale files.
     goto :error
+)
+
+copy /Y "%PLUGIN_DIR%\receiver\index.html" "%RECEIVER_DEST%\"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver index.html.
+    goto :error
+)
+
+if exist "%PLUGIN_DIR%\receiver\third_party" (
+    xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
+    if errorlevel 1 (
+        echo [ERROR] Failed to copy receiver third_party files.
+        goto :error
+    )
 )
 
 :: Install port release helper script

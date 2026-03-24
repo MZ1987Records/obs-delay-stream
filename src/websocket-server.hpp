@@ -55,6 +55,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <fstream>
 
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
@@ -416,6 +417,11 @@ public:
         opus_reset_pending_.store(true, std::memory_order_release);
     }
 
+    void set_http_root_dir(std::string dir) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        http_root_dir_ = std::move(dir);
+    }
+
 private:
     // ----- Opus Encoder (per channel) -----
     struct OpusEnc {
@@ -575,6 +581,49 @@ private:
         if (ch_1idx < 1 || ch_1idx > 10) return false;
         ch_0idx = ch_1idx - 1;
         return !stream_id.empty();
+    }
+
+    static bool is_safe_rel_path(const std::string& rel) {
+        if (rel.empty()) return false;
+        if (rel.find("..") != std::string::npos) return false;
+        if (rel.find('\\') != std::string::npos) return false;
+        if (rel.find(':') != std::string::npos) return false; // Windows drive
+        return true;
+    }
+
+    static std::string join_path(const std::string& base, const std::string& rel) {
+        if (base.empty()) return rel;
+        std::string out = base;
+        char last = out.back();
+        if (last != '/' && last != '\\') out += '/';
+        out += rel;
+        return out;
+    }
+
+    static bool read_file_to_string(const std::string& path, std::string& out) {
+        std::ifstream ifs(path, std::ios::binary);
+        if (!ifs) return false;
+        out.assign(std::istreambuf_iterator<char>(ifs),
+                   std::istreambuf_iterator<char>());
+        return true;
+    }
+
+    static const char* guess_content_type(const std::string& path) {
+        auto dot = path.find_last_of('.');
+        std::string ext = (dot == std::string::npos) ? "" : path.substr(dot);
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){
+            return (char)std::tolower(c);
+        });
+        if (ext == ".html") return "text/html; charset=utf-8";
+        if (ext == ".js" || ext == ".mjs") return "application/javascript; charset=utf-8";
+        if (ext == ".css") return "text/css; charset=utf-8";
+        if (ext == ".wasm") return "application/wasm";
+        if (ext == ".json" || ext == ".map") return "application/json; charset=utf-8";
+        if (ext == ".svg") return "image/svg+xml";
+        if (ext == ".png") return "image/png";
+        if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+        if (ext == ".gif") return "image/gif";
+        return "application/octet-stream";
     }
 
     // ----- ch_map_検索 -----
@@ -820,10 +869,12 @@ private:
     void on_http(ConnHandle h) {
         std::shared_ptr<WsServer> srv;
         std::string body;
+        std::string root;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             srv = server_ptr_;
             body = http_index_html_;
+            root = http_root_dir_;
         }
         if (!srv) return;
         websocketpp::connection_hdl hdl = h;
@@ -833,16 +884,46 @@ private:
             auto q = path.find_first_of("?#");
             if (q != std::string::npos) path = path.substr(0, q);
             if (path.empty()) path = "/";
-            if ((path == "/" || path == "/index.html") && !body.empty()) {
-                con->set_status(websocketpp::http::status_code::ok);
-                con->replace_header("Content-Type", "text/html; charset=utf-8");
-                con->replace_header("Cache-Control", "no-store");
-                con->set_body(std::move(body));
-            } else {
-                con->set_status(websocketpp::http::status_code::not_found);
-                con->replace_header("Content-Type", "text/plain; charset=utf-8");
-                con->set_body("Not Found");
+            if (path == "/" || path == "/index.html") {
+                if (!body.empty()) {
+                    con->set_status(websocketpp::http::status_code::ok);
+                    con->replace_header("Content-Type", "text/html; charset=utf-8");
+                    con->replace_header("Cache-Control", "no-store");
+                    con->set_body(std::move(body));
+                    return;
+                }
+                if (!root.empty()) {
+                    std::string full = join_path(root, "index.html");
+                    std::string file;
+                    if (read_file_to_string(full, file)) {
+                        con->set_status(websocketpp::http::status_code::ok);
+                        con->replace_header("Content-Type", "text/html; charset=utf-8");
+                        con->replace_header("Cache-Control", "no-store");
+                        con->set_body(std::move(file));
+                        return;
+                    }
+                }
             }
+
+            if (!root.empty()) {
+                std::string rel = path;
+                if (!rel.empty() && rel[0] == '/') rel = rel.substr(1);
+                if (is_safe_rel_path(rel)) {
+                    std::string full = join_path(root, rel);
+                    std::string file;
+                    if (read_file_to_string(full, file)) {
+                        con->set_status(websocketpp::http::status_code::ok);
+                        con->replace_header("Content-Type", guess_content_type(full));
+                        con->replace_header("Cache-Control", "no-store");
+                        con->set_body(std::move(file));
+                        return;
+                    }
+                }
+            }
+
+            con->set_status(websocketpp::http::status_code::not_found);
+            con->replace_header("Content-Type", "text/plain; charset=utf-8");
+            con->set_body("Not Found");
         } catch (...) {
         }
     }
@@ -965,6 +1046,7 @@ private:
     std::atomic<bool>  running_{false};
     std::string        stream_id_;
     std::string        http_index_html_;
+    std::string        http_root_dir_;
     std::atomic<int>   audio_codec_{0}; // 0: Opus, 1: PCM16
     std::atomic<bool>  opus_reset_pending_{false};
     std::atomic<int>   opus_bitrate_kbps_{96};
