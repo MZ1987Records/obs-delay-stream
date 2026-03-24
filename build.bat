@@ -11,12 +11,26 @@ echo.
 rem 環境変数の説明:
 rem - OBS_SOURCE_DIR: OBS Studio のソースパス（例: D:\dev\obs-studio）。未指定なら third_party\obs-studio を使用
 rem - OBS_LEGACY_INSTALL: 1=Program Files のレガシー配置, 0=ProgramData の推奨配置（未指定は0）
+rem - build.env に KEY=VALUE 形式で記述（空白を入れない）。例は build.env.sample
 
 for %%I in ("%~dp0.") do set "PLUGIN_DIR=%%~fI"
+set "OBS_SOURCE_DIR="
+set "OBS_LEGACY_INSTALL="
+set "ENV_FILE=%PLUGIN_DIR%\build.env"
+if exist "%ENV_FILE%" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
+        if /I "%%A"=="OBS_SOURCE_DIR" if not "%%B"=="" (
+            set "OBS_SOURCE_DIR=%%B"
+        )
+        if /I "%%A"=="OBS_LEGACY_INSTALL" if not "%%B"=="" (
+            set "OBS_LEGACY_INSTALL=%%B"
+        )
+    )
+)
 if not "%~1"=="" (
-    set OBS_SOURCE_DIR=%~1
+    set "OBS_SOURCE_DIR=%~1"
 ) else if "%OBS_SOURCE_DIR%"=="" (
-    set OBS_SOURCE_DIR=%PLUGIN_DIR%\third_party\obs-studio
+    set "OBS_SOURCE_DIR=%PLUGIN_DIR%\third_party\obs-studio"
 )
 set OBS_INSTALL_DIR=C:\ProgramData\obs-studio
 if "%OBS_LEGACY_INSTALL%"=="" set OBS_LEGACY_INSTALL=0
