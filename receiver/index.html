@@ -442,12 +442,30 @@ let opusQueue = [];
 let opusTsUs = 0;
 let opusErrored = false;
 let opusErrorReported = false;
+let pcmFallbackRequested = false;
+let pcmFallbackReason = '';
 
 function reportOpusError(msg) {
   if (opusErrorReported) return;
   opusErrorReported = true;
   setStatus(msg, 'err');
   try { console.warn('[Opus]', msg); } catch {}
+}
+
+function sendPcmFallbackIfPossible() {
+  if (!pcmFallbackRequested) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const payload = { type: 'audio_codec', mode: 'pcm' };
+    if (pcmFallbackReason) payload.reason = pcmFallbackReason;
+    try { ws.send(JSON.stringify(payload)); } catch {}
+  }
+}
+
+function requestPcmFallback(reason) {
+  if (pcmFallbackRequested) return;
+  pcmFallbackRequested = true;
+  pcmFallbackReason = reason || '';
+  sendPcmFallbackIfPossible();
 }
 
 // VUメーター
@@ -589,6 +607,7 @@ function connect() {
     document.getElementById('syncBtn').disabled = false;
     enableSyncOptions(true);
     document.getElementById('latencyCard').classList.add('active');
+    sendPcmFallbackIfPossible();
   };
   wsLocal.onerror = () => {
     if (ws !== wsLocal) return;
@@ -701,19 +720,21 @@ function ensureOpusDecoder(sampleRate, channels) {
   if (!window.isSecureContext) {
     opusErrored = true;
     reportOpusError('❌ Opus再生にはHTTPS/localhostが必要です');
+    requestPcmFallback('insecure_context');
     return false;
   }
   if (typeof AudioDecoder === 'undefined') {
     opusErrored = true;
     reportOpusError('❌ この環境はAudioDecoder未対応です');
+    requestPcmFallback('no_audio_decoder');
     return false;
   }
   const config = { codec: 'opus', sampleRate, numberOfChannels: channels };
   opusInitPromise = AudioDecoder.isConfigSupported(config).then(s => {
-    if (!s.supported) { opusErrored = true; reportOpusError('❌ Opusデコーダ非対応です'); return false; }
+    if (!s.supported) { opusErrored = true; reportOpusError('❌ Opusデコーダ非対応です'); requestPcmFallback('config_unsupported'); return false; }
     opusDecoder = new AudioDecoder({
       output: onOpusDecoded,
-      error: () => { opusErrored = true; reportOpusError('❌ Opusデコードエラー'); }
+      error: () => { opusErrored = true; reportOpusError('❌ Opusデコードエラー'); requestPcmFallback('decode_error'); }
     });
     opusDecoder.configure(config);
     opusConfig = config;
@@ -726,6 +747,7 @@ function ensureOpusDecoder(sampleRate, channels) {
   }).catch(() => {
     opusErrored = true;
     reportOpusError('❌ Opusデコーダ初期化に失敗');
+    requestPcmFallback('init_failed');
     return false;
   });
   return false;
@@ -769,7 +791,7 @@ function audioDataToBuffer(ad) {
   const planar = fmt.endsWith('-planar');
   const f32 = fmt.startsWith('f32');
   const s16 = fmt.startsWith('s16');
-  if (!f32 && !s16) return null;
+  if (!f32 && !s16) { requestPcmFallback('unsupported_audio_format'); return null; }
 
   const abuf = actx.createBuffer(channels, frames, sampleRate);
   if (planar) {

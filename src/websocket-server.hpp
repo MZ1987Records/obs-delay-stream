@@ -21,6 +21,7 @@
  *   OBS → Browser: {"type":"latency_result","avg_rtt":X,"one_way":Y,"min":A,"max":B,"samples":N}
  *   OBS → Browser: {"type":"apply_delay","ms":X}
  *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N}  ← 接続直後に送信
+ *   Browser → OBS: {"type":"audio_codec","mode":"pcm"}  ← Opus不可時のPCM要求
  *
  * v2.0.0 changes:
  *   - send_audio() を非ブロッキング化 (ASIO::post 経由で送信)
@@ -112,6 +113,7 @@ struct LatencyResult {
 struct ConnInfo {
     std::string stream_id; // 配信ID
     int         ch = -1;   // 0-indexed ch番号 (0〜9)
+    bool        force_pcm = false; // クライアント要求でPCM固定
 };
 
 // ============================================================
@@ -236,24 +238,35 @@ public:
             reset_opus_state();
         }
         // 送信先ハンドルのスナップショットを取得（短時間ロック）
-        std::vector<ConnHandle> targets;
+        std::vector<ConnHandle> targets_opus;
+        std::vector<ConnHandle> targets_pcm;
         std::shared_ptr<WsServer> srv;
+        const int default_codec = audio_codec_.load(std::memory_order_relaxed);
         {
             std::lock_guard<std::mutex> lk(mtx_);
             auto* cs = find_ch(stream_id_, ch);
             if (!cs || cs->conns.empty()) return;
-            targets.assign(cs->conns.begin(), cs->conns.end());
+            for (auto& hdl : cs->conns) {
+                auto it = conn_map_.find(hdl);
+                if (it == conn_map_.end()) continue;
+                if (!it->second.force_pcm && default_codec == 0) {
+                    targets_opus.push_back(hdl);
+                } else {
+                    targets_pcm.push_back(hdl);
+                }
+            }
             srv = server_ptr_;
         }
         if (!srv) return;
+        if (targets_opus.empty() && targets_pcm.empty()) return;
 
-        // --- Opus 優先、失敗時 PCM16 ---
-        if (audio_codec_.load(std::memory_order_relaxed) == 0) {
+        // --- Opus 優先、失敗時 PCM16（Opus対象のみ） ---
+        if (!targets_opus.empty() && default_codec == 0) {
             std::vector<std::shared_ptr<std::string>> pkts;
             if (encode_opus_packets(ch, data, frames, sample_rate, channels, pkts)) {
                 if (!pkts.empty()) {
                     try {
-                        srv->get_io_service().post([srv, targets = std::move(targets),
+                        srv->get_io_service().post([srv, targets = std::move(targets_opus),
                                                     pkts = std::move(pkts)]() mutable {
                             for (auto& pkt : pkts) {
                                 for (auto& hdl : targets) {
@@ -264,11 +277,16 @@ public:
                         });
                     } catch (...) {}
                 }
-                return; // Opus選択時はPCMにフォールバックしない
+                if (targets_pcm.empty()) return;
+            } else {
+                // Opus失敗時は対象をPCMへ回す
+                targets_pcm.insert(targets_pcm.end(), targets_opus.begin(), targets_opus.end());
             }
         }
 
-        // パケットを構築（PCM16フォールバック）
+        if (targets_pcm.empty()) return;
+
+        // パケットを構築（PCM16）
         size_t samples = frames * channels;
         size_t pcm_bytes = samples * sizeof(int16_t);
         auto pkt = std::make_shared<std::string>(16 + pcm_bytes, '\0');
@@ -288,7 +306,7 @@ public:
 
         // ASIO スレッドに送信を委譲（音声スレッドはブロックしない）
         try {
-            srv->get_io_service().post([srv, targets = std::move(targets),
+            srv->get_io_service().post([srv, targets = std::move(targets_pcm),
                                         pkt = std::move(pkt)]() {
                 for (auto& hdl : targets) {
                     try { srv->send(hdl, *pkt, websocketpp::frame::opcode::binary); }
@@ -765,23 +783,37 @@ private:
     void on_message(ConnHandle h, WsServer::message_ptr msg) {
         if (msg->get_opcode() != websocketpp::frame::opcode::text) return;
         const std::string& p = msg->get_payload();
-        if (p.find("\"pong\"") == std::string::npos) return;
+        if (p.find("\"pong\"") != std::string::npos) {
+            int seq = -1;
+            auto pos = p.find("\"seq\":");
+            if (pos != std::string::npos) seq = std::atoi(p.c_str() + pos + 6);
+            if (seq < 0) return;
 
-        int seq = -1;
-        auto pos = p.find("\"seq\":");
-        if (pos != std::string::npos) seq = std::atoi(p.c_str() + pos + 6);
-        if (seq < 0) return;
+            auto now = Clock::now();
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto it = conn_map_.find(h);
+            if (it == conn_map_.end()) return;
+            auto* cs = find_ch(it->second.stream_id, it->second.ch);
+            if (!cs) return;
+            auto pt = cs->ping_times.find(seq);
+            if (pt != cs->ping_times.end()) {
+                cs->rtt_samples.push_back(Ms(now - pt->second).count());
+                cs->ping_times.erase(pt);
+            }
+            return;
+        }
 
-        auto now = Clock::now();
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto it = conn_map_.find(h);
-        if (it == conn_map_.end()) return;
-        auto* cs = find_ch(it->second.stream_id, it->second.ch);
-        if (!cs) return;
-        auto pt = cs->ping_times.find(seq);
-        if (pt != cs->ping_times.end()) {
-            cs->rtt_samples.push_back(Ms(now - pt->second).count());
-            cs->ping_times.erase(pt);
+        if (p.find("\"audio_codec\"") != std::string::npos) {
+            int mode = -1;
+            if (p.find("\"mode\":\"pcm\"") != std::string::npos) mode = 1;
+            else if (p.find("\"mode\":\"opus\"") != std::string::npos) mode = 0;
+            if (mode < 0) return;
+
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto it = conn_map_.find(h);
+            if (it == conn_map_.end()) return;
+            it->second.force_pcm = (mode == 1);
+            return;
         }
     }
 
