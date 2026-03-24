@@ -27,6 +27,7 @@ OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネ
 ```
 C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\obs-delay-stream.dll
 C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\en-US.ini
+C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\ja-JP.ini
 ```
 
 3. OBS Studio を再起動
