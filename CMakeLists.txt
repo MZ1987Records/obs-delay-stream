@@ -119,5 +119,19 @@ else()
 endif()
 
 install(TARGETS obs-delay-stream LIBRARY DESTINATION "${OBS_PLUGIN_BIN_DIR}")
-install(FILES data/locale/en-US.ini DESTINATION "${OBS_PLUGIN_DATA_DIR}/locale")
+install(DIRECTORY data/locale/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/locale")
 install(FILES receiver/index.html DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver")
+
+# Copy data files next to DLL so OBS finds them during development
+add_custom_command(TARGET obs-delay-stream POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+    "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/locale"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/locale"
+    "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/locale"
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+    "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver"
+  COMMAND ${CMAKE_COMMAND} -E copy
+    "${CMAKE_CURRENT_SOURCE_DIR}/receiver/index.html"
+    "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver/"
+)
