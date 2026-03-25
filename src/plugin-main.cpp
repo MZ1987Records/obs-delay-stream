@@ -205,6 +205,23 @@ struct DelayStreamData {
     }
 };
 
+static void maybe_fill_cloudflared_path_from_auto(DelayStreamData* d) {
+    if (!d || !d->context) return;
+    obs_data_t* s = obs_source_get_settings(d->context);
+    const char* cur = obs_data_get_string(s, "cloudflared_exe_path");
+    bool is_auto = (!cur || !*cur || _stricmp(cur, "auto") == 0);
+    if (is_auto) {
+        std::string auto_path;
+        if (TunnelManager::get_auto_cloudflared_path_if_exists(auto_path)) {
+            std::string ui_path = TunnelManager::to_localappdata_env_path(auto_path);
+            if (!cur || _stricmp(cur, ui_path.c_str()) != 0) {
+                obs_data_set_string(s, "cloudflared_exe_path", ui_path.c_str());
+            }
+        }
+    }
+    obs_data_release(s);
+}
+
 static void request_properties_refresh(DelayStreamData* d) {
     if (!d || !d->context || !d->create_done.load()) return;
     if (d->in_get_props.load()) return; // prevent re-entry
@@ -376,6 +393,9 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         request_properties_refresh(d);
     };
+    d->tunnel.on_download_state = [d](bool) {
+        request_properties_refresh(d);
+    };
     d->router.on_conn_change = [d](const std::string& sid, int, size_t) {
         if (sid == d->get_stream_id()) request_properties_refresh(d);
     };
@@ -416,6 +436,7 @@ static void ds_destroy(void* data) {
     d->tunnel.on_url_ready  = nullptr;
     d->tunnel.on_error      = nullptr;
     d->tunnel.on_stopped    = nullptr;
+    d->tunnel.on_download_state = nullptr;
     d->router.clear_callbacks();
 
     delete d;
@@ -787,6 +808,8 @@ static obs_properties_t* ds_get_properties(void* data) {
         return props; // already building properties
     }
 
+    maybe_fill_cloudflared_path_from_auto(d);
+
     // (1) WebSocket
     {
         char ws_title[64];
@@ -844,14 +867,23 @@ static obs_properties_t* ds_get_properties(void* data) {
         obs_properties_add_text(grp, "ngrok_token",          T_("NgrokToken"),  OBS_TEXT_PASSWORD);
         obs_properties_add_text(grp, "cloudflared_exe_path", T_("CloudflaredExePath"), OBS_TEXT_DEFAULT);
         obs_property_set_modified_callback(type_p, cb_tunnel_type_changed);
+        int tunnel_type = 0;
         {
             obs_data_t* s = obs_source_get_settings(d->context);
+            tunnel_type = (int)obs_data_get_int(s, "tunnel_type");
             cb_tunnel_type_changed(grp, nullptr, s);
             obs_data_release(s);
         }
+        bool cloudflared_downloading =
+            (tunnel_type == 1) && d->tunnel.cloudflared_downloading();
         if (ts == TunnelState::Running) {
             obs_properties_add_button2(grp, "tunnel_stop_btn",
                 T_("TunnelStop"), cb_tunnel_stop, d);
+        } else if (cloudflared_downloading) {
+            obs_property_t* dl_p =
+                obs_properties_add_button2(grp, "tunnel_downloading_btn",
+                    T_("CloudflaredDownloading"), cb_tunnel_stop, d);
+            obs_property_set_enabled(dl_p, false);
         } else if (ts == TunnelState::Starting) {
             obs_property_t* starting_p =
                 obs_properties_add_button2(grp, "tunnel_starting_btn",

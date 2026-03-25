@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cctype>
 
 #include <string>
 #include <thread>
@@ -74,6 +75,28 @@ public:
     std::function<void(const std::string& url)>   on_url_ready;
     std::function<void(const std::string& reason)> on_error;
     std::function<void()>                          on_stopped;
+    std::function<void(bool downloading)>          on_download_state;
+
+    static bool get_auto_cloudflared_path_if_exists(std::string& out) {
+        out = get_default_cloudflared_path();
+        return file_exists(out);
+    }
+    static std::string to_localappdata_env_path(const std::string& path) {
+        std::string base = get_local_appdata_dir();
+        if (base.empty()) return path;
+        std::string base_norm = base;
+        if (!base_norm.empty() && base_norm.back() != '\\' && base_norm.back() != '/') {
+            base_norm.push_back('\\');
+        }
+        if (path.size() >= base_norm.size() &&
+            _strnicmp(path.c_str(), base_norm.c_str(), base_norm.size()) == 0) {
+            return std::string("%LocalAppData%\\") + path.substr(base_norm.size());
+        }
+        return path;
+    }
+    bool cloudflared_downloading() const {
+        return downloading_cloudflared_.load();
+    }
 
     TunnelManager()  { WSADATA w{}; WSAStartup(MAKEWORD(2,2), &w); }
     ~TunnelManager() { stop(); }
@@ -99,15 +122,30 @@ public:
         }
 
         if (type_ == TunnelType::Cloudflared) {
-            std::string resolved;
-            std::string err;
-            if (!resolve_cloudflared_path(exe_path, resolved, err)) {
-                set_error(err);
-                return false;
+            requested_exe_path_ = exe_path;
+            bool is_auto = exe_path.empty() || _stricmp(exe_path.c_str(), "auto") == 0;
+            if (!is_auto) {
+                std::string expanded = expand_allowed_env_vars(exe_path);
+                std::string resolved;
+                std::string err;
+                if (!resolve_cloudflared_path(expanded, resolved, err)) {
+                    set_error(err);
+                    return false;
+                }
+                exe_path_ = resolved;
+                set_cloudflared_downloading(false);
+            } else {
+                std::string auto_path = get_default_cloudflared_path();
+                if (file_exists(auto_path)) {
+                    exe_path_ = auto_path;
+                    set_cloudflared_downloading(false);
+                } else {
+                    exe_path_.clear();
+                    set_cloudflared_downloading(true);
+                }
             }
-            exe_path_ = resolved;
         } else {
-            exe_path_ = exe_path;
+            exe_path_ = expand_allowed_env_vars(exe_path);
         }
 
         state_ = TunnelState::Starting;
@@ -123,6 +161,7 @@ public:
         kill_child();
         if (worker_.joinable()) worker_.join();
         state_ = TunnelState::Stopped;
+        set_cloudflared_downloading(false);
         {
             std::lock_guard<std::mutex> lk(mtx_);
             url_.clear();
@@ -151,6 +190,64 @@ public:
     }
 
 private:
+    void set_cloudflared_downloading(bool v) {
+        bool prev = downloading_cloudflared_.exchange(v);
+        if (prev != v && on_download_state) on_download_state(v);
+    }
+
+    static std::string get_local_appdata_dir() {
+        char base[MAX_PATH] = {};
+        if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, base))) {
+            return std::string(base);
+        }
+        return "";
+    }
+    static std::string get_temp_dir() {
+        char tmp_path[MAX_PATH] = {};
+        DWORD n = GetTempPathA(MAX_PATH, tmp_path);
+        if (n > 0 && n < MAX_PATH) return std::string(tmp_path);
+        return "";
+    }
+    static std::string get_allowed_env_value(const std::string& name) {
+        std::string upper = name;
+        std::transform(upper.begin(), upper.end(), upper.begin(),
+            [](unsigned char c){ return (char)std::toupper(c); });
+        if (upper == "LOCALAPPDATA") {
+            return get_local_appdata_dir();
+        }
+        if (upper == "TEMP" || upper == "TMP") {
+            return get_temp_dir();
+        }
+        return "";
+    }
+    static std::string expand_allowed_env_vars(const std::string& path) {
+        std::string out;
+        out.reserve(path.size());
+        size_t i = 0;
+        while (i < path.size()) {
+            size_t p = path.find('%', i);
+            if (p == std::string::npos || p + 1 >= path.size()) {
+                out.append(path.substr(i));
+                break;
+            }
+            size_t q = path.find('%', p + 1);
+            if (q == std::string::npos) {
+                out.append(path.substr(i));
+                break;
+            }
+            out.append(path.substr(i, p - i));
+            std::string var = path.substr(p + 1, q - p - 1);
+            std::string val = get_allowed_env_value(var);
+            if (!val.empty()) {
+                out.append(val);
+            } else {
+                out.append(path.substr(p, q - p + 1));
+            }
+            i = q + 1;
+        }
+        return out;
+    }
+
     static bool file_exists(const std::string& path) {
         DWORD attr = GetFileAttributesA(path.c_str());
         if (attr == INVALID_FILE_ATTRIBUTES) return false;
@@ -158,15 +255,15 @@ private:
     }
 
     static std::string get_default_cloudflared_path() {
-        char base[MAX_PATH] = {};
-        if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, base))) {
-            std::string dir = std::string(base) + "\\obs-delay-stream\\bin";
+        std::string base = get_local_appdata_dir();
+        if (!base.empty()) {
+            std::string dir = base + "\\obs-delay-stream\\bin";
             SHCreateDirectoryExA(nullptr, dir.c_str(), nullptr);
             return dir + "\\cloudflared.exe";
         }
-        char tmp_path[MAX_PATH] = {};
-        GetTempPathA(MAX_PATH, tmp_path);
-        std::string dir = std::string(tmp_path) + "obs-delay-stream\\bin";
+        std::string tmp_path = get_temp_dir();
+        if (tmp_path.empty()) tmp_path = "C:\\Temp\\";
+        std::string dir = tmp_path + "obs-delay-stream\\bin";
         SHCreateDirectoryExA(nullptr, dir.c_str(), nullptr);
         return dir + "\\cloudflared.exe";
     }
@@ -195,8 +292,9 @@ private:
     {
         bool is_auto = requested.empty() || _stricmp(requested.c_str(), "auto") == 0;
         if (!is_auto) {
-            if (file_exists(requested)) {
-                out = requested;
+            std::string expanded = expand_allowed_env_vars(requested);
+            if (file_exists(expanded)) {
+                out = expanded;
                 return true;
             }
             err = "cloudflared.exe が見つかりません。パスを確認するか、空欄にして自動取得を使用してください。";
@@ -298,6 +396,19 @@ private:
     // メインループ
     // ============================================================
     void run_loop() {
+        if (type_ == TunnelType::Cloudflared && exe_path_.empty()) {
+            std::string resolved;
+            std::string err;
+            set_cloudflared_downloading(true);
+            if (!resolve_cloudflared_path(requested_exe_path_, resolved, err)) {
+                set_cloudflared_downloading(false);
+                set_error(err);
+                if (!stop_requested_) state_ = TunnelState::Error;
+                return;
+            }
+            exe_path_ = resolved;
+            set_cloudflared_downloading(false);
+        }
         bool ok = (type_ == TunnelType::Ngrok)
             ? run_ngrok()
             : run_cloudflared();
@@ -589,6 +700,7 @@ private:
     std::string  log_file_path_;
     TunnelType   type_          = TunnelType::Ngrok;
     std::string  exe_path_;
+    std::string  requested_exe_path_;
     std::string  token_;
     int          ws_port_       = 19000;
 
@@ -599,6 +711,7 @@ private:
 
     std::atomic<TunnelState> state_{TunnelState::Idle};
     std::atomic<bool>        stop_requested_{false};
+    std::atomic<bool>        downloading_cloudflared_{false};
     std::thread              worker_;
 
     std::mutex           proc_mtx_;
