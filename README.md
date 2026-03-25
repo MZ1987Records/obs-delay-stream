@@ -21,13 +21,15 @@ OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネ
 
 ## インストール
 
-1. [Releases](https://github.com/your-repo/obs-delay-stream/releases) から最新の `obs-delay-stream.dll` をダウンロード
+1. [Releases](https://github.com/burgermate/obs-delay-stream/releases) から最新の `obs-delay-stream.dll` をダウンロード
 2. 以下のフォルダに配置:
 
 ```
 C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\obs-delay-stream.dll
 C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\en-US.ini
 C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\ja-JP.ini
+C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\index.html
+C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\third_party\opus-decoder\
 ```
 
 3. OBS Studio を再起動
@@ -74,7 +76,7 @@ C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\ja-JP.ini
 
 ### 同期フロー（推奨手順）
 
-1. 全パフォーマーが `receiver/index.html` に接続済みであることを確認
+1. 全パフォーマーが受信ページに接続済みであることを確認
 2. 「同期フロー開始」ボタンを押す
 3. Step1: 自動計測完了後、提案値を確認して「一括反映」
 4. Step3: RTMP計測完了後、マスター遅延を確認して「反映して完了」
@@ -94,10 +96,10 @@ C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\ja-JP.ini
 
 ## 開発者向け情報
 
-ビルド手順・トラブルシューティング・ファイル構成については [docs/BUILDING.md](docs/BUILDING.md) を参照してください。
+ビルド手順・トラブルシューティング・ファイル構成については [BUILDING.md](BUILDING.md) を参照してください。
 
 ---
 
 ## ライセンス
 
-MIT License
+[GNU General Public License v2.0 or later](LICENSE) — サードパーティライセンスについては [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) を参照してください。

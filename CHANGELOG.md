@@ -1,14 +1,33 @@
 # Changelog
 
-## 2026-03-24
-- dfb437e Add Opus/PCM toggle and Opus WebSocket encoding
-- 604231a Embed receiver HTML and improve connection UX
-- d110cc3 Improve tunnel UX and localize settings
-- 63a662b Serve receiver index on websocket port
-- 717060a Ignore .claude workspace settings
-- 4e04976 Update OBS build setup and install layout
-- 2939cec Fix problems by GPT-5.2-Codex high
+## v2.0.0 — 2026-03-25
 
-## 2026-03-23
-- bb96dd0 Fix problems by Claude
-- d554f9e Initial commit
+### 新機能
+
+- **Opus エンコーディング対応** — WebSocket 配信の音声を Opus で圧縮して送信可能に。帯域を大幅に削減（PCM との切り替えも可能）
+- **WASM Opus デコーダ同梱** — ブラウザがネイティブ Opus デコードに対応していない場合でも、WASM フォールバックで再生可能
+- **受信ページの DLL 埋め込み** — receiver HTML を WebSocket ポート(19000)から直接配信。別途ファイルを配置する必要がなくなった
+- **日本語 UI 対応** — プラグイン設定画面が日本語で表示されるように（en-US / ja-JP）
+- **cloudflared 自動ダウンロード** — トンネル起動時に cloudflared.exe が未インストールなら自動取得。手動セットアップ不要に
+- **トンネル UX 改善** — トンネル種別やパス設定の UI をわかりやすく整理
+
+### ビルド・配布
+
+- GitHub Actions による自動ビルド・プレリリース作成（タグプッシュ時）
+- `build.bat` ワンクリックビルド対応（OBS 自動取得・ビルド・インストールまで一括）
+- `build.env` による設定カスタマイズ（OBS ソースパス、インストール先の切替など）
+
+### ライセンス・ドキュメント
+
+- GPL 2.0+ ライセンス明記、THIRD_PARTY_NOTICES 追加
+
+## v1.0.0 — 2026-03-23
+
+### 初期リリース
+
+- 音声遅延処理（ms 単位、ON/OFF 切替）
+- サブ CH x10 の WebSocket 配信（ch ごとに個別遅延設定）
+- 同期フロー（3 ステップで全パフォーマーの遅延を自動最適化）
+- パフォーマー遅延計測（ping/pong RTT）
+- RTMP 遅延計測（ハンドシェイク RTT）
+- ngrok / cloudflared トンネル内蔵（IP 隠蔽）

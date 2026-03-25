@@ -34,7 +34,7 @@ OBS_CI=1
 
 - OS: Windows 10 1909+ / Windows 11
 - Visual Studio 2022 17.13.2 以上（https://visualstudio.microsoft.com/）「C++によるデスクトップ開発」、Windows 11 SDK 10.0.22621.0 以上、C++ ATL for v143、MSVC v143 を含める
-- CMake 3.28 以上（https://cmake.org/download/）
+- CMake 3.16 以上（https://cmake.org/download/）
 - Git for Windows（https://gitforwindows.org/）
 - OBS Studio ソースコード（手動ビルドの場合のみ。`build.bat` は自動取得）
 
@@ -217,10 +217,22 @@ obs-delay-stream/
   third_party/            （git cloneで追加）
     websocketpp/
     asio/
+  cmake/
+    embed_html.cmake      receiver HTML埋め込み用CMakeヘルパー
   data/locale/
-    en-US.ini
+    en-US.ini             英語ロケール
+    ja-JP.ini             日本語ロケール
   receiver/
     index.html            パフォーマー受信ページ（Chrome用）
+    third_party/
+      opus-decoder/       Opus WASM デコーダ
+  build.bat               ワンクリックビルドスクリプト
+  build.env.sample        ビルド設定サンプル
+  release_port.bat        ポート解放ユーティリティ
   CMakeLists.txt
   README.md
+  BUILDING.md
+  LICENSE
+  CHANGELOG.md
+  THIRD_PARTY_NOTICES
 ```
