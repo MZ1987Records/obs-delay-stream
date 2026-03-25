@@ -259,8 +259,7 @@ echo ================================================================
 echo  SUCCESS: Build and install complete!
 echo ================================================================
 echo.
-echo  DLL : %PLUGIN_DEST%\obs-delay-stream.dll
-echo  INI : %LOCALE_DEST%\en-US.ini
+echo  Install dir: %OBS_INSTALL_DIR%\plugins\obs-delay-stream
 echo.
 echo  1. Open OBS Studio
 echo  2. Right-click audio source - Filters - click +
