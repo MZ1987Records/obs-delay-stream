@@ -21,15 +21,11 @@ OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネ
 
 ## インストール
 
-1. [Releases](https://github.com/burgermate/obs-delay-stream/releases) から最新の `obs-delay-stream.dll` をダウンロード
-2. 以下のフォルダに配置:
+1. [Releases](https://github.com/burgermate/obs-delay-stream/releases) から最新の `obs-delay-stream-vX.X.X.zip` をダウンロードして解凍
+2. `plugins/obs-delay-stream` を以下のフォルダに配置:
 
 ```
-C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\obs-delay-stream.dll
-C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\en-US.ini
-C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\ja-JP.ini
-C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\index.html
-C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\third_party\opus-decoder\
+C:\ProgramData\obs-studio\plugins\obs-delay-stream
 ```
 
 3. OBS Studio を再起動
@@ -48,11 +44,11 @@ C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\third_party\opu
 ### 初期設定
 
 1. フィルターパネルを開く
-2. **配信ID** を設定（例: `myshow2024`）。他の配信者と重複しない英数字
+2. **配信ID** を設定（例: `myshow2024`）
 
 ### パフォーマーへの接続案内
 
-配布用のURL（`https://.../#!/{sid}/{ch}`）を共有し、開いてもらう（入力不要）。
+配布用のURL（`https://.../#!/{sid}/{ch}`）を共有し、開いてもらう。
 
 ### トンネル使用時（IP隠蔽）
 
@@ -62,8 +58,8 @@ C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\third_party\opu
 3. `https://xxxx.trycloudflare.com` 形式のURLが発行される
 4. CH別URL（`https://.../#!/{sid}/{ch}`）をコピーしてパフォーマーに共有
 
-> **注意:** セキュリティソフトが `api.trycloudflare.com` をブロックしてトンネル接続に失敗することがあります。
-> その場合は `api.trycloudflare.com` を例外（許可）に追加してください。
+> **注意:** セキュリティソフトが `*.trycloudflare.com` をブロックしてトンネル接続に失敗することがあります。
+> その場合は `*.trycloudflare.com` を例外（許可）に追加してください。
 
 ※ 自動ダウンロードの保存先:
 `%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared.exe`
