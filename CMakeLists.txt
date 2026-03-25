@@ -43,7 +43,9 @@ find_package(libobs REQUIRED HINTS "${OBS_DIR}/build_x64/libobs" "${OBS_DIR}/bui
 add_library(obs-delay-stream MODULE src/plugin-main.cpp)
 
 # ---- Embed receiver/index.html into the plugin ----
-set(RECEIVER_HTML_IN  "${CMAKE_CURRENT_SOURCE_DIR}/receiver/index.html")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/receiver/index.html"
+               "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html" @ONLY)
+set(RECEIVER_HTML_IN  "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html")
 set(RECEIVER_HTML_OUT "${CMAKE_CURRENT_BINARY_DIR}/generated/receiver_index_html.hpp")
 
 add_custom_command(
@@ -103,6 +105,7 @@ target_compile_definitions(obs-delay-stream PRIVATE
   NOMINMAX
   # Tell SIMDe to NOT redefine standard integer types
   SIMDE_NO_NATIVE
+  PLUGIN_VERSION="${PROJECT_VERSION}"
 )
 
 # Force MSVC to treat source as UTF-8
@@ -120,7 +123,7 @@ endif()
 
 install(TARGETS obs-delay-stream LIBRARY DESTINATION "${OBS_PLUGIN_BIN_DIR}")
 install(DIRECTORY data/locale/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/locale")
-install(FILES receiver/index.html DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html" DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver")
 install(DIRECTORY receiver/third_party/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver/third_party")
 
 # Copy data files next to DLL so OBS finds them during development
@@ -133,7 +136,7 @@ add_custom_command(TARGET obs-delay-stream POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory
     "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver"
   COMMAND ${CMAKE_COMMAND} -E copy
-    "${CMAKE_CURRENT_SOURCE_DIR}/receiver/index.html"
+    "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html"
     "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver/"
   COMMAND ${CMAKE_COMMAND} -E make_directory
     "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver/third_party"

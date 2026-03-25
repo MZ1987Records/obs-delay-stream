@@ -102,8 +102,8 @@ jobs:
           name: obs-delay-stream
           path: obs-delay-stream-${{ github.ref_name }}.zip
 
-      - name: Create prerelease
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
+          draft: true
           files: obs-delay-stream-${{ github.ref_name }}.zip

@@ -31,7 +31,8 @@ Makefile
 /third_party/
 
 # IDE / Editor
-.claude/
+.claude/*
+!.claude/skills/
 .vs/
 .vscode/
 .idea/

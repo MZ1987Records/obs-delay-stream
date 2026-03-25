@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * websocket-server.hpp  v2.0.0
+ * websocket-server.hpp
  *
  * StreamRouter: 単一ポート(19000)でパスルーティングを行う WebSocketサーバー
  *
@@ -23,7 +23,7 @@
  *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N}  ← 接続直後に送信
  *   Browser → OBS: {"type":"audio_codec","mode":"pcm"}  ← Opus不可時のPCM要求
  *
- * v2.0.0 changes:
+ * v2.0 changes:
  *   - send_audio() を非ブロッキング化 (ASIO::post 経由で送信)
  *   - .detach() を廃止、全計測スレッドを join() 管理
  *   - stop() の正しい停止順序

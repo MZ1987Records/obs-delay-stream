@@ -1,6 +1,6 @@
 #pragma once
 /*
- * sync-flow.hpp  v2.0.0
+ * sync-flow.hpp
  *
  * 3ステップ同期フローを管理するクラス
  *

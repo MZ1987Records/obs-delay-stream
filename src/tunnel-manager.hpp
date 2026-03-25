@@ -1,6 +1,6 @@
 #pragma once
 /*
- * tunnel-manager.hpp  v2.0.0
+ * tunnel-manager.hpp
  *
  * ngrok または cloudflared を子プロセスとして起動し、
  * 取得したパブリックURL (wss://) を返す。

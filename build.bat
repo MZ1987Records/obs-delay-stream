@@ -82,7 +82,6 @@ goto :build_obs
 :obs_found
 echo   OBS library: found at %OBS_SOURCE_DIR%
 goto :step1_libs
-
 :build_obs
 if not exist "%PLUGIN_DIR%\third_party" mkdir "%PLUGIN_DIR%\third_party"
 if not exist "%OBS_SOURCE_DIR%\CMakeLists.txt" (
@@ -218,9 +217,6 @@ if exist "%PLUGIN_DIR%\receiver\third_party" (
         goto :error
     )
 )
-
-:: Install port release helper script
-copy /Y "%PLUGIN_DIR%\release_port.bat" "%OBS_INSTALL_DIR%\release_port.bat" >nul 2>&1
 
 echo.
 echo ================================================================
