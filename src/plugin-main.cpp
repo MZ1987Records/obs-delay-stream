@@ -702,8 +702,18 @@ static bool cb_ws_enabled_changed(void* priv, obs_properties_t*, obs_property_t*
     request_properties_refresh(d);
     return false;
 }
-static bool cb_stream_id_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t*) {
-    (void)priv; return false;
+static bool cb_stream_id_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
+    (void)priv;
+    if (!props || !settings) return false;
+    const char* sid = obs_data_get_string(settings, "stream_id");
+    bool has_sid = (sid && *sid);
+    if (auto* p = obs_properties_get(props, "ws_server_start_btn")) {
+        obs_property_set_enabled(p, has_sid);
+    }
+    if (auto* p = obs_properties_get(props, "ws_server_start_note_sid")) {
+        obs_property_set_visible(p, !has_sid);
+    }
+    return true;
 }
 static bool cb_host_ip_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t*) {
     (void)priv; return false;
@@ -810,7 +820,34 @@ static obs_properties_t* ds_get_properties(void* data) {
 
     maybe_fill_cloudflared_path_from_auto(d);
 
-    // (1) WebSocket
+    bool has_sid = false;
+    {
+        obs_data_t* s = obs_source_get_settings(d->context);
+        if (s) {
+            const char* sid = obs_data_get_string(s, "stream_id");
+            has_sid = (sid && *sid);
+            obs_data_release(s);
+        }
+    }
+
+    // (1) Stream ID / IP
+    {
+        obs_properties_t* grp = obs_properties_create();
+        obs_property_t* sid_p =
+            obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
+        obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
+        { char info[128]; snprintf(info, sizeof(info), T_("AutoIpFmt"), d->auto_ip.c_str());
+          obs_properties_add_text(grp, "auto_ip_info", info, OBS_TEXT_INFO); }
+        obs_property_t* ip_p =
+            obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
+        if (d->router_running.load()) {
+            obs_property_set_enabled(sid_p, false);
+            obs_property_set_enabled(ip_p, false);
+        }
+        obs_properties_add_group(props, "grp_stream", T_("GroupStreamId"), OBS_GROUP_NORMAL, grp);
+    }
+
+    // (2) WebSocket
     {
         char ws_title[64];
         if (d->router_running.load())
@@ -828,25 +865,23 @@ static obs_properties_t* ds_get_properties(void* data) {
             OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
         obs_property_list_add_int(codec_p, "Opus (WebCodecs)", 0);
         obs_property_list_add_int(codec_p, T_("CodecPcm"), 1);
+        if (d->router_running.load()) {
+            obs_property_set_enabled(codec_p, false);
+        }
 
         if (d->router_running.load()) {
             obs_properties_add_button2(grp, "ws_server_stop_btn",
                 T_("WsServerStop"), cb_ws_server_stop, d);
         } else {
-            obs_properties_add_button2(grp, "ws_server_start_btn",
+            obs_property_t* start_p = obs_properties_add_button2(grp, "ws_server_start_btn",
                 T_("WsServerStart"), cb_ws_server_start, d);
+            obs_property_set_enabled(start_p, has_sid);
+            obs_property_t* note_p =
+                obs_properties_add_text(grp, "ws_server_start_note_sid",
+                    T_("WsServerStartNoteSid"), OBS_TEXT_INFO);
+            obs_property_set_visible(note_p, !has_sid);
         }
         obs_properties_add_group(props, "grp_ws", ws_title, OBS_GROUP_NORMAL, grp);
-    }
-
-    // (2) Stream ID / IP
-    {
-        obs_properties_t* grp = obs_properties_create();
-        obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
-        { char info[128]; snprintf(info, sizeof(info), T_("AutoIpFmt"), d->auto_ip.c_str());
-          obs_properties_add_text(grp, "auto_ip_info", info, OBS_TEXT_INFO); }
-        obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
-        obs_properties_add_group(props, "grp_stream", T_("GroupStreamId"), OBS_GROUP_NORMAL, grp);
     }
 
     // (3) Tunnel
