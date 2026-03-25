@@ -123,7 +123,7 @@ endif()
 
 install(TARGETS obs-delay-stream LIBRARY DESTINATION "${OBS_PLUGIN_BIN_DIR}")
 install(DIRECTORY data/locale/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/locale")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html" DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html" receiver/ui.css DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver")
 install(DIRECTORY receiver/third_party/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver/third_party")
 
 # Copy data files next to DLL so OBS finds them during development

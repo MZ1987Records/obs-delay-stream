@@ -13,11 +13,14 @@ rem - OBS_SOURCE_DIR: OBS Studio のソースパス（例: D:\dev\obs-studio）�
 rem - OBS_LEGACY_INSTALL: 1=Program Files のレガシー配置, 0=ProgramData の推奨配置（未指定は0）
 rem - OBS_CI: 1=CIモード（インストールとpauseを無効化）
 rem - build.env に KEY=VALUE 形式で記述（空白を入れない）。例は build.env.sample
+rem オプション:
+rem - --receiver-only / --receiver / /receiver-only / /receiver : receiver のみインストール
 
 for %%I in ("%~dp0.") do set "PLUGIN_DIR=%%~fI"
 set "OBS_SOURCE_DIR="
 set "OBS_LEGACY_INSTALL="
 set "OBS_CI="
+set "RECEIVER_ONLY=0"
 set "ENV_FILE=%PLUGIN_DIR%\build.env"
 if exist "%ENV_FILE%" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
@@ -32,11 +35,35 @@ if exist "%ENV_FILE%" (
         )
     )
 )
-if not "%~1"=="" (
-    set "OBS_SOURCE_DIR=%~1"
-) else if "%OBS_SOURCE_DIR%"=="" (
-    set "OBS_SOURCE_DIR=%PLUGIN_DIR%\third_party\obs-studio"
+:parse_args
+if "%~1"=="" goto :args_done
+if /I "%~1"=="--receiver-only" (
+    set "RECEIVER_ONLY=1"
+    shift
+    goto :parse_args
 )
+if /I "%~1"=="--receiver" (
+    set "RECEIVER_ONLY=1"
+    shift
+    goto :parse_args
+)
+if /I "%~1"=="/receiver-only" (
+    set "RECEIVER_ONLY=1"
+    shift
+    goto :parse_args
+)
+if /I "%~1"=="/receiver" (
+    set "RECEIVER_ONLY=1"
+    shift
+    goto :parse_args
+)
+if "%OBS_SOURCE_DIR%"=="" (
+    set "OBS_SOURCE_DIR=%~1"
+)
+shift
+goto :parse_args
+:args_done
+if "%OBS_SOURCE_DIR%"=="" set "OBS_SOURCE_DIR=%PLUGIN_DIR%\third_party\obs-studio"
 set OBS_INSTALL_DIR=C:\ProgramData\obs-studio
 if "%OBS_LEGACY_INSTALL%"=="" set OBS_LEGACY_INSTALL=0
 if "%OBS_LEGACY_INSTALL%"=="1" set OBS_INSTALL_DIR=C:\Program Files\obs-studio
@@ -45,6 +72,8 @@ set CI_MODE=0
 if /I "%OBS_CI%"=="1" set CI_MODE=1
 if /I "%CI%"=="true" set CI_MODE=1
 if /I "%CI%"=="1" set CI_MODE=1
+
+if "%RECEIVER_ONLY%"=="1" goto :receiver_only
 
 echo [Step 0] Checking environment...
 
@@ -82,6 +111,7 @@ goto :build_obs
 :obs_found
 echo   OBS library: found at %OBS_SOURCE_DIR%
 goto :step1_libs
+
 :build_obs
 if not exist "%PLUGIN_DIR%\third_party" mkdir "%PLUGIN_DIR%\third_party"
 if not exist "%OBS_SOURCE_DIR%\CMakeLists.txt" (
@@ -204,7 +234,7 @@ if errorlevel 1 (
     goto :error
 )
 
-copy /Y "%PLUGIN_DIR%\receiver\index.html" "%RECEIVER_DEST%\"
+copy /Y "%BUILD_DIR%\receiver\index.html" "%RECEIVER_DEST%\"
 if errorlevel 1 (
     echo [ERROR] Failed to copy receiver index.html.
     goto :error
@@ -236,6 +266,53 @@ echo  1. Open OBS Studio
 echo  2. Right-click audio source - Filters - click +
 echo  3. Select "Delay Stream (delay + WebSocket)"
 echo.
+pause
+exit /b 0
+
+:receiver_only
+echo.
+echo ================================================================
+echo  [Receiver Only] Installing receiver files...
+echo ================================================================
+echo.
+
+if "%OBS_LEGACY_INSTALL%"=="1" goto :receiver_legacy_paths
+set RECEIVER_DEST=%OBS_INSTALL_DIR%\plugins\obs-delay-stream\data\receiver
+goto :receiver_paths_set
+:receiver_legacy_paths
+set RECEIVER_DEST=%OBS_INSTALL_DIR%\data\obs-plugins\obs-delay-stream\receiver
+:receiver_paths_set
+
+if not exist "%RECEIVER_DEST%" mkdir "%RECEIVER_DEST%"
+
+copy /Y "%PLUGIN_DIR%\receiver\index.html" "%RECEIVER_DEST%\"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver index.html.
+    goto :error
+)
+
+copy /Y "%PLUGIN_DIR%\receiver\ui.css" "%RECEIVER_DEST%\"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver ui.css.
+    goto :error
+)
+
+if exist "%PLUGIN_DIR%\receiver\third_party" (
+    xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
+    if errorlevel 1 (
+        echo [ERROR] Failed to copy receiver third_party files.
+        goto :error
+    )
+)
+
+echo.
+echo ================================================================
+echo  SUCCESS: Receiver files installed.
+echo ================================================================
+echo.
+echo  Receiver : %RECEIVER_DEST%
+echo.
+if "%CI_MODE%"=="1" exit /b 0
 pause
 exit /b 0
 

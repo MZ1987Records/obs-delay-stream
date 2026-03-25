@@ -130,6 +130,9 @@ struct ChannelState {
     std::atomic<bool>                measuring{false};
     LatencyResult                    last_result;
 
+    // 最後に適用された遅延 (ms)。負値=未設定
+    double                           last_applied_delay{-1.0};
+
     // コールバック (計測完了時)
     std::function<void(const std::string& stream_id, int ch, LatencyResult)> on_result;
 };
@@ -383,6 +386,11 @@ public:
 
     // 遅延反映通知
     void notify_apply_delay(int ch, double ms) {
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto& cs = ch_map_[make_key(stream_id_, ch)];
+            cs.last_applied_delay = ms;
+        }
         char buf[64];
         snprintf(buf, sizeof(buf), "{\"type\":\"apply_delay\",\"ms\":%.1f}", ms);
         broadcast_text(stream_id_, ch, buf);
@@ -788,6 +796,8 @@ private:
 
         std::function<void(const std::string&, int, size_t)> cb;
         size_t count = 0;
+        LatencyResult cached_result;
+        double cached_delay = -1.0;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             conn_map_[h] = { sid, ch };
@@ -795,15 +805,39 @@ private:
             cs.conns.insert(h);
             count = cs.conns.size();
             cb = on_conn_change;
+            cached_result = cs.last_result;
+            cached_delay  = cs.last_applied_delay;
         }
         if (cb) cb(sid, ch, count);
 
+        // session_info
         char info[256];
         snprintf(info, sizeof(info),
             "{\"type\":\"session_info\",\"stream_id\":\"%s\",\"ch\":%d}",
             sid.c_str(), ch + 1);
         try { srv->send(h, std::string(info), websocketpp::frame::opcode::text); }
         catch (...) {}
+
+        // 計測済みの遅延情報があれば再接続クライアントへ即送信
+        if (cached_result.valid) {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                "{\"type\":\"latency_result\","
+                "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
+                "\"min\":%.1f,\"max\":%.1f,\"samples\":%d}",
+                cached_result.avg_rtt_ms, cached_result.avg_one_way,
+                cached_result.min_rtt_ms, cached_result.max_rtt_ms,
+                cached_result.samples);
+            try { srv->send(h, std::string(buf), websocketpp::frame::opcode::text); }
+            catch (...) {}
+        }
+        if (cached_delay >= 0.0) {
+            char buf[64];
+            snprintf(buf, sizeof(buf),
+                "{\"type\":\"apply_delay\",\"ms\":%.1f}", cached_delay);
+            try { srv->send(h, std::string(buf), websocketpp::frame::opcode::text); }
+            catch (...) {}
+        }
     }
 
     void on_close(ConnHandle h) {
