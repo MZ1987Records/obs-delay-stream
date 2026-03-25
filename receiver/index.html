@@ -304,6 +304,14 @@
     const CONNECT_TIMEOUT_MS = 7000;
     let syncAvailable = false;
 
+    // 制御メッセージ / 再同期の状態
+    let pingCount = 0;
+    let autoSyncTimer = null;
+    let syncCountdown = 0;
+    let syncTickTimer = null;
+    let currentSyncInterval = 0;  // 0=オフ
+    let pendingSyncInterval = 0;
+
     // WebCodecs (Opus)
     let opusDecoder = null;
     let opusConfig = null;
@@ -967,13 +975,6 @@
     // ============================================================
     // 制御メッセージ
     // ============================================================
-    let pingCount = 0;
-    let autoSyncTimer = null;
-    let syncCountdown = 0;
-    let syncTickTimer = null;
-    let currentSyncInterval = 0;  // 0=オフ
-    let pendingSyncInterval = 0;
-
     function handleControl(text) {
       let msg; try { msg = JSON.parse(text); } catch { return; }
 
@@ -1090,24 +1091,24 @@
       document.getElementById('latencyContent').innerHTML = `
     <div class="latency-grid">
       <div class="metric has-text-centered">
-        <span class="val" style="color:#7eb8f7">${r.one_way.toFixed(1)}</span>
-        <span class="unit">ms</span>
-        <div class="lbl">推定片道遅延 (RTT÷2)</div>
+        <span class="val ${colCls}">${r.one_way.toFixed(1)}</span>
+        <span class="unit has-text-grey">ms</span>
+        <div class="lbl has-text-grey">推定片道遅延 (RTT÷2)</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val ${colCls}">${r.avg_rtt.toFixed(1)}</span>
-        <span class="unit">ms RTT</span>
-        <div class="lbl">平均往復遅延 (${lbl})</div>
+        <span class="unit has-text-grey">ms RTT</span>
+        <div class="lbl has-text-grey">平均往復遅延 (${lbl})</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val" style="color:#888">${r.min.toFixed(1)}</span>
-        <span class="unit">ms</span>
-        <div class="lbl">最小RTT</div>
+        <span class="unit has-text-grey">ms</span>
+        <div class="lbl has-text-grey">最小RTT</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val" style="color:#888">${r.max.toFixed(1)}</span>
-        <span class="unit">ms</span>
-        <div class="lbl">最大RTT</div>
+        <span class="unit has-text-grey">ms</span>
+        <div class="lbl has-text-grey">最大RTT</div>
       </div>
     </div>
     <div class="notification is-info py-3 px-4 mt-3" id="waitingApply">
