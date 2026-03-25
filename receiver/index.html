@@ -1,331 +1,193 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html class="has-navbar-fixed-top" lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Delay Stream Receiver</title>
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: 'Segoe UI', sans-serif;
-  background: #0a0a0f; color: #e0e0e0;
-  min-height: 100vh; padding: 20px;
-  display: flex; flex-direction: column; align-items: center;
-}
-
-/* ヘッダー */
-.header {
-  width: 100%; max-width: 520px;
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 20px; padding-top: 8px;
-}
-.header h1 { font-size: 1.25rem; color: #7eb8f7; }
-.header .version { font-size: 0.72rem; color: #444;
-  background: #1a1a1a; border-radius: 4px; padding: 2px 6px; }
-
-/* セッションバッジ */
-.session-badge {
-  width: 100%; max-width: 520px;
-  display: flex; gap: 10px; margin-bottom: 16px;
-}
-.badge {
-  flex: 1; background: #111; border: 1px solid #222;
-  border-radius: 10px; padding: 12px 16px;
-  display: flex; flex-direction: column; gap: 3px;
-}
-.badge.active { border-color: #2563eb; }
-.badge .label { font-size: 0.7rem; color: #555; text-transform: uppercase;
-  letter-spacing: .06em; }
-.badge .value { font-size: 1.15rem; font-weight: 700; color: #7eb8f7; }
-.badge .value.unset { color: #333; font-style: italic; font-weight: 400; }
-
-/* カード */
-.card {
-  background: #111; border: 1px solid #1e1e1e;
-  border-radius: 12px; padding: 20px 24px;
-  width: 100%; max-width: 520px; margin-bottom: 14px;
-}
-.card-title {
-  font-size: 0.72rem; color: #555; text-transform: uppercase;
-  letter-spacing: .08em; margin-bottom: 14px;
-  display: flex; align-items: center; gap: 8px;
-}
-.card-title::after {
-  content: ''; flex: 1; height: 1px; background: #1e1e1e;
-}
-
-/* フォーム */
-label { font-size: 0.8rem; color: #888; display: block; margin-bottom: 5px; }
-.field { margin-bottom: 14px; }
-input[type=text], input[type=number] {
-  width: 100%; background: #0d0d0d; border: 1px solid #222;
-  border-radius: 8px; padding: 9px 12px; color: #fff; font-size: 0.95rem;
-}
-input:focus { outline: none; border-color: #2563eb; }
-.row { display: flex; gap: 10px; }
-.row .field { flex: 1; }
-.row .field.narrow { flex: 0 0 135px; }
-
-/* ボタン */
-.btn {
-  width: 100%; padding: 11px; border-radius: 8px; border: none;
-  font-size: 0.95rem; cursor: pointer; transition: all .15s;
-  margin-bottom: 8px;
-}
-.btn-primary  { background: #2563eb; color: #fff; }
-.btn-primary:hover:not(:disabled) { background: #1d4ed8; }
-.btn-danger   { background: #7f1d1d; color: #fca5a5; box-shadow: 0 0 0 1px #b91c1c inset; }
-.btn-danger:hover:not(:disabled) { background: #991b1b; color: #fee2e2; }
-.btn-danger:active:not(:disabled) { transform: translateY(1px); }
-.btn-danger:disabled { background: #1a1a1a; color: #666; box-shadow: none; }
-.btn:disabled { opacity: .35; cursor: default; }
-
-/* ステータス */
-.status {
-  padding: 9px 14px; border-radius: 8px; font-size: 0.85rem;
-  text-align: center; background: #0d0d0d; border: 1px solid #1e1e1e;
-  color: #444; margin-top: 8px;
-}
-.status.ok  { border-color: #16a34a; color: #4ade80; }
-.status.err { border-color: #dc2626; color: #f87171; }
-.status.mea { border-color: #d97706; color: #fbbf24; }
-
-/* ==============================
-   音量コントロール
-   ============================== */
-.volume-section { margin-top: 6px; }
-.volume-row {
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 8px;
-}
-.mute-btn {
-  width: 42px; height: 42px; border-radius: 8px; border: none;
-  background: #1a1a1a; color: #aaa; font-size: 1.2rem;
-  cursor: pointer; transition: all .15s; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-}
-.mute-btn:hover { background: #2a2a2a; }
-.mute-btn.muted { background: #7f1d1d; color: #fca5a5; }
-
-.vol-slider-wrap { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.vol-labels { display: flex; justify-content: space-between;
-  font-size: 0.7rem; color: #444; }
-
-input[type=range] {
-  width: 100%; -webkit-appearance: none; height: 6px;
-  background: #222; border-radius: 3px; outline: none;
-}
-input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 18px; height: 18px;
-  border-radius: 50%; background: #2563eb; cursor: pointer;
-  transition: background .1s;
-}
-input[type=range]::-webkit-slider-thumb:hover { background: #3b82f6; }
-input[type=range].muted-range::-webkit-slider-thumb { background: #555; }
-
-.db-display {
-  min-width: 64px; text-align: right;
-  font-size: 1.1rem; font-weight: 700; color: #7eb8f7;
-  font-variant-numeric: tabular-nums;
-}
-.db-display.muted { color: #444; }
-.db-display.clip  { color: #ef4444; }
-
-/* VUメーター */
-.meter-wrap { display: flex; gap: 3px; height: 36px;
-  align-items: flex-end; margin-top: 10px; }
-.bar { flex: 1; border-radius: 2px 2px 0 0;
-  min-height: 2px; transition: height .04s; }
-
-/* 計測パネル */
-.latency-card {
-  background: #0d0d0d; border: 1px solid #1e1e1e;
-  border-radius: 10px; padding: 16px 18px;
-}
-.latency-card.active { border-color: #1d4ed8; }
-.latency-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-.metric { background: #111; border-radius: 8px; padding: 10px 12px; }
-.metric .val { font-size: 1.4rem; font-weight: 700; color: #7eb8f7; }
-.metric.hi .val { color: #4ade80; }
-.metric .unit { font-size: 0.7rem; color: #444; }
-.metric .lbl  { font-size: 0.72rem; color: #666; margin-top: 2px; }
-.recommend {
-  margin-top: 10px; padding: 9px 12px; border-radius: 8px;
-  background: #0a1f14; border: 1px solid #14532d;
-  font-size: 0.82rem; color: #86efac; line-height: 1.6;
-}
-.measuring-box { text-align: center; padding: 16px 0; color: #fbbf24; font-size: 0.88rem; }
-.dots span { animation: blink 1s infinite; display: inline-block; }
-.dots span:nth-child(2) { animation-delay: .25s; }
-.dots span:nth-child(3) { animation-delay: .5s; }
-@keyframes blink { 0%,100%{opacity:.15} 50%{opacity:1} }
-
-/* 情報フッター */
-.info-footer {
-  display: flex; justify-content: space-between; flex-wrap: wrap;
-  gap: 6px; font-size: 0.72rem; color: #333;
-  margin-top: 12px; padding-top: 10px; border-top: 1px solid #1a1a1a;
-}
-.info-footer span { color: #555; }
-
-.btn-sync {
-  background: #1a2a1a; color: #4ade80; border: 1px solid #166534;
-}
-.btn-sync:hover:not(:disabled) { background: #14532d; }
-.btn-sync:disabled { opacity: .35; cursor: default; }
-
-.auto-sync-section {
-  margin-top: 10px; padding: 12px 14px; border-radius: 10px;
-  background: #0a1a0a; border: 1px solid #1a2a1a;
-}
-.auto-sync-title {
-  font-size: 0.72rem; color: #4ade80; text-transform: uppercase;
-  letter-spacing: .06em; margin-bottom: 10px;
-  display: flex; align-items: center; justify-content: space-between;
-}
-.auto-sync-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
-}
-.sync-option {
-  display: flex; align-items: center; gap: 7px;
-  padding: 7px 10px; border-radius: 7px; cursor: pointer;
-  border: 1px solid #1a2a1a; background: #0d0d0d;
-  transition: all .15s; font-size: 0.82rem; color: #666;
-}
-.sync-option:hover:not(.disabled) { border-color: #166534; color: #4ade80; background: #0a1a0a; }
-.sync-option.active { border-color: #16a34a; color: #4ade80; background: #052e16; }
-.sync-option.disabled { opacity: .35; cursor: default; }
-.sync-option input[type=radio] { accent-color: #4ade80; width: 14px; height: 14px; }
-.sync-countdown { font-size: 0.72rem; color: #4ade80; font-variant-numeric: tabular-nums; }
-
-.tip { max-width: 520px; margin-top: 16px; font-size: 0.72rem;
-  color: #2a2a2a; text-align: center; line-height: 1.7; }
-</style>
+<link rel="stylesheet" href="third_party/bulma.min.css">
+<link rel="stylesheet" href="third_party/fontawesome/css/all.min.css">
+<link rel="stylesheet" href="ui.css">
 </head>
 <body>
-<!-- ヘッダー -->
-<div class="header">
-  <h1>🎵 Delay Stream Receiver</h1>
-  <span class="version">v@PROJECT_VERSION@</span>
-</div>
-
-<!-- セッションバッジ -->
-<div class="session-badge">
-  <div class="badge" id="badgeId">
-    <span class="label">配信 ID</span>
-    <span class="value unset" id="badgeIdVal">未接続</span>
-  </div>
-  <div class="badge" id="badgeCh">
-    <span class="label">チャンネル</span>
-    <span class="value unset" id="badgeChVal">—</span>
-  </div>
-</div>
-
-<!-- 接続設定 -->
-<div class="card">
-  <div class="card-title">接続設定</div>
-
-  <div class="row">
-    <div class="field">
-      <label>配信ID (半角英数字)</label>
-      <input type="text" id="sidInput" placeholder="myshow2024">
-    </div>
-    <div class="field narrow">
-      <label>CH番号 (1〜10)</label>
-      <input type="number" id="chInput" min="1" max="10" value="1" style="text-align:center">
-    </div>
-  </div>
-
-  <div class="field" style="margin-bottom:0">
-    <label style="font-size:.72rem;color:#444">
-      受信URL: <span id="urlPreview" style="color:#555">—</span>
-    </label>
-  </div>
-
-  <div style="margin-top:12px">
-    <button class="btn btn-primary" id="connectBtn" onclick="connect()">▶ 接続して受信開始</button>
-    <button class="btn btn-danger"  id="stopBtn"    onclick="disconnect()" disabled>■ 停止</button>
-    <button class="btn btn-sync"    id="syncBtn"    onclick="resync()" disabled>🔄 今すぐ再同期</button>
-  </div>
-  <div class="auto-sync-section">
-    <div class="auto-sync-title">
-      <span>🔄 自動再同期</span>
-      <span class="sync-countdown" id="syncCountdown"></span>
-    </div>
-    <div class="auto-sync-grid" id="syncOptions">
-      <label class="sync-option disabled" id="opt_off">
-        <input type="radio" name="syncInterval" value="0" checked onchange="onSyncIntervalChange(0)" disabled>
-        オフ
-      </label>
-      <label class="sync-option disabled" id="opt_5">
-        <input type="radio" name="syncInterval" value="5" onchange="onSyncIntervalChange(5)" disabled>
-        5秒ごと
-      </label>
-      <label class="sync-option disabled" id="opt_10">
-        <input type="radio" name="syncInterval" value="10" onchange="onSyncIntervalChange(10)" disabled>
-        10秒ごと
-      </label>
-      <label class="sync-option disabled" id="opt_20">
-        <input type="radio" name="syncInterval" value="20" onchange="onSyncIntervalChange(20)" disabled>
-        20秒ごと
-      </label>
-      <label class="sync-option disabled" id="opt_30">
-        <input type="radio" name="syncInterval" value="30" onchange="onSyncIntervalChange(30)" disabled>
-        30秒ごと
-      </label>
-      <label class="sync-option disabled" id="opt_60">
-        <input type="radio" name="syncInterval" value="60" onchange="onSyncIntervalChange(60)" disabled>
-        60秒ごと
-      </label>
-    </div>
-  </div>
-  <div class="status" id="statusBar">待機中 — 接続ボタンを押してください</div>
-</div>
-
-<!-- 音量コントロール -->
-<div class="card">
-  <div class="card-title">音量コントロール</div>
-  <div class="volume-section">
-    <div class="volume-row">
-      <button class="mute-btn" id="muteBtn" onclick="toggleMute()" title="ミュート">🔊</button>
-      <div class="vol-slider-wrap">
-        <div class="vol-labels">
-          <span>-∞</span><span>-40dB</span><span>-20dB</span><span>-6dB</span><span>0dB</span>
-        </div>
-        <input type="range" id="volSlider" min="0" max="100" value="80"
-               oninput="onVolumeChange(this.value)">
+<nav class="navbar is-dark is-fixed-top ds-navbar" role="navigation" aria-label="main navigation">
+  <div class="container is-max-desktop">
+    <div class="navbar-brand is-flex-grow-1">
+      <div class="navbar-item ds-navbar-title">
+        <span class="title is-6">Delay Stream Receiver</span>
       </div>
-      <div class="db-display" id="dbDisplay">−3.9 dB</div>
+      <div class="navbar-item ml-auto">
+        <span class="is-size-7">v2.0.0</span>
+      </div>
     </div>
   </div>
+</nav>
 
-  <!-- VUメーター -->
-  <div class="meter-wrap" id="meter"></div>
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="block">
+      <div class="notification is-info" id="statusBar" role="status">
+        <span class="icon-text">
+          <span class="icon">
+            <i id="statusIcon" class="fas fa-info-circle"></i>
+          </span>
+          <span id="statusText">待機中 — 接続ボタンを押してください</span>
+        </span>
+      </div>
+    </div>
 
-  <!-- 再生状態 -->
-  <div class="info-footer">
-    <div>SR: <span id="infoSR">—</span></div>
-    <div>CH: <span id="infoCH">—</span></div>
-    <div>Buffer: <span id="infoBuf">—</span></div>
-    <div>Codec: <span id="infoCodec">—</span></div>
+    <div class="columns is-variable is-4 is-align-items-stretch">
+      <div class="column is-flex">
+        <article class="message is-flex is-flex-direction-column is-flex-grow-1">
+          <div class="message-header">
+            <p>接続設定</p>
+          </div>
+          <div class="message-body is-flex-grow-1">
+            <div class="block">
+              <div class="columns is-mobile is-variable is-2">
+                <div class="column is-8">
+                  <div class="field">
+                    <label class="label" for="sidInput">配信ID (半角英数字)</label>
+                    <div class="control">
+                      <input class="input" type="text" id="sidInput" placeholder="myshow2024">
+                    </div>
+                  </div>
+                </div>
+                <div class="column is-4">
+                  <div class="field">
+                    <label class="label" for="chInput">CH番号 (1〜10)</label>
+                    <div class="control">
+                      <input class="input has-text-centered" type="number" id="chInput" min="1" max="10" value="1">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="block">
+              <div class="columns is-mobile is-variable is-2">
+                <div class="column btnColumn">
+                  <button class="button is-primary is-fullwidth" id="connectBtn" onclick="connect()">
+                    <span class="icon">
+                      <i class="fas fa-play"></i>
+                    </span>
+                    <span>接続</span>
+                  </button>
+                </div>
+                <div class="column btnColumn">
+                  <button class="button is-danger is-fullwidth" id="stopBtn" onclick="disconnect()" disabled>
+                    <span class="icon">
+                      <i class="fas fa-stop"></i>
+                    </span>
+                    <span>停止</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </article>
+      </div>
+      <div class="column is-flex">
+        <article class="message is-flex is-flex-direction-column is-flex-grow-1">
+          <div class="message-header">
+            <p>再同期</p>
+          </div>
+          <div class="message-body is-flex-grow-1">
+            <div class="block">
+              <div class="field">
+                <label class="label" for="syncIntervalSelect">自動再同期間隔</label>
+                <div class="control">
+                  <div class="select is-fullwidth">
+                    <select id="syncIntervalSelect" onchange="onSyncIntervalChange(this.value)">
+                      <option value="0" selected>オフ</option>
+                      <option value="5">5秒</option>
+                      <option value="10">10秒</option>
+                      <option value="20">20秒</option>
+                      <option value="30">30秒</option>
+                      <option value="60">60秒</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <div class="control">
+                <button class="button is-success is-fullwidth" id="syncBtn" onclick="resync()" disabled>
+                  <span class="icon">
+                    <i class="fas fa-sync-alt"></i>
+                  </span>
+                  <span id="syncBtnLabel">再同期</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <article class="message mb-4">
+      <div class="message-header">
+        <p>音量コントロール</p>
+      </div>
+      <div class="message-body">
+        <div class="block">
+        <div class="columns is-mobile is-vcentered is-variable is-2">
+          <div class="column is-narrow">
+            <button class="button is-primary" id="muteBtn" onclick="toggleMute()" title="ミュート" aria-label="ミュート">
+              <span class="icon">
+                <i id="muteIcon" class="fas fa-volume-up"></i>
+              </span>
+            </button>
+          </div>
+          <div class="column">
+            <div class="is-flex is-justify-content-space-between has-text-grey mb-1">
+              <span>-∞</span><span>-40dB</span><span>-20dB</span><span>-6dB</span><span>0dB</span>
+            </div>
+            <input type="range" id="volSlider" min="0" max="100" value="80" aria-label="音量"
+                   oninput="onVolumeChange(this.value)">
+          </div>
+          <div class="column is-narrow">
+            <span class="tag is-medium has-background-dark has-text-white is-family-monospace" id="dbDisplay">−3.9 dB</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="meter-wrap" id="meter"></div>
+      </div>
+
+      <div class="columns is-mobile is-multiline is-variable is-1 has-text-grey">
+        <div class="column is-half">SR: <span id="infoSR">—</span></div>
+        <div class="column is-half">CH: <span id="infoCH">—</span></div>
+        <div class="column is-half">Buffer: <span id="infoBuf">—</span></div>
+        <div class="column is-half">Codec: <span id="infoCodec">—</span></div>
+      </div>
+      </div>
+    </article>
+
+    <article class="message mb-4" id="latencyCard">
+      <div class="message-header">
+        <p>遅延計測 (RTT)</p>
+      </div>
+      <div class="message-body">
+        <div id="latencyContent">
+          <p class="has-text-grey has-text-centered">
+            接続後、主催側で遅延計測が開始されると、ここに結果が表示されます。
+          </p>
+        </div>
+      </div>
+    </article>
+
+    <div class="notification is-warning">
+      <div class="content">
+        <ul>
+          <li>Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。</li>
+          <li>LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。</li>
+        </ul>
+      </div>
+    </div>
   </div>
-</div>
-
-<!-- 遅延計測 -->
-<div class="card latency-card" id="latencyCard">
-  <div class="card-title">遅延計測 (RTT)</div>
-  <div id="latencyContent">
-    <p style="font-size:.82rem;color:#333;text-align:center;padding:10px 0">
-      接続後、OBSのフィルターパネルから「遅延を計測する」を押すと自動で計測が始まります。
-    </p>
-  </div>
-</div>
-
-<p class="tip">
-  ※ Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。<br>
-  ※ LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。<br>
-  ※ トンネル使用時: このページのドメインが接続先になります（例: xxxx.trycloudflare.com）。
-</p>
+</section>
 
 <script>
 // ============================================================
@@ -398,7 +260,8 @@ applyUrlParams();
 function updateUrlPreview() {
   const sid = sidInput.value.trim();
   const ch  = chInput.value || '1';
-  document.getElementById('urlPreview').textContent = buildUrl(hostDomain, sid, ch);
+  const preview = document.getElementById('urlPreview');
+  if (preview) preview.textContent = buildUrl(hostDomain, sid, ch);
   updateShebang(sid, ch);
 }
 
@@ -433,6 +296,7 @@ let connecting = false;
 let lastWsError = false;
 let connectTimer = null;
 const CONNECT_TIMEOUT_MS = 7000;
+let syncAvailable = false;
 
 // WebCodecs (Opus)
 let opusDecoder = null;
@@ -481,7 +345,7 @@ function disableOpus(reason, msg) {
   if (opusErrored) return;
   opusErrored = true;
   requestPcmFallback(reason);
-  reportOpusError(msg || '❌ Opusデコードに失敗しました（PCMに切替）');
+  reportOpusError(msg || 'Opusデコードに失敗しました（PCMに切替）');
   opusQueue = [];
 }
 
@@ -560,18 +424,27 @@ function formatDb(gain) {
 function onVolumeChange(val) {
   const gain = sliderToGain(parseInt(val, 10));
   if (gainNode && !muted) gainNode.gain.value = gain;
+  const slider = document.getElementById('volSlider');
+  slider.disabled = muted;
+  slider.classList.toggle('is-primary', !muted);
   const dbEl = document.getElementById('dbDisplay');
-  dbEl.textContent = formatDb(gain);
-  dbEl.className = 'db-display' + (muted ? ' muted' : gain >= 1 ? ' clip' : '');
-  document.getElementById('volSlider').className =
-    muted ? 'muted-range' : '';
+  dbEl.textContent = muted ? 'ミュート' : formatDb(gain);
+  const dbClasses = ['tag', 'is-medium', 'has-background-dark', 'has-text-white', 'is-family-monospace'];
+  if (muted) {
+    dbClasses.push('has-text-grey');
+  }
+  dbEl.className = dbClasses.join(' ');
 }
 
 function toggleMute() {
   muted = !muted;
   const btn = document.getElementById('muteBtn');
-  btn.textContent = muted ? '🔇' : '🔊';
-  btn.className = 'mute-btn' + (muted ? ' muted' : '');
+  btn.className = muted ? 'button is-ghost has-text-grey' : 'button is-primary';
+  const slider = document.getElementById('volSlider');
+  slider.disabled = muted;
+  slider.classList.toggle('is-primary', !muted);
+  const iconEl = document.getElementById('muteIcon');
+  if (iconEl) iconEl.className = muted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
   if (gainNode) {
     gainNode.gain.value = muted ? 0
       : sliderToGain(parseInt(document.getElementById('volSlider').value, 10));
@@ -579,8 +452,12 @@ function toggleMute() {
   const val = parseInt(document.getElementById('volSlider').value, 10);
   const gain = sliderToGain(val);
   const dbEl = document.getElementById('dbDisplay');
-  dbEl.textContent = muted ? '(ミュート)' : formatDb(gain);
-  dbEl.className = 'db-display' + (muted ? ' muted' : '');
+  dbEl.textContent = muted ? 'ミュート' : formatDb(gain);
+  const dbClasses = ['tag', 'is-medium', 'has-background-dark', 'has-text-white', 'is-family-monospace'];
+  if (muted) {
+    dbClasses.push('has-text-grey');
+  }
+  dbEl.className = dbClasses.join(' ');
 }
 
 // 初期表示
@@ -591,8 +468,20 @@ onVolumeChange(80);
 // ============================================================
 function setStatus(msg, cls = '') {
   const el = document.getElementById('statusBar');
-  el.textContent = msg;
-  el.className = 'status ' + cls;
+  const textEl = document.getElementById('statusText');
+  const iconEl = document.getElementById('statusIcon');
+  if (textEl) textEl.textContent = msg;
+  const classes = ['notification'];
+  if (cls === 'ok') classes.push('is-success');
+  else if (cls === 'err') classes.push('is-danger');
+  else if (cls === 'mea') classes.push('is-warning');
+  else classes.push('is-primary');
+  el.className = classes.join(' ');
+  let icon = 'fa-info-circle';
+  if (cls === 'ok') icon = 'fa-check-circle';
+  else if (cls === 'err') icon = 'fa-times-circle';
+  else if (cls === 'mea') icon = 'fa-exclamation-triangle';
+  if (iconEl) iconEl.className = `fas ${icon}`;
 }
 
 function setCodecLabel(text) {
@@ -604,13 +493,18 @@ function clearConnectTimer() {
   if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
 }
 
+function setInputsEnabled(enabled) {
+  document.getElementById('sidInput').disabled = !enabled;
+  document.getElementById('chInput').disabled = !enabled;
+}
+
 function setDisconnectedUi() {
   document.getElementById('connectBtn').disabled = false;
   document.getElementById('stopBtn').disabled = true;
   document.getElementById('syncBtn').disabled = true;
   enableSyncOptions(false);
-  document.getElementById('latencyCard').classList.remove('active');
-  resetBadge();
+  document.getElementById('latencyCard').classList.remove('has-background-info-light');
+  setInputsEnabled(true);
   setCodecLabel('—');
 }
 
@@ -629,10 +523,10 @@ function connect() {
   const sid = document.getElementById('sidInput').value.trim();
   const ch  = parseInt(document.getElementById('chInput').value, 10);
 
-  if (!sid) { setStatus('❌ 配信IDを入力してください', 'err'); return; }
-  if (!/^[a-z0-9]+$/i.test(sid)) { setStatus('❌ 配信IDは半角英数字のみです', 'err'); return; }
+  if (!sid) { setStatus('配信IDを入力してください', 'err'); return; }
+  if (!/^[a-z0-9]+$/i.test(sid)) { setStatus('配信IDは半角英数字のみです', 'err'); return; }
   if (!Number.isInteger(ch) || ch < 1 || ch > 10) {
-    setStatus('❌ CH番号は1〜10で入力してください', 'err');
+    setStatus('CH番号は1〜10で入力してください', 'err');
     return;
   }
 
@@ -640,13 +534,15 @@ function connect() {
   setStatus('接続中...', '');
   connecting = true;
   lastWsError = false;
+  setInputsEnabled(false);
   document.getElementById('connectBtn').disabled = true;
   try {
     ws = new WebSocket(url);
   } catch (e) {
     connecting = false;
-    setStatus('❌ 接続に失敗しました — URLを確認してください', 'err');
+    setStatus('接続に失敗しました — URLを確認してください', 'err');
     document.getElementById('connectBtn').disabled = false;
+    setInputsEnabled(true);
     return;
   }
   ws.binaryType = 'arraybuffer';
@@ -657,7 +553,7 @@ function connect() {
     if (ws !== wsLocal) return;
     if (wsLocal.readyState !== WebSocket.OPEN) {
       lastWsError = true;
-      setStatus('❌ 接続タイムアウト — 接続先を確認してください', 'err');
+      setStatus('接続タイムアウト — 接続先を確認してください', 'err');
       try { wsLocal.close(); } catch {}
     }
   }, CONNECT_TIMEOUT_MS);
@@ -666,18 +562,18 @@ function connect() {
     if (ws !== wsLocal) return;
     clearConnectTimer();
     connecting = false;
-    setStatus(`✅ 受信中 — ${url}`, 'ok');
+    setStatus(`受信中 — ${url}`, 'ok');
     document.getElementById('connectBtn').disabled = true;
     document.getElementById('stopBtn').disabled = false;
     document.getElementById('syncBtn').disabled = false;
     enableSyncOptions(true);
-    document.getElementById('latencyCard').classList.add('active');
+    document.getElementById('latencyCard').classList.add('has-background-info-light');
     sendPcmFallbackIfPossible();
   };
   wsLocal.onerror = () => {
     if (ws !== wsLocal) return;
     lastWsError = true;
-    setStatus('❌ 接続エラー — 配信ID・CH番号を確認してください', 'err');
+    setStatus('接続エラー — 配信ID・CH番号を確認してください', 'err');
   };
   wsLocal.onclose = () => {
     if (ws !== wsLocal) return;
@@ -708,15 +604,6 @@ function disconnect() {
   if (wsLocal) {
     try { wsLocal.close(); } catch {}
   }
-}
-
-function resetBadge() {
-  document.getElementById('badgeIdVal').textContent = '未接続';
-  document.getElementById('badgeIdVal').className = 'value unset';
-  document.getElementById('badgeChVal').textContent = '—';
-  document.getElementById('badgeChVal').className = 'value unset';
-  document.getElementById('badgeId').classList.remove('active');
-  document.getElementById('badgeCh').classList.remove('active');
 }
 
 // ============================================================
@@ -815,7 +702,7 @@ function handleOpus(buf, sampleRate, channels, frameCount) {
     return;
   }
 
-  disableOpus('opus_unavailable', '❌ Opusデコーダを利用できません（PCMに切替）');
+  disableOpus('opus_unavailable', 'Opusデコーダを利用できません（PCMに切替）');
 }
 
 function ensureWebCodecsDecoder(sampleRate, channels) {
@@ -912,7 +799,7 @@ function ensureWasmDecoder(sampleRate, channels) {
     opusWasmInitPromise = null;
     markWasmFailed(e && e.message ? e.message : 'init_failed');
     if (opusWebCodecsState === 'failed') {
-      disableOpus('opus_unavailable', '❌ Opusデコーダを利用できません（PCMに切替）');
+      disableOpus('opus_unavailable', 'Opusデコーダを利用できません（PCMに切替）');
     }
     return false;
   });
@@ -1023,7 +910,7 @@ function decodeOpusPacketWasm(buf, sampleRate, channels, frameCount) {
     if (streak >= 3) {
       markWasmFailed('decode_error');
       if (opusWebCodecsState === 'failed') {
-        disableOpus('opus_unavailable', '❌ Opusデコードに失敗しました（PCMに切替）');
+        disableOpus('opus_unavailable', 'Opusデコードに失敗しました（PCMに切替）');
       } else {
         opusMode = 'auto';
       }
@@ -1065,7 +952,8 @@ let pingCount     = 0;
 let autoSyncTimer = null;
 let syncCountdown = 0;
 let syncTickTimer = null;
-let   currentSyncInterval = 0;  // 0=オフ
+let currentSyncInterval = 0;  // 0=オフ
+let pendingSyncInterval = 0;
 
 function handleControl(text) {
   let msg; try { msg = JSON.parse(text); } catch { return; }
@@ -1073,12 +961,10 @@ function handleControl(text) {
   switch (msg.type) {
     case 'session_info':
       // サーバーからセッション確認情報を受信
-      document.getElementById('badgeIdVal').textContent = msg.stream_id;
-      document.getElementById('badgeIdVal').className = 'value';
-      document.getElementById('badgeChVal').textContent = 'Ch ' + msg.ch;
-      document.getElementById('badgeChVal').className = 'value';
-      document.getElementById('badgeId').classList.add('active');
-      document.getElementById('badgeCh').classList.add('active');
+      if (msg.stream_id) document.getElementById('sidInput').value = msg.stream_id;
+      if (msg.ch !== undefined && msg.ch !== null) {
+        document.getElementById('chInput').value = String(msg.ch);
+      }
       break;
 
     case 'ping':
@@ -1105,11 +991,11 @@ function resync() {
   if (!actx) return;
   // バッファをリセットして次のパケットから即座に再開
   nextTime = actx.currentTime + AHEAD;
-  setStatus('🔄 再同期しました', 'ok');
+  setStatus('再同期しました', 'ok');
   // 0.5秒後に通常表示に戻す
   setTimeout(() => {
     if (ws && ws.readyState === WebSocket.OPEN)
-      setStatus('✅ 受信中', 'ok');
+      setStatus('受信中', 'ok');
   }, 500);
 }
 
@@ -1132,49 +1018,36 @@ function startAutoSync(interval) {
 function stopAutoSync() {
   if (syncTickTimer) { clearInterval(syncTickTimer); syncTickTimer = null; }
   currentSyncInterval = 0;
-  document.getElementById('syncCountdown').textContent = '';
+  updateCountdown();
 }
 
 function onSyncIntervalChange(interval) {
-  // ラジオボタン選択時のハイライト更新
-  ['off','5','10','20','30','60'].forEach(v => {
-    const el = document.getElementById('opt_' + v);
-    if (el) el.classList.remove('active');
-  });
-  const key = interval === 0 ? 'off' : String(interval);
-  const active = document.getElementById('opt_' + key);
-  if (active) active.classList.add('active');
-
-  if (interval === 0) {
+  const value = Number(interval);
+  pendingSyncInterval = Number.isFinite(value) ? value : 0;
+  if (pendingSyncInterval === 0) {
     stopAutoSync();
-  } else if (ws && ws.readyState === WebSocket.OPEN) {
-    startAutoSync(interval);
+    return;
+  }
+  if (syncAvailable) {
+    startAutoSync(pendingSyncInterval);
   }
 }
 
 function enableSyncOptions(enabled) {
-  ['off','5','10','20','30','60'].forEach(v => {
-    const el = document.getElementById('opt_' + v);
-    if (!el) return;
-    const radio = el.querySelector('input');
-    if (enabled) {
-      el.classList.remove('disabled');
-      radio.disabled = false;
-    } else {
-      el.classList.add('disabled');
-      radio.disabled = true;
-      el.classList.remove('active');
-    }
-  });
-  if (!enabled) stopAutoSync();
+  syncAvailable = enabled;
+  if (!enabled) {
+    stopAutoSync();
+    return;
+  }
+  onSyncIntervalChange(document.getElementById('syncIntervalSelect').value);
 }
 
 function updateCountdown() {
-  const el = document.getElementById('syncCountdown');
+  const labelEl = document.getElementById('syncBtnLabel');
   if (syncTickTimer && currentSyncInterval > 0) {
-    el.textContent = `次の再同期まで ${syncCountdown}秒`;
+    labelEl.textContent = `再同期（あと${syncCountdown}秒）`;
   } else {
-    el.textContent = '';
+    labelEl.textContent = '再同期';
   }
 }
 
@@ -1182,51 +1055,74 @@ function updateCountdown() {
 // 計測UI
 // ============================================================
 function showMeasuring(n) {
-  setStatus(`📡 遅延計測中... (${n}/10)`, 'mea');
+  setStatus(`遅延計測中... (${n}/10)`, 'mea');
   document.getElementById('latencyContent').innerHTML = `
-    <div class="measuring-box">
-      計測中 (${n} / 10 ping)
-      <br><span class="dots"><span>●</span><span>●</span><span>●</span></span>
+    <div class="has-text-centered">
+      <p class="has-text-grey">計測中 (${n} / 10 ping)</p>
+      <progress class="progress is-small is-warning" value="${n}" max="10">${n}</progress>
     </div>`;
 }
 
 function showLatencyResult(r) {
-  setStatus('✅ 受信中', 'ok');
-  const col = r.avg_rtt < 50 ? '#4ade80' : r.avg_rtt < 150 ? '#fbbf24' : '#f87171';
+  setStatus('受信中', 'ok');
+  const colCls = r.avg_rtt < 50 ? 'has-text-success' : r.avg_rtt < 150 ? 'has-text-warning' : 'has-text-danger';
   const lbl = r.avg_rtt < 50 ? '良好' : r.avg_rtt < 150 ? '普通' : '高遅延';
   document.getElementById('latencyContent').innerHTML = `
-    <div class="latency-grid">
-      <div class="metric hi">
-        <div class="val">${r.one_way.toFixed(1)}</div>
-        <div class="unit">ms</div>
-        <div class="lbl">推定片道遅延 (RTT÷2)</div>
+    <div class="columns is-mobile is-multiline is-variable is-1">
+      <div class="column is-half">
+        <div class="box has-text-centered has-background-dark has-text-light">
+          <p class="has-text-link has-text-weight-semibold">${r.one_way.toFixed(1)}</p>
+          <p class="has-text-grey">ms</p>
+          <p class="has-text-grey">推定片道遅延 (RTT÷2)</p>
+        </div>
       </div>
-      <div class="metric">
-        <div class="val" style="color:${col}">${r.avg_rtt.toFixed(1)}</div>
-        <div class="unit">ms RTT</div>
-        <div class="lbl">平均往復遅延 (${lbl})</div>
+      <div class="column is-half">
+        <div class="box has-text-centered has-background-dark has-text-light">
+          <p class="${colCls} has-text-weight-semibold">${r.avg_rtt.toFixed(1)}</p>
+          <p class="has-text-grey">ms RTT</p>
+          <p class="has-text-grey">平均往復遅延 (${lbl})</p>
+        </div>
       </div>
-      <div class="metric">
-        <div class="val" style="font-size:1rem;color:#888">${r.min.toFixed(1)}</div>
-        <div class="unit">ms</div><div class="lbl">最小RTT</div>
+      <div class="column is-half">
+        <div class="box has-text-centered has-background-dark has-text-light">
+          <p class="has-text-grey">${r.min.toFixed(1)}</p>
+          <p class="has-text-grey">ms</p>
+          <p class="has-text-grey">最小RTT</p>
+        </div>
       </div>
-      <div class="metric">
-        <div class="val" style="font-size:1rem;color:#888">${r.max.toFixed(1)}</div>
-        <div class="unit">ms</div><div class="lbl">最大RTT</div>
+      <div class="column is-half">
+        <div class="box has-text-centered has-background-dark has-text-light">
+          <p class="has-text-grey">${r.max.toFixed(1)}</p>
+          <p class="has-text-grey">ms</p>
+          <p class="has-text-grey">最大RTT</p>
+        </div>
       </div>
     </div>
-    <div class="recommend">
-      💡 OBSのサブch遅延設定の参考値: <strong>${r.one_way.toFixed(1)} ms</strong><br>
-      （${r.samples}回計測の平均 / OBS側「遅延設定に反映」ボタンで自動適用）
+    <div class="notification is-success">
+      <span class="icon-text">
+        <span class="icon">
+          <i class="fas fa-info-circle"></i>
+        </span>
+        <span>
+          OBSのサブch遅延設定の参考値: <strong>${r.one_way.toFixed(1)} ms</strong><br>
+          （${r.samples}回計測の平均 / OBS側「遅延設定に反映」ボタンで自動適用）
+        </span>
+      </span>
     </div>`;
-  document.getElementById('latencyCard').classList.add('active');
+  document.getElementById('latencyCard').classList.add('has-background-info-light');
 }
 
 function showApplied(ms) {
   document.getElementById('latencyContent').innerHTML +=
-    `<div style="margin-top:8px;padding:8px 12px;border-radius:8px;
-      background:#0c1a36;border:1px solid #1e3a8a;font-size:.8rem;color:#93c5fd">
-      ✅ OBSがサブch遅延を <strong>${parseFloat(ms).toFixed(1)} ms</strong> に自動設定しました
+    `<div class="block">
+      <div class="notification is-link">
+        <span class="icon-text">
+          <span class="icon">
+            <i class="fas fa-check-circle"></i>
+          </span>
+          <span>OBSがサブch遅延を <strong>${parseFloat(ms).toFixed(1)} ms</strong> に自動設定しました</span>
+        </span>
+      </div>
     </div>`;
 }
 
@@ -1234,10 +1130,11 @@ function showApplied(ms) {
 // VUメーター
 // ============================================================
 function updateMeter(samples) {
+  const g = gainNode ? gainNode.gain.value : 1;
   const step = Math.floor(samples.length / NUM_BARS) || 1;
   for (let i = 0; i < NUM_BARS; i++) {
     let rms = 0;
-    for (let j = 0; j < step; j++) { const s = samples[i*step+j]||0; rms += s*s; }
+    for (let j = 0; j < step; j++) { const s = (samples[i*step+j]||0) * g; rms += s*s; }
     rms = Math.sqrt(rms / step);
     const h = Math.min(100, Math.round(rms * 500));
     bars[i].style.height = Math.max(2, h) + '%';
