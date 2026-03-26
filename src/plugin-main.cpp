@@ -109,6 +109,12 @@ static std::string generate_stream_id(size_t len = 12) {
     return out;
 }
 
+static int clamp_sub_ch_count(int v) {
+    if (v < 1) return 1;
+    if (v > NUM_SUB_CH) return NUM_SUB_CH;
+    return v;
+}
+
 static std::string read_file_to_string(const char* path) {
     if (!path || !*path) return "";
     std::ifstream ifs(path, std::ios::binary);
@@ -182,6 +188,7 @@ struct DelayStreamData {
     std::string   auto_ip;
     float         master_delay_ms = 0.0f;
     float         sub_offset_ms   = 0.0f; // global offset added to all sub-ch after Sync Flow
+    int           sub_ch_count    = 1; // active sub-channel count (1..NUM_SUB_CH)
     DelayBuffer   master_buf;
     RtmpMeasureState rtmp;
     StreamRouter  router;
@@ -304,6 +311,8 @@ static void              build_flow_panel(obs_properties_t*, DelayStreamData*);
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void*);
+static bool cb_sub_add(obs_properties_t*, obs_property_t*, void*);
+static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void*);
 static bool cb_rtmp_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void*);
 static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void*);
@@ -472,6 +481,17 @@ static void ds_update(void* data, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(data);
     d->enabled.store(obs_data_get_bool(settings, "enabled"));
     d->ws_enabled.store(obs_data_get_bool(settings, "ws_enabled"));
+    {
+        int v = (int)obs_data_get_int(settings, "sub_ch_count");
+        if (v <= 0) v = 1;
+        int clamped = clamp_sub_ch_count(v);
+        if (clamped != v) obs_data_set_int(settings, "sub_ch_count", clamped);
+        bool changed = (clamped != d->sub_ch_count);
+        d->sub_ch_count = clamped;
+        d->router.set_active_channels(clamped);
+        d->flow.set_active_channels(clamped);
+        if (changed) d->flow.reset();
+    }
     int audio_codec = (int)obs_data_get_int(settings, "audio_codec");
     d->router.set_audio_codec(audio_codec);
     const char* raw = obs_data_get_string(settings, "stream_id");
@@ -532,6 +552,7 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
     bool ws = d->ws_enabled.load(std::memory_order_relaxed);
     bool rr = d->router_running.load(std::memory_order_relaxed);
     bool has_sid = !d->get_stream_id().empty();
+    int sub_count = d->sub_ch_count;
 
     if (en) {
         d->master_buf.process(in, out, frames);
@@ -541,14 +562,14 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
             for (size_t f = 0; f < frames; ++f) dst[f] = out[f*ch+c];
         }
         if (ws && rr && has_sid) {
-            for (int i = 0; i < NUM_SUB_CH; ++i) {
+            for (int i = 0; i < sub_count; ++i) {
                 d->sub[i].buf.process(in, sub, frames);
                 d->router.send_audio(i, sub, frames, sr, ch);
             }
         }
     } else {
         if (ws && rr && has_sid)
-            for (int i = 0; i < NUM_SUB_CH; ++i)
+            for (int i = 0; i < sub_count; ++i)
                 d->router.send_audio(i, in, frames, sr, ch);
     }
     return audio;
@@ -593,7 +614,8 @@ static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     obs_data_t* s = obs_source_get_settings(d->context);
     std::string out;
     out.reserve(512);
-    for (int i = 0; i < NUM_SUB_CH; ++i) {
+    int sub_count = d->sub_ch_count;
+    for (int i = 0; i < sub_count; ++i) {
         std::string url = make_sub_url(d, i + 1);
         char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         const char* memo = obs_data_get_string(s, memo_key);
@@ -608,6 +630,91 @@ static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     }
     obs_data_release(s);
     if (!out.empty()) copy_to_clipboard(out);
+    return false;
+}
+static bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
+    auto* d = static_cast<DelayStreamData*>(priv);
+    if (!d) return false;
+    if (d->router_running.load()) return false;
+    int cur = d->sub_ch_count;
+    if (cur >= NUM_SUB_CH) return false;
+    int next = clamp_sub_ch_count(cur + 1);
+    obs_data_t* s = obs_source_get_settings(d->context);
+    obs_data_set_int(s, "sub_ch_count", next);
+    obs_data_release(s);
+    d->sub_ch_count = next;
+    d->router.set_active_channels(next);
+    d->flow.set_active_channels(next);
+    d->flow.reset();
+    request_properties_refresh(d);
+    return false;
+}
+static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
+    auto* ctx = static_cast<ChCtx*>(priv);
+    if (!ctx || !ctx->d) return false;
+    auto* d = ctx->d;
+    if (d->router_running.load()) return false;
+    int cur = d->sub_ch_count;
+    if (cur <= 1) return false;
+    int ch = ctx->ch;
+    if (ch < 0 || ch >= cur) return false;
+    int next = clamp_sub_ch_count(cur - 1);
+    obs_data_t* s = obs_source_get_settings(d->context);
+    // shift settings down: ch+1 -> ch (including inactive tail)
+    for (int i = ch; i < NUM_SUB_CH - 1; ++i) {
+        char key_from[32], key_to[32];
+        snprintf(key_from, sizeof(key_from), "sub%d_delay_ms", i + 1);
+        snprintf(key_to,   sizeof(key_to),   "sub%d_delay_ms", i);
+        double v = obs_data_get_double(s, key_from);
+        obs_data_set_double(s, key_to, v);
+
+        char memo_from[32], memo_to[32];
+        snprintf(memo_from, sizeof(memo_from), "sub%d_memo", i + 1);
+        snprintf(memo_to,   sizeof(memo_to),   "sub%d_memo", i);
+        const char* m = obs_data_get_string(s, memo_from);
+        obs_data_set_string(s, memo_to, m ? m : "");
+        d->router.set_sub_memo(i, m ? m : "");
+    }
+    // clear last
+    {
+        char key_last[32]; snprintf(key_last, sizeof(key_last), "sub%d_delay_ms", NUM_SUB_CH - 1);
+        obs_data_set_double(s, key_last, 0.0);
+        char memo_last[32]; snprintf(memo_last, sizeof(memo_last), "sub%d_memo", NUM_SUB_CH - 1);
+        obs_data_set_string(s, memo_last, "");
+        d->router.set_sub_memo(NUM_SUB_CH - 1, "");
+    }
+    obs_data_set_int(s, "sub_ch_count", next);
+    obs_data_release(s);
+
+    // shift runtime state down
+    for (int i = ch; i < NUM_SUB_CH - 1; ++i) {
+        d->sub[i].delay_ms = d->sub[i + 1].delay_ms;
+        float effective = d->sub[i].delay_ms + d->sub_offset_ms;
+        if (effective < 0.0f) effective = 0.0f;
+        d->sub[i].buf.set_delay_ms(d->enabled.load() ? (uint32_t)effective : 0);
+        auto& ms = d->sub[i].measure;
+        std::lock_guard<std::mutex> lk(ms.mtx);
+        ms.result = LatencyResult{};
+        ms.measuring = false;
+        ms.applied = false;
+        ms.last_error.clear();
+    }
+    d->sub[NUM_SUB_CH - 1].delay_ms = 0.0f;
+    d->sub[NUM_SUB_CH - 1].buf.set_delay_ms(0);
+    {
+        auto& ms = d->sub[NUM_SUB_CH - 1].measure;
+        std::lock_guard<std::mutex> lk(ms.mtx);
+        ms.result = LatencyResult{};
+        ms.measuring = false;
+        ms.applied = false;
+        ms.last_error.clear();
+    }
+
+    d->sub_ch_count = next;
+    d->router.set_active_channels(next);
+    d->flow.set_active_channels(next);
+    d->flow.reset();
+    request_properties_refresh(d);
     return false;
 }
 static bool cb_rtmp_measure(obs_properties_t*, obs_property_t*, void* priv) {
@@ -773,6 +880,7 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
         OBS_TEXT_INFO);
     FlowPhase phase = d->flow.phase();
     FlowResult res  = d->flow.result();
+    int sub_count = d->sub_ch_count;
     switch (phase) {
     case FlowPhase::Idle:
     case FlowPhase::Complete: {
@@ -781,7 +889,7 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
         char buf[256];
         snprintf(buf, sizeof(buf), "%s", T_("FlowConnected"));
         int nc = 0;
-        for (int i = 0; i < NUM_SUB_CH; ++i)
+        for (int i = 0; i < sub_count; ++i)
             if (d->router.client_count(i) > 0) {
                 char t[8]; snprintf(t, sizeof(t), "Ch.%d ", i+1);
                 strncat(buf, t, sizeof(buf)-strlen(buf)-1); ++nc;
@@ -806,7 +914,7 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
     case FlowPhase::Step1_Done: {
         char buf[1024];
         snprintf(buf, sizeof(buf), T_("FlowStep1DoneFmt"), res.max_one_way_ms);
-        for (int i = 0; i < NUM_SUB_CH; ++i) {
+        for (int i = 0; i < sub_count; ++i) {
             if (!res.channels[i].connected) continue;
             char line[80];
             if (res.channels[i].measured)
@@ -1050,15 +1158,22 @@ static obs_properties_t* ds_get_properties(void* data) {
     // (6) Sub channels
     {
         obs_properties_t* grp = obs_properties_create();
+        {
+            char count_info[64];
+            snprintf(count_info, sizeof(count_info), T_("SubCountInfoFmt"), d->sub_ch_count);
+            obs_properties_add_text(grp, "sub_count_info", count_info, OBS_TEXT_INFO);
+        }
+        obs_properties_add_text(grp, "sub_remove_note", T_("SubRemoveNote"), OBS_TEXT_INFO);
         obs_properties_add_button2(grp, "sub_copy_all", T_("SubCopyAll"), cb_sub_copy_all, d);
         {
             obs_property_t* spc = obs_properties_add_text(grp, "sub_copy_all_spacer", "", OBS_TEXT_INFO);
             obs_property_set_long_description(spc, " ");
             obs_property_text_set_info_word_wrap(spc, false);
         }
-        for (int i = 0; i < NUM_SUB_CH; ++i) {
+        int sub_count = d->sub_ch_count;
+        for (int i = 0; i < sub_count; ++i) {
             d->btn_ctx[i]  = { d, i };
-            char dk[32], uk[32], mk[32], ak[32], rk[32], nk[32];
+            char dk[32], uk[32], mk[32], ak[32], rk[32], nk[32], dk_rm[32];
             char dn[64], ul[32], us[512];
             snprintf(dk, sizeof(dk), "sub%d_delay_ms",    i);
             snprintf(dn, sizeof(dn), "%s", T_("SubDelay"));
@@ -1067,6 +1182,7 @@ static obs_properties_t* ds_get_properties(void* data) {
             snprintf(ak, sizeof(ak), "sub%d_apply",       i);
             snprintf(rk, sizeof(rk), "sub%d_result",      i);
             snprintf(nk, sizeof(nk), "sub%d_memo",        i);
+            snprintf(dk_rm, sizeof(dk_rm), "sub%d_remove", i);
             snprintf(ul, sizeof(ul), "Ch.%d", i+1);
             if (i > 0) {
                 char sk[32];
@@ -1126,6 +1242,26 @@ static obs_properties_t* ds_get_properties(void* data) {
                     cb_sub_measure, &d->btn_ctx[i]);
                 obs_property_set_enabled(mp, false);
             }
+            char rm_label[32];
+            snprintf(rm_label, sizeof(rm_label), T_("SubRemoveFmt"), i + 1);
+            obs_property_t* rm = obs_properties_add_button2(grp, dk_rm, rm_label,
+                cb_sub_remove, &d->btn_ctx[i]);
+            obs_property_set_long_description(rm, T_("SubRemoveDesc"));
+            if (d->router_running.load() || sub_count <= 1) {
+                obs_property_set_enabled(rm, false);
+            }
+        }
+        {
+            obs_property_t* spc = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
+            obs_property_set_long_description(spc, " ");
+            obs_property_text_set_info_word_wrap(spc, false);
+        }
+        char add_label[32];
+        snprintf(add_label, sizeof(add_label), T_("SubAddFmt"), d->sub_ch_count + 1);
+        obs_property_t* add_p =
+            obs_properties_add_button2(grp, "sub_add_btn", add_label, cb_sub_add, d);
+        if (d->router_running.load() || d->sub_ch_count >= NUM_SUB_CH) {
+            obs_property_set_enabled(add_p, false);
         }
         obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);
     }
@@ -1140,6 +1276,7 @@ static obs_properties_t* ds_get_properties(void* data) {
 static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_bool  (settings, "enabled",               true);
     obs_data_set_default_bool  (settings, "ws_enabled",            true);
+    obs_data_set_default_int   (settings, "sub_ch_count",          1);
     obs_data_set_default_int   (settings, "audio_codec",           0);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");

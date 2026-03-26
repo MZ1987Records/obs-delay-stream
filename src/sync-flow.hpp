@@ -87,6 +87,12 @@ public:
     std::function<void(double master_ms)>          on_apply_master;
 
     SyncFlow() { reset(); }
+    void set_active_channels(int n) {
+        if (n < 1) n = 1;
+        if (n > FLOW_NUM_CH) n = FLOW_NUM_CH;
+        std::lock_guard<std::mutex> lk(mtx_);
+        active_ch_ = n;
+    }
 
     // ----- 状態アクセス -----
     FlowPhase   phase()  const { std::lock_guard<std::mutex> lk(mtx_); return phase_; }
@@ -99,16 +105,18 @@ public:
     // ----- ステップ1開始 -----
     // router: StreamRouter, rtmp_url: RTMP接続先URL
     bool start_step1(StreamRouter& router, const std::string& stream_id) {
+        int active = FLOW_NUM_CH;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             if (phase_ != FlowPhase::Idle) return false;
+            active = active_ch_;
         }
         reset();
         {
             std::lock_guard<std::mutex> lk(mtx_);
             phase_ = FlowPhase::Step1_Measuring;
             // 接続中CHを確認
-            for (int i = 0; i < FLOW_NUM_CH; ++i) {
+            for (int i = 0; i < active; ++i) {
                 result_.channels[i].ch        = i;
                 result_.channels[i].connected = (router.client_count(i) > 0);
                 result_.channels[i].measured  = false;
@@ -124,7 +132,7 @@ public:
 
         // 各CHのコールバックを登録して並列計測開始
         pending_count_ = result_.connected_count;
-        for (int i = 0; i < FLOW_NUM_CH; ++i) {
+        for (int i = 0; i < active; ++i) {
             if (!result_.channels[i].connected) continue;
             router.set_on_latency_result(i,
                 [this, i](const std::string&, int, LatencyResult r) {
@@ -139,12 +147,14 @@ public:
     // ----- ステップ1: 失敗CHのみ再計測 -----
     bool retry_failed_step1(StreamRouter& router) {
         int retry_count = 0;
+        int active = FLOW_NUM_CH;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             if (phase_ != FlowPhase::Step1_Done) return false;
+            active = active_ch_;
 
             // 接続中だが計測失敗のCHを特定
-            for (int i = 0; i < FLOW_NUM_CH; ++i) {
+            for (int i = 0; i < active; ++i) {
                 auto& ch = result_.channels[i];
                 // 再接続している可能性があるので接続状態を再確認
                 ch.connected = (router.client_count(i) > 0);
@@ -157,7 +167,7 @@ public:
 
         // 失敗CHのみ再計測
         pending_count_ = retry_count;
-        for (int i = 0; i < FLOW_NUM_CH; ++i) {
+        for (int i = 0; i < active; ++i) {
             auto& ch = result_.channels[i];
             if (!ch.connected || ch.measured) continue;
             router.set_on_latency_result(i,
@@ -244,6 +254,7 @@ private:
     void on_ch_result(int i, LatencyResult r) {
         {
             std::lock_guard<std::mutex> lk(mtx_);
+            if (i < 0 || i >= active_ch_) return;
             auto& ch = result_.channels[i];
             ch.measured  = r.valid;
             ch.one_way_ms = r.valid ? r.avg_one_way : 0.0;
@@ -263,13 +274,16 @@ private:
     void compute_proposals() {
         // 計測成功CHの最大片道遅延を求める
         double max_ow = 0.0;
-        for (auto& ch : result_.channels)
+        for (int i = 0; i < active_ch_; ++i) {
+            auto& ch = result_.channels[i];
             if (ch.measured && ch.one_way_ms > max_ow)
                 max_ow = ch.one_way_ms;
+        }
         result_.max_one_way_ms = max_ow;
 
         // 各CHの追加遅延 = max - ch_one_way
-        for (auto& ch : result_.channels) {
+        for (int i = 0; i < active_ch_; ++i) {
+            auto& ch = result_.channels[i];
             if (ch.measured)
                 ch.proposed_delay = max_ow - ch.one_way_ms;
             else
@@ -279,6 +293,7 @@ private:
 
     mutable std::mutex mtx_;
     FlowPhase          phase_         = FlowPhase::Idle;
+    int                active_ch_     = FLOW_NUM_CH;
     std::atomic<int>   pending_count_{0};
     FlowResult         result_;
     RtmpProber         prober_;

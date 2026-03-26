@@ -239,6 +239,33 @@ public:
         return stream_id_;
     }
 
+    void set_active_channels(int n) {
+        if (n < 1) n = 1;
+        if (n > MAX_CH) n = MAX_CH;
+        std::shared_ptr<WsServer> srv;
+        std::vector<ConnHandle> to_close;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            active_ch_max_ = n;
+            srv = server_ptr_;
+            for (auto& kv : conn_map_) {
+                if (kv.second.ch >= n) to_close.push_back(kv.first);
+            }
+        }
+        if (srv) {
+            for (auto& h : to_close) {
+                try {
+                    srv->close(h, websocketpp::close::status::policy_violation,
+                               "ch_out_of_range");
+                } catch (...) {}
+            }
+        }
+    }
+    int active_channels() const {
+        std::lock_guard<std::mutex> lk(mtx_);
+        return active_ch_max_;
+    }
+
     void set_sub_memo(int ch, const std::string& memo) {
         if (ch < 0 || ch >= MAX_CH) return;
         std::string sid;
@@ -650,7 +677,8 @@ private:
     };
 
     static PathParseResult parse_path(const std::string& path,
-                                      std::string& stream_id, int& ch_0idx)
+                                      std::string& stream_id, int& ch_0idx,
+                                      int max_ch)
     {
         std::string p = path;
         if (!p.empty() && p[0] == '/') p = p.substr(1);
@@ -666,7 +694,7 @@ private:
         char* end = nullptr;
         long ch_1idx = std::strtol(ch_str.c_str(), &end, 10);
         if (end == ch_str.c_str() || *end != '\0') return PathParseResult::Invalid;
-        if (ch_1idx < 1 || ch_1idx > MAX_CH) return PathParseResult::ChOutOfRange;
+        if (ch_1idx < 1 || ch_1idx > max_ch) return PathParseResult::ChOutOfRange;
         ch_0idx = (int)ch_1idx - 1;
         return stream_id.empty() ? PathParseResult::Invalid : PathParseResult::Ok;
     }
@@ -868,7 +896,12 @@ private:
         auto con = srv->get_con_from_hdl(h);
         std::string path = con->get_resource();
         std::string sid; int ch;
-        auto parse_res = parse_path(path, sid, ch);
+        int max_ch = MAX_CH;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            max_ch = active_ch_max_;
+        }
+        auto parse_res = parse_path(path, sid, ch, max_ch);
         if (parse_res != PathParseResult::Ok) {
             if (parse_res == PathParseResult::ChOutOfRange) {
                 con->close(websocketpp::close::status::policy_violation,
@@ -1033,6 +1066,20 @@ private:
             auto hpos = path.find('#');
             if (hpos != std::string::npos) path = path.substr(0, hpos);
             if (path.empty()) path = "/";
+            if (path == "/config") {
+                int active = MAX_CH;
+                {
+                    std::lock_guard<std::mutex> lk(mtx_);
+                    active = active_ch_max_;
+                }
+                std::string resp = "{\"ok\":true,\"max_ch\":" + std::to_string(MAX_CH)
+                                 + ",\"active_ch\":" + std::to_string(active) + "}";
+                con->set_status(websocketpp::http::status_code::ok);
+                con->replace_header("Content-Type", "application/json; charset=utf-8");
+                con->replace_header("Cache-Control", "no-store");
+                con->set_body(std::move(resp));
+                return;
+            }
             if (path == "/memo") {
                 std::string sid_param;
                 int ch_1idx = -1;
@@ -1050,7 +1097,12 @@ private:
                 }
 
                 std::string sid = sanitize_id(sid_param);
-                if (sid.empty() || ch_1idx < 1 || ch_1idx > MAX_CH) {
+                int active = MAX_CH;
+                {
+                    std::lock_guard<std::mutex> lk(mtx_);
+                    active = active_ch_max_;
+                }
+                if (sid.empty() || ch_1idx < 1 || ch_1idx > active) {
                     con->set_status(websocketpp::http::status_code::bad_request);
                     con->replace_header("Content-Type", "text/plain; charset=utf-8");
                     con->set_body("Bad Request");
@@ -1249,6 +1301,7 @@ private:
     std::atomic<bool>  opus_reset_pending_{false};
     std::atomic<int>   opus_bitrate_kbps_{96};
     std::vector<OpusEnc> opus_;
+    int active_ch_max_ = MAX_CH;
 
     // conn_handle → ConnInfo
     std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;
