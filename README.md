@@ -1,4 +1,4 @@
-# obs-delay-stream  v2.0.0
+# obs-delay-stream  v2.1.0
 
 OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネル機能を追加するプラグインです。
 
