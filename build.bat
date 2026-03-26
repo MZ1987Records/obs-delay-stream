@@ -246,6 +246,12 @@ if errorlevel 1 (
     goto :error
 )
 
+copy /Y "%PLUGIN_DIR%\receiver\favicon.svg" "%RECEIVER_DEST%\"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver favicon.svg.
+    goto :error
+)
+
 if exist "%PLUGIN_DIR%\receiver\third_party" (
     xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
     if errorlevel 1 (
@@ -293,6 +299,12 @@ if errorlevel 1 (
 copy /Y "%PLUGIN_DIR%\receiver\ui.css" "%RECEIVER_DEST%\"
 if errorlevel 1 (
     echo [ERROR] Failed to copy receiver ui.css.
+    goto :error
+)
+
+copy /Y "%PLUGIN_DIR%\receiver\favicon.svg" "%RECEIVER_DEST%\"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver favicon.svg.
     goto :error
 )
 

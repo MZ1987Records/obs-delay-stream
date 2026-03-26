@@ -1,0 +1,52 @@
+name: 機能要望
+description: 追加してほしい機能や改善の提案
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ありがとうございます。分かる範囲で記入してください。
+
+  - type: input
+    id: summary
+    attributes:
+      label: 概要
+      description: どんな機能がほしいかを一文で
+      placeholder: 例）配信開始時に自動で遅延補正を始めたい
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景/課題
+      description: その機能が必要な理由
+      placeholder: 例）毎回手動設定が必要でミスが起きる
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 期待する解決策
+      description: 理想の動作や画面
+      placeholder: 例）ワンクリックで設定できる
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 代替案
+      description: 他の方法があれば
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 追加情報
+      description: 参考リンクやスクショなど
+    validations:
+      required: false

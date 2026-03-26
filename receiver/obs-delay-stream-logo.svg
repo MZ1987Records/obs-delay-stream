@@ -1,0 +1,213 @@
+<svg width="680" height="680" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%"   stop-color="#2d1260"/>
+    <stop offset="100%" stop-color="#0d2a22"/>
+  </linearGradient>
+  <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#00d68f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<rect fill="#1a0d38" width="680" height="680"/>
+<circle cx="340" cy="340" r="336" fill="#1e0f40"/>
+<circle cx="340" cy="340" r="318" fill="#1a0d38"/>
+<circle cx="340" cy="340" r="300" fill="url(#bg)"/>
+
+<circle cx="340" cy="340" r="300" fill="none" stroke="#7c4dcc" stroke-width="2.5"/>
+<circle cx="340" cy="340" r="262" fill="none" stroke="#00d68f" stroke-width="4.5"/>
+<circle cx="340" cy="340" r="220" fill="none" stroke="#4a2080" stroke-width="2"/>
+
+<path fill="none" stroke="#00d68f" stroke-width="7" stroke-linecap="butt" opacity="0.5"
+  d="M 567 471 A 262 262 0 0 1 340 602"/>
+<path fill="none" stroke="#e8b800" stroke-width="7" stroke-linecap="butt" opacity="0.6"
+  d="M 340 602 A 262 262 0 0 1 113 471"/>
+<circle fill="#ffffff" cx="340" cy="602" r="5"/>
+<circle fill="#e8b800" cx="340" cy="602" r="3.5"/>
+
+<g stroke="#7c4dcc" stroke-width="3.5" stroke-linecap="round">
+  <line x1="340" y1="42"  x2="340" y2="62"/>
+  <line x1="340" y1="618" x2="340" y2="638"/>
+  <line x1="42"  y1="340" x2="62"  y2="340"/>
+  <line x1="618" y1="340" x2="638" y2="340"/>
+</g>
+<g stroke="#3b1672" stroke-width="2" stroke-linecap="round">
+  <line x1="149" y1="125" x2="162" y2="138"/>
+  <line x1="518" y1="542" x2="531" y2="555"/>
+  <line x1="531" y1="125" x2="518" y2="138"/>
+  <line x1="162" y1="542" x2="149" y2="555"/>
+  <line x1="149" y1="531" x2="162" y2="518"/>
+  <line x1="531" y1="149" x2="518" y2="162"/>
+  <line x1="518" y1="531" x2="531" y2="518"/>
+  <line x1="162" y1="149" x2="149" y2="162"/>
+</g>
+
+<!-- BOLT MODULES -->
+<g transform="translate(62,62)">
+  <rect fill="#071a12" stroke="#00d68f" stroke-width="2" x="-22" y="-22" width="44" height="44" rx="6"/>
+  <rect fill="#0a2e1e" stroke="#008c60" stroke-width="1.5" x="-14" y="-14" width="28" height="28" rx="3"/>
+  <circle fill="#00d68f" cx="0" cy="0" r="5"/>
+  <circle fill="none" stroke="#00d68f" stroke-width="1.5" cx="0" cy="0" r="9"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="-22" x2="-14" y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="-22" x2="14"  y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="22"  x2="-14" y2="14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="22"  x2="14"  y2="14"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="-17" x2="-15" y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="-17" x2="19"  y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="17"  x2="-15" y2="17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="17"  x2="19"  y2="17"/>
+</g>
+<g transform="translate(618,62)">
+  <rect fill="#071a12" stroke="#00d68f" stroke-width="2" x="-22" y="-22" width="44" height="44" rx="6"/>
+  <rect fill="#0a2e1e" stroke="#008c60" stroke-width="1.5" x="-14" y="-14" width="28" height="28" rx="3"/>
+  <circle fill="#00d68f" cx="0" cy="0" r="5"/>
+  <circle fill="none" stroke="#00d68f" stroke-width="1.5" cx="0" cy="0" r="9"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="-22" x2="-14" y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="-22" x2="14"  y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="22"  x2="-14" y2="14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="22"  x2="14"  y2="14"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="-17" x2="-15" y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="-17" x2="19"  y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="17"  x2="-15" y2="17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="17"  x2="19"  y2="17"/>
+</g>
+<g transform="translate(62,618)">
+  <rect fill="#071a12" stroke="#00d68f" stroke-width="2" x="-22" y="-22" width="44" height="44" rx="6"/>
+  <rect fill="#0a2e1e" stroke="#008c60" stroke-width="1.5" x="-14" y="-14" width="28" height="28" rx="3"/>
+  <circle fill="#00d68f" cx="0" cy="0" r="5"/>
+  <circle fill="none" stroke="#00d68f" stroke-width="1.5" cx="0" cy="0" r="9"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="-22" x2="-14" y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="-22" x2="14"  y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="22"  x2="-14" y2="14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="22"  x2="14"  y2="14"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="-17" x2="-15" y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="-17" x2="19"  y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="17"  x2="-15" y2="17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="17"  x2="19"  y2="17"/>
+</g>
+<g transform="translate(618,618)">
+  <rect fill="#071a12" stroke="#00d68f" stroke-width="2" x="-22" y="-22" width="44" height="44" rx="6"/>
+  <rect fill="#0a2e1e" stroke="#008c60" stroke-width="1.5" x="-14" y="-14" width="28" height="28" rx="3"/>
+  <circle fill="#00d68f" cx="0" cy="0" r="5"/>
+  <circle fill="none" stroke="#00d68f" stroke-width="1.5" cx="0" cy="0" r="9"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="-22" x2="-14" y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="-22" x2="14"  y2="-14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="-22" y1="22"  x2="-14" y2="14"/>
+  <line stroke="#005c3e" stroke-width="1.5" x1="22"  y1="22"  x2="14"  y2="14"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="-17" x2="-15" y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="-17" r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="-17" x2="19"  y2="-17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="-17" cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="-19" y1="17"  x2="-15" y2="17"/>
+  <circle fill="#0a2e1e" stroke="#00d68f" stroke-width="1.5" cx="17"  cy="17"  r="4"/>
+  <line stroke="#00d68f" stroke-width="1" x1="15"  y1="17"  x2="19"  y2="17"/>
+</g>
+
+<!-- TEXT -->
+<rect fill="#e8b800" x="226" y="74" width="228" height="32" rx="16"/>
+<text font-family="'Segoe UI',system-ui,sans-serif" font-size="17" font-weight="800"
+      fill="#1a0d38" letter-spacing="1" x="340" y="95" text-anchor="middle">for VR Performer's</text>
+<text font-family="'Segoe UI',system-ui,sans-serif" font-size="50" font-weight="800"
+      fill="#ffffff" x="340" y="154" text-anchor="middle">obs-delay-stream</text>
+<text font-family="'Segoe UI',system-ui,sans-serif" font-size="13" font-weight="500"
+      fill="#8b6fd4" letter-spacing="5" x="340" y="182" text-anchor="middle">PERFORMER SYNC PLUGIN</text>
+
+<line stroke="#2d1060" stroke-width="2" x1="155" y1="200" x2="525" y2="200"/>
+<circle fill="#00d68f" cx="155" cy="200" r="3.5"/>
+<circle fill="#e8b800" cx="340" cy="200" r="3.5"/>
+<circle fill="#00d68f" cx="525" cy="200" r="3.5"/>
+
+<!-- STOPWATCH -->
+<g transform="translate(340, 330)">
+  <line stroke="#b09ce0" stroke-width="5" stroke-linecap="round" x1="-10" y1="-78" x2="10" y2="-78"/>
+  <line stroke="#b09ce0" stroke-width="5" stroke-linecap="round" x1="0"   y1="-78" x2="0"  y2="-67"/>
+  <rect fill="#8b5cf6" x="-24" y="-92" width="18" height="16" rx="5"/>
+  <rect fill="#8b5cf6" x="6"   y="-92" width="18" height="16" rx="5"/>
+  <circle fill="#1e0f40" stroke="#b09ce0" stroke-width="5" cx="0" cy="0" r="66"/>
+  <circle fill="none" stroke="#2d1260" stroke-width="2" cx="0" cy="0" r="54"/>
+  <g stroke="#b09ce0" stroke-width="4" stroke-linecap="round">
+    <line x1="0"   y1="-59" x2="0"   y2="-49"/>
+    <line x1="0"   y1="49"  x2="0"   y2="59"/>
+    <line x1="-59" y1="0"   x2="-49" y2="0"/>
+    <line x1="49"  y1="0"   x2="59"  y2="0"/>
+  </g>
+  <g stroke="#4a2080" stroke-width="2.5" stroke-linecap="round">
+    <line x1="30"  y1="-52" x2="25"  y2="-43"/>
+    <line x1="-30" y1="-52" x2="-25" y2="-43"/>
+    <line x1="52"  y1="-30" x2="43"  y2="-25"/>
+    <line x1="52"  y1="30"  x2="43"  y2="25"/>
+    <line x1="30"  y1="52"  x2="25"  y2="43"/>
+    <line x1="-30" y1="52"  x2="-25" y2="43"/>
+    <line x1="-52" y1="30"  x2="-43" y2="25"/>
+    <line x1="-52" y1="-30" x2="-43" y2="-25"/>
+  </g>
+  <line stroke="#d4bbff" stroke-width="5" stroke-linecap="round" x1="0" y1="0" x2="-26" y2="-42"/>
+  <line stroke="#00d68f" stroke-width="4" stroke-linecap="round" x1="0" y1="0" x2="34"  y2="44"/>
+  <line stroke="#00d68f" stroke-width="3" stroke-linecap="round" x1="0" y1="0" x2="-12" y2="-15" opacity="0.35"/>
+  <circle fill="#00d68f" cx="0" cy="0" r="6"/>
+  <circle fill="#1e0f40" cx="0" cy="0" r="3"/>
+</g>
+
+<!-- NODES -->
+<g transform="translate(158, 330)">
+  <circle fill="#160b30" stroke="#b09ce0" stroke-width="4" cx="0" cy="0" r="30"/>
+  <circle fill="#2d1260" cx="0" cy="0" r="20"/>
+  <circle fill="#d4bbff" cx="0" cy="-8" r="7"/>
+  <path fill="none" stroke="#d4bbff" stroke-width="3.5" stroke-linecap="round"
+    d="M -10 14 Q -10 1 0 1 Q 10 1 10 14"/>
+</g>
+<g transform="translate(522, 330)">
+  <circle fill="#071a12" stroke="#00d68f" stroke-width="4" cx="0" cy="0" r="30"/>
+  <circle fill="#0a2e1e" cx="0" cy="0" r="20"/>
+  <circle fill="#00d68f" cx="0" cy="-8" r="7"/>
+  <path fill="none" stroke="#00d68f" stroke-width="3.5" stroke-linecap="round"
+    d="M -10 14 Q -10 1 0 1 Q 10 1 10 14"/>
+</g>
+
+<line stroke="#b09ce0" stroke-width="2.5" stroke-dasharray="6 4" x1="188" y1="330" x2="274" y2="330"/>
+<line stroke="#00d68f" stroke-width="2.5" stroke-dasharray="6 4" x1="406" y1="330" x2="492" y2="330"/>
+<circle fill="#b09ce0" cx="188" cy="330" r="3.5"/>
+<circle fill="#b09ce0" cx="274" cy="330" r="3.5"/>
+<circle fill="#00d68f" cx="406" cy="330" r="3.5"/>
+<circle fill="#00d68f" cx="492" cy="330" r="3.5"/>
+
+<!-- PULSES -->
+<path fill="none" stroke="#b09ce0" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"
+  d="M 142 444 L 184 444 L 200 404 L 217 480 L 232 414 L 246 444
+     L 274 444 L 290 388 L 307 492 L 322 406 L 336 444
+     L 362 444 L 374 408 L 387 474 L 400 426 L 414 444
+     L 440 444 L 452 410 L 464 466 L 476 432 L 494 444 L 536 444"/>
+<path fill="none" stroke="#00d68f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="12 6"
+  d="M 142 476 L 200 476 L 217 438 L 232 510 L 246 448 L 274 476
+     L 307 476 L 322 422 L 338 522 L 352 438 L 362 476
+     L 400 476 L 414 442 L 426 506 L 438 460 L 440 476
+     L 536 476"/>
+
+<line stroke="#00d68f" stroke-width="2.5" x1="232" y1="416" x2="232" y2="456" marker-end="url(#arr)"/>
+<text font-family="'Segoe UI',system-ui,sans-serif" font-size="14" font-weight="700"
+      fill="#00d68f" x="238" y="444">&#916;t</text>
+
+<circle fill="#b09ce0" cx="246" cy="444" r="6"/>
+<circle fill="#00d68f" cx="246" cy="476" r="6"/>
+<circle fill="#b09ce0" cx="414" cy="444" r="6"/>
+<circle fill="#00d68f" cx="414" cy="476" r="6"/>
+
+<!-- CREDIT -->
+<text font-family="'Segoe UI',system-ui,sans-serif" font-size="13" font-weight="400"
+      fill="#4a7a5c" x="340" y="524" text-anchor="middle">by</text>
+<text font-family="'Segoe UI',system-ui,sans-serif" font-size="18" font-weight="700"
+      fill="#00d68f" letter-spacing="1" x="340" y="546" text-anchor="middle">MZ1987Records</text>
+</svg>

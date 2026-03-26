@@ -1,0 +1,76 @@
+name: バグ報告
+description: 不具合の報告
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ありがとうございます。分かる範囲で記入してください。
+
+  - type: input
+    id: summary
+    attributes:
+      label: 概要
+      description: 何が起きたかを一文で
+      placeholder: 例）配信開始後に音声が数秒遅れていく
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: できるだけ具体的に
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する挙動
+      placeholder: 例）音声遅延が増えず一定のまま
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の挙動
+      placeholder: 例）10分で音声が2秒遅延する
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      description: 分かる範囲でOK
+      value: |
+        - OS:
+        - OBSバージョン:
+        - 本プロジェクトのバージョン/ビルド:
+        - 配信設定（任意）:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ・スクリーンショット
+      description: 可能なら添付してください
+      placeholder: 例）ログファイルの場所やスクショ
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 追加情報
+      description: 回避策や発生頻度など
+    validations:
+      required: false

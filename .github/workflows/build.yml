@@ -16,6 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Pandoc
+        shell: pwsh
+        run: |
+          choco install pandoc -y
+
       - name: Detect Windows SDK
         shell: pwsh
         run: |
@@ -71,7 +76,7 @@ jobs:
             git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git third_party/asio
           }
 
-      - name: Configure plugin
+      - name: Configure plugin (ProgramData layout)
         shell: pwsh
         run: |
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=OFF
@@ -81,12 +86,34 @@ jobs:
         run: |
           cmake --build build --config RelWithDebInfo --parallel
 
-      - name: Install to dist
+      - name: Install to dist (ProgramData layout)
         shell: pwsh
         run: |
           $dist = "$env:GITHUB_WORKSPACE/dist"
           New-Item -ItemType Directory -Force $dist | Out-Null
-          cmake --install build --config RelWithDebInfo --prefix $dist
+          $prefix = "$dist/For ProgramData"
+          cmake --install build --config RelWithDebInfo --prefix $prefix
+
+      - name: Configure legacy layout
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=ON
+
+      - name: Install to dist (Program Files legacy layout)
+        shell: pwsh
+        run: |
+          $dist = "$env:GITHUB_WORKSPACE/dist"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          $prefix = "$dist/For Program Files (legacy)"
+          cmake --install build --config RelWithDebInfo --prefix $prefix
+
+      - name: Convert README to PDF
+        shell: pwsh
+        run: |
+          $src = "$env:GITHUB_WORKSPACE/README.md"
+          $dst = "$env:GITHUB_WORKSPACE/dist/README.pdf"
+          if (-Not (Test-Path $src)) { throw "README.md not found." }
+          pandoc $src -o $dst
 
       - name: Pack artifact
         shell: pwsh

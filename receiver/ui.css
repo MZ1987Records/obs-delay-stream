@@ -38,12 +38,15 @@ body {
 
 /* Navbar */
 .ds-navbar {
-  background: #10141c;
-  border-bottom: 1px solid #1f2937;
+  background: #10141c url('navbar-bg.svg') no-repeat center center / 100% auto;
+  border-bottom: none;
 }
 .ds-navbar .navbar-item,
 .ds-navbar .navbar-item .title {
   color: #e5e7eb !important;
+}
+.ds-navbar-logo {
+  height: 2.625rem;
 }
 .ds-navbar > .container {
   padding-left: 0.75rem;

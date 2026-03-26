@@ -2,6 +2,10 @@
 
 OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネル機能を追加するプラグインです。
 
+<p align="center">
+  <img src="receiver/obs-delay-stream-logo.svg" alt="obs-delay-stream logo" width="280">
+</p>
+
 ---
 
 ## 機能一覧
@@ -22,13 +26,34 @@ OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネ
 ## インストール
 
 1. [Releases](https://github.com/MZ1987Records/obs-delay-stream/releases) から最新の `obs-delay-stream-vX.X.X.zip` をダウンロードして解凍
-2. `plugins/obs-delay-stream` を以下のフォルダに配置:
+2. ZIP内に `For ProgramData` と `For Program Files (legacy)` の2種類が入っています。使用中のOBS配置に合わせて選択してください
+
+### ProgramData 配置（推奨）
+
+1. `For ProgramData/plugins/obs-delay-stream` を以下へ配置:
 
 ```
-C:\ProgramData\obs-studio\plugins\obs-delay-stream
+C:\ProgramData\obs-studio\plugins\
 ```
 
-3. OBS Studio を再起動
+2. OBS Studio を再起動
+
+### Program Files 配置（レガシー）
+
+1. `For Program Files (legacy)/obs-plugins/64bit/obs-delay-stream.dll` を以下へ配置:
+
+```
+C:\Program Files\obs-studio\obs-plugins\64bit\
+```
+
+2. `For Program Files (legacy)/data/obs-plugins/obs-delay-stream` を以下へ配置:
+
+```
+C:\Program Files\obs-studio\data\obs-plugins\
+```
+
+3. 既存ファイルがある場合は上書きでOKです（更新の場合）
+4. OBS Studio を再起動（管理者権限が必要な場合があります）
 
 ### 動作確認
 
