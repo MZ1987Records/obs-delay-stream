@@ -198,7 +198,7 @@ struct ChCtx { DelayStreamData* d; int ch; };
 struct DelayStreamData {
     obs_source_t* context      = nullptr;
     std::atomic<bool> enabled{true};
-    std::atomic<bool> ws_enabled{true};
+    std::atomic<bool> ws_send_enabled{true};
     mutable std::mutex stream_id_mtx;  // protects stream_id, host_ip
     std::string   stream_id;
     std::string   host_ip;
@@ -341,7 +341,6 @@ static bool cb_flow_start_step3(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_apply_step3(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void*);
 static bool cb_enabled_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
-static bool cb_ws_enabled_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_stream_id_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_host_ip_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void*);
@@ -496,8 +495,23 @@ static void ensure_init(DelayStreamData* d, uint32_t sr, uint32_t ch) {
 
 static void ds_update(void* data, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(data);
-    d->enabled.store(obs_data_get_bool(settings, "enabled"));
-    d->ws_enabled.store(obs_data_get_bool(settings, "ws_enabled"));
+    bool delay_disable = obs_data_get_bool(settings, "delay_disable");
+    if (!obs_data_has_user_value(settings, "delay_disable")) {
+        bool legacy_enabled = obs_data_get_bool(settings, "enabled");
+        delay_disable = !legacy_enabled;
+        obs_data_set_bool(settings, "delay_disable", delay_disable);
+    }
+    d->enabled.store(!delay_disable);
+    bool paused = obs_data_get_bool(settings, "ws_send_paused");
+    if (!obs_data_has_user_value(settings, "ws_send_paused")) {
+        bool ws_send = obs_data_get_bool(settings, "ws_send_enabled");
+        if (!obs_data_has_user_value(settings, "ws_send_enabled")) {
+            ws_send = obs_data_get_bool(settings, "ws_enabled");
+        }
+        paused = !ws_send;
+        obs_data_set_bool(settings, "ws_send_paused", paused);
+    }
+    d->ws_send_enabled.store(!paused);
     {
         int v = (int)obs_data_get_int(settings, "sub_ch_count");
         if (v <= 0) v = 1;
@@ -566,7 +580,7 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
         for (size_t f = 0; f < frames; ++f) in[f*ch+c] = src[f];
     }
     bool en = d->enabled.load(std::memory_order_relaxed);
-    bool ws = d->ws_enabled.load(std::memory_order_relaxed);
+    bool ws = d->ws_send_enabled.load(std::memory_order_relaxed);
     bool rr = d->router_running.load(std::memory_order_relaxed);
     bool has_sid = !d->get_stream_id().empty();
     int sub_count = d->sub_ch_count;
@@ -858,18 +872,12 @@ static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void* priv) {
 static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
-    bool en = obs_data_get_bool(settings, "enabled");
+    bool delay_disable = obs_data_get_bool(settings, "delay_disable");
+    bool en = !delay_disable;
     d->enabled.store(en);
     d->master_buf.set_delay_ms(en ? (uint32_t)d->master_delay_ms : 0);
     for (int i = 0; i < NUM_SUB_CH; ++i)
         d->sub[i].buf.set_delay_ms(en ? (uint32_t)d->sub[i].delay_ms : 0);
-    request_properties_refresh(d);
-    return false;
-}
-static bool cb_ws_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
-    auto* d = static_cast<DelayStreamData*>(priv);
-    if (!d) return false;
-    d->ws_enabled.store(obs_data_get_bool(settings, "ws_enabled"));
     request_properties_refresh(d);
     return false;
 }
@@ -1027,17 +1035,16 @@ static obs_properties_t* ds_get_properties(void* data) {
 
     // (2) WebSocket
     {
-        char ws_title[64];
+        char ws_title[96];
         if (d->router_running.load())
             snprintf(ws_title, sizeof(ws_title), T_("WsRunningFmt"), WS_PORT);
         else
             snprintf(ws_title, sizeof(ws_title), "%s", T_("WsStopped"));
+        if (d->router_running.load() && !d->ws_send_enabled.load()) {
+            strncat(ws_title, T_("WsPausedSuffix"),
+                sizeof(ws_title) - strlen(ws_title) - 1);
+        }
         obs_properties_t* grp = obs_properties_create();
-        obs_properties_add_bool(grp, "enabled",
-            d->enabled.load() ? T_("DelayOn") : T_("DelayOff"));
-        obs_properties_add_bool(grp, "ws_enabled",
-            d->ws_enabled.load() ? T_("WsOn") : T_("WsOff"));
-
         obs_property_t* codec_p = obs_properties_add_list(
             grp, "audio_codec", T_("AudioCodec"),
             OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -1058,6 +1065,14 @@ static obs_properties_t* ds_get_properties(void* data) {
                 obs_properties_add_text(grp, "ws_server_start_note_sid",
                     T_("WsServerStartNoteSid"), OBS_TEXT_INFO);
             obs_property_set_visible(note_p, !has_sid);
+        }
+        obs_property_t* send_p = obs_properties_add_bool(grp, "ws_send_paused", T_("WsSendPause"));
+        if (!d->router_running.load()) {
+            obs_property_set_enabled(send_p, false);
+        }
+        obs_property_t* delay_p = obs_properties_add_bool(grp, "delay_disable", T_("DelayDisable"));
+        if (!d->router_running.load()) {
+            obs_property_set_enabled(delay_p, false);
         }
         obs_properties_add_group(props, "grp_ws", ws_title, OBS_GROUP_NORMAL, grp);
     }
@@ -1135,9 +1150,13 @@ static obs_properties_t* ds_get_properties(void* data) {
             grp, "master_delay_ms", T_("MasterDelay"), 0.0, MAX_DELAY_MS, 1.0);
         obs_property_float_set_suffix(mp, " ms");
         obs_properties_add_text(grp, "rtmp_url_manual", T_("RtmpUrlManual"), OBS_TEXT_DEFAULT);
-        obs_properties_add_button2(grp, "rtmp_measure_btn",
+        obs_property_t* rtmp_p = obs_properties_add_button2(
+            grp, "rtmp_measure_btn",
             d->rtmp.prober.is_running() ? T_("Measuring") : T_("RtmpMeasure"),
             cb_rtmp_measure, d);
+        if (!d->router_running.load()) {
+            obs_property_set_enabled(rtmp_p, false);
+        }
         {
             std::lock_guard<std::mutex> lk(d->rtmp.mtx);
             if (d->rtmp.result.valid) {
@@ -1287,6 +1306,9 @@ static obs_properties_t* ds_get_properties(void* data) {
 
 static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_bool  (settings, "enabled",               true);
+    obs_data_set_default_bool  (settings, "delay_disable",         false);
+    obs_data_set_default_bool  (settings, "ws_send_paused",        false);
+    obs_data_set_default_bool  (settings, "ws_send_enabled",       true);
     obs_data_set_default_bool  (settings, "ws_enabled",            true);
     obs_data_set_default_int   (settings, "sub_ch_count",          1);
     obs_data_set_default_int   (settings, "audio_codec",           0);
