@@ -136,6 +136,40 @@ public:
         return true;
     }
 
+    // ----- ステップ1: 失敗CHのみ再計測 -----
+    bool retry_failed_step1(StreamRouter& router) {
+        int retry_count = 0;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            if (phase_ != FlowPhase::Step1_Done) return false;
+
+            // 接続中だが計測失敗のCHを特定
+            for (int i = 0; i < FLOW_NUM_CH; ++i) {
+                auto& ch = result_.channels[i];
+                // 再接続している可能性があるので接続状態を再確認
+                ch.connected = (router.client_count(i) > 0);
+                if (ch.connected && !ch.measured) ++retry_count;
+            }
+            if (retry_count == 0) return false;
+
+            phase_ = FlowPhase::Step1_Measuring;
+        }
+
+        // 失敗CHのみ再計測
+        pending_count_ = retry_count;
+        for (int i = 0; i < FLOW_NUM_CH; ++i) {
+            auto& ch = result_.channels[i];
+            if (!ch.connected || ch.measured) continue;
+            router.set_on_latency_result(i,
+                [this, i](const std::string&, int, LatencyResult r) {
+                    on_ch_result(i, r);
+                });
+            router.start_measurement(i, FLOW_PINGS, FLOW_PING_INT);
+        }
+        if (on_update) on_update();
+        return true;
+    }
+
     // ----- ステップ2: サブch遅延一括反映 -----
     bool apply_step2() {
         {

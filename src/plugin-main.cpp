@@ -296,6 +296,7 @@ static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void*);
 static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void*);
 static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_start(obs_properties_t*, obs_property_t*, void*);
+static bool cb_flow_retry_failed(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_apply_step2(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_start_step3(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_apply_step3(obs_properties_t*, obs_property_t*, void*);
@@ -656,6 +657,11 @@ static bool cb_flow_start(obs_properties_t*, obs_property_t*, void* priv) {
     d->flow.start_step1(d->router, sid);
     return false;
 }
+static bool cb_flow_retry_failed(obs_properties_t*, obs_property_t*, void* priv) {
+    auto* d = static_cast<DelayStreamData*>(priv);
+    d->flow.retry_failed_step1(d->router);
+    return false;
+}
 static bool cb_flow_apply_step2(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     d->flow.apply_step2();
@@ -770,6 +776,10 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
             strncat(buf, line, sizeof(buf)-strlen(buf)-1);
         }
         obs_properties_add_text(props, "flow_s1_result", buf, OBS_TEXT_INFO);
+        // 失敗CHがあればリトライボタンを表示
+        if (res.measured_count < res.connected_count)
+            obs_properties_add_button2(props, "flow_retry_btn",
+                T_("FlowRetryFailed"), cb_flow_retry_failed, d);
         obs_properties_add_button2(props, "flow_apply2_btn",
             T_("FlowApplyStep2"), cb_flow_apply_step2, d);
         obs_properties_add_button2(props, "flow_cancel_s1d", T_("Cancel"), cb_flow_reset, d);
