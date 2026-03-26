@@ -797,6 +797,17 @@ private:
                        "invalid path: use /stream_id/ch");
             return;
         }
+        // 配信IDが設定済みなら一致を要求
+        std::string current_sid;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            current_sid = stream_id_;
+        }
+        if (!current_sid.empty() && sid != current_sid) {
+            con->close(websocketpp::close::status::policy_violation,
+                       "stream_id_mismatch");
+            return;
+        }
 
         std::function<void(const std::string&, int, size_t)> cb;
         size_t count = 0;

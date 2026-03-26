@@ -601,11 +601,16 @@
         lastWsError = true;
         setStatus('接続エラー — 配信ID・CH番号を確認してください', 'err');
       };
-      wsLocal.onclose = () => {
+      wsLocal.onclose = (ev) => {
         if (ws !== wsLocal) return;
         clearConnectTimer();
         connecting = false;
-        if (!lastWsError) setStatus('切断されました', '');
+        if (ev && ev.code === 1008 && ev.reason === 'stream_id_mismatch') {
+          lastWsError = true;
+          setStatus('配信IDが一致しません', 'err');
+        } else if (!lastWsError) {
+          setStatus('切断されました', '');
+        }
         lastWsError = false;
         setDisconnectedUi();
         ws = null;
