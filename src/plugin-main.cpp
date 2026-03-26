@@ -57,6 +57,7 @@ static constexpr int   PING_INTV_MS    = 150;
 static constexpr int   RTMP_PROBE_CNT  = 10;
 static constexpr int   RTMP_PROBE_INTV = 300;
 
+// ローカルネットワークで利用しやすいIPv4アドレスを優先して取得する。
 static std::string get_local_ip() {
     ULONG buf_size = 15000;
     std::vector<BYTE> buf(buf_size);
@@ -77,6 +78,7 @@ static std::string get_local_ip() {
     return fallback.empty() ? "127.0.0.1" : fallback;
 }
 
+// UTF-8文字列をクリップボードへUNICODEテキストとしてコピーする。
 static void copy_to_clipboard(const std::string& text) {
     if (!OpenClipboard(nullptr)) return;
     EmptyClipboard();
@@ -105,6 +107,7 @@ static void copy_to_clipboard(const std::string& text) {
     CloseClipboard();
 }
 
+// 配信用IDに使える文字のみを残して正規化する。
 static std::string sanitize_stream_id(const char* raw) {
     if (!raw) return "";
     std::string s(raw);
@@ -114,6 +117,7 @@ static std::string sanitize_stream_id(const char* raw) {
     return s;
 }
 
+// ランダムな配信用IDを生成する。
 static std::string generate_stream_id(size_t len = 12) {
     static const char kChars[] =
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -126,12 +130,14 @@ static std::string generate_stream_id(size_t len = 12) {
     return out;
 }
 
+// Sub-CH数を有効範囲(1..NUM_SUB_CH)に丸める。
 static int clamp_sub_ch_count(int v) {
     if (v < 1) return 1;
     if (v > NUM_SUB_CH) return NUM_SUB_CH;
     return v;
 }
 
+// ファイル全体を文字列として読み込む。
 static std::string read_file_to_string(const char* path) {
     if (!path || !*path) return "";
     std::ifstream ifs(path, std::ios::binary);
@@ -140,6 +146,7 @@ static std::string read_file_to_string(const char* path) {
                        std::istreambuf_iterator<char>());
 }
 
+// receiver/index.html をモジュール配下→相対パス→埋め込みの順で読み込む。
 static std::string load_receiver_index_html() {
     std::string html;
     char* mod_path = obs_module_file("receiver/index.html");
@@ -156,6 +163,7 @@ static std::string load_receiver_index_html() {
     return html;
 }
 
+// receiver/index.html の配置ディレクトリを返す。
 static std::string get_receiver_root_dir() {
     std::string path;
     char* mod_path = obs_module_file("receiver/index.html");
@@ -171,6 +179,7 @@ static std::string get_receiver_root_dir() {
     return path.substr(0, pos);
 }
 
+// OBS本体からRTMP URLを取得する拡張ポイント（現状は未使用）。
 static std::string get_obs_stream_url() {
     return ""; // Set RTMP URL manually in the plugin panel
 }
@@ -228,20 +237,60 @@ struct DelayStreamData {
     std::vector<float> work_buf;
 
     // Thread-safe accessors for stream_id
+    // 現在の配信IDをスレッドセーフに取得する。
     std::string get_stream_id() const {
         std::lock_guard<std::mutex> lk(stream_id_mtx);
         return stream_id;
     }
+    // 配信IDをスレッドセーフに更新する。
     void set_stream_id(const std::string& id) {
         std::lock_guard<std::mutex> lk(stream_id_mtx);
         stream_id = id;
     }
+    // 現在の配信用ホストIPをスレッドセーフに取得する。
     std::string get_host_ip() const {
         std::lock_guard<std::mutex> lk(stream_id_mtx);
         return host_ip;
     }
 };
 
+// Sub-CHの最終遅延値（base + global offset）を算出して、無効時は0にする。
+static uint32_t calc_effective_sub_delay_ms(const DelayStreamData* d, float base_delay_ms) {
+    if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
+    float effective = base_delay_ms + d->sub_offset_ms;
+    if (effective < 0.0f) effective = 0.0f;
+    return static_cast<uint32_t>(effective);
+}
+
+// 指定Sub-CHのバッファ遅延を現在設定へ反映する。
+static void apply_sub_delay_to_buffer(DelayStreamData* d, int ch) {
+    if (!d || ch < 0 || ch >= NUM_SUB_CH) return;
+    d->sub[ch].buf.set_delay_ms(calc_effective_sub_delay_ms(d, d->sub[ch].delay_ms));
+}
+
+// 測定状態を初期値へ戻す。
+static void clear_measure_state(MeasureState& ms) {
+    std::lock_guard<std::mutex> lk(ms.mtx);
+    ms.result = LatencyResult{};
+    ms.measuring = false;
+    ms.applied = false;
+    ms.last_error.clear();
+}
+
+// OBS自動取得値が空の場合は、UI設定の手入力URLを使う。
+static std::string resolve_rtmp_url(DelayStreamData* d) {
+    if (!d || !d->context) return "";
+    std::string url = get_obs_stream_url();
+    if (!url.empty()) return url;
+    obs_data_t* s = obs_source_get_settings(d->context);
+    if (!s) return "";
+    const char* manual = obs_data_get_string(s, "rtmp_url_manual");
+    if (manual && *manual) url = manual;
+    obs_data_release(s);
+    return url;
+}
+
+// cloudflaredの自動検出結果があれば設定へ反映する。
 static void maybe_fill_cloudflared_path_from_auto(DelayStreamData* d) {
     if (!d || !d->context) return;
     obs_data_t* s = obs_source_get_settings(d->context);
@@ -259,6 +308,7 @@ static void maybe_fill_cloudflared_path_from_auto(DelayStreamData* d) {
     obs_data_release(s);
 }
 
+// プロパティUIの再描画をUIスレッドへ依頼する。
 static void request_properties_refresh(DelayStreamData* d) {
     if (!d || !d->context || !d->create_done.load()) return;
     if (d->in_get_props.load()) return; // prevent re-entry
@@ -268,6 +318,7 @@ static void request_properties_refresh(DelayStreamData* d) {
     }, ctx, false);
 }
 
+// Sync FlowのStep2結果をSub-CH遅延設定へ書き戻す。
 static void write_sub_delays(DelayStreamData* d, const FlowResult& r) {
     obs_data_t* s = obs_source_get_settings(d->context);
     for (int i = 0; i < NUM_SUB_CH; ++i) {
@@ -282,6 +333,7 @@ static void write_sub_delays(DelayStreamData* d, const FlowResult& r) {
     // Note: ds_update will be called by OBS when settings change
 }
 
+// マスター遅延を設定へ書き戻し、必要ならバッファへ反映する。
 static void write_master_delay(DelayStreamData* d, double ms) {
     obs_data_t* s = obs_source_get_settings(d->context);
     obs_data_set_double(s, "master_delay_ms", ms);
@@ -290,6 +342,7 @@ static void write_master_delay(DelayStreamData* d, double ms) {
     obs_data_release(s);
 }
 
+// 指定チャンネル用の受信用URLを生成する。
 static std::string make_sub_url(DelayStreamData* d, int ch1) {
     std::string sid = d->get_stream_id();
     if (sid.empty()) return "";
@@ -350,6 +403,7 @@ static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void*);
 
 static struct obs_source_info delay_stream_filter;
 
+// OBSへ登録するソース情報テーブルを初期化する。
 static void register_source_info() {
     memset(&delay_stream_filter, 0, sizeof(delay_stream_filter));
     delay_stream_filter.id             = "delay_stream_filter";
@@ -364,16 +418,20 @@ static void register_source_info() {
     delay_stream_filter.get_defaults   = ds_get_defaults;
 }
 
+// プラグイン読み込み時にフィルタを登録する。
 bool obs_module_load(void) {
     register_source_info();
     obs_register_source(&delay_stream_filter);
     blog(LOG_INFO, "[obs-delay-stream] v" PLUGIN_VERSION " loaded");
     return true;
 }
+// 明示的な後処理は不要のため空実装。
 void obs_module_unload(void) {}
 
+// OBS表示名を返す。
 static const char* ds_get_name(void*) { return "obs-delay-stream"; }
 
+// フィルタインスタンスを生成して各コンポーネントを初期化する。
 static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     blog(LOG_INFO, "[obs-delay-stream] ds_create START");
     auto* d = new DelayStreamData();
@@ -472,6 +530,7 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     return d;
 }
 
+// フィルタインスタンス破棄時に各コンポーネントを安全に停止する。
 static void ds_destroy(void* data) {
     auto* d = static_cast<DelayStreamData*>(data);
     // 1. 各コンポーネントの停止（内部スレッドの join を含む）
@@ -495,6 +554,7 @@ static void ds_destroy(void* data) {
     delete d;
 }
 
+// サンプルレート/チャンネル変更時に内部バッファを再初期化する。
 static void ensure_init(DelayStreamData* d, uint32_t sr, uint32_t ch) {
     if (d->initialized && d->sample_rate == sr && d->channels == ch) return;
     d->sample_rate = sr; d->channels = ch;
@@ -508,6 +568,7 @@ static void ensure_init(DelayStreamData* d, uint32_t sr, uint32_t ch) {
     d->initialized = true;
 }
 
+// OBS設定値を内部状態へ同期する。
 static void ds_update(void* data, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(data);
     bool delay_disable = obs_data_get_bool(settings, "delay_disable");
@@ -568,13 +629,11 @@ static void ds_update(void* data, obs_data_t* settings) {
         char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         const char* memo = obs_data_get_string(settings, memo_key);
         d->router.set_sub_memo(i, memo ? memo : "");
-        // Apply base delay + global offset (clamp to 0)
-        float effective = d->sub[i].delay_ms + d->sub_offset_ms;
-        if (effective < 0.0f) effective = 0.0f;
-        d->sub[i].buf.set_delay_ms(d->enabled.load() ? (uint32_t)effective : 0);
+        apply_sub_delay_to_buffer(d, i);
     }
 }
 
+// マスター遅延適用とSub-CH配信用の音声分岐を行う。
 static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
     auto* d = static_cast<DelayStreamData*>(data);
     if (!audio || audio->frames == 0) return audio;
@@ -622,6 +681,7 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
 }
 
 // Button callbacks
+// 選択されたSub-CHの往復遅延測定を開始する。
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     auto* d = ctx->d; int i = ctx->ch;
@@ -638,6 +698,7 @@ static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+// 指定Sub-CHの遅延を設定値と実バッファへ反映する。
 static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
     if (!d || i < 0 || i >= NUM_SUB_CH) return;
     obs_data_t* s = obs_source_get_settings(d->context);
@@ -645,9 +706,10 @@ static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
     obs_data_set_double(s, key, ms);
     obs_data_release(s);
     d->sub[i].delay_ms = (float)ms;
-    d->sub[i].buf.set_delay_ms((uint32_t)ms);
+    apply_sub_delay_to_buffer(d, i);
     d->router.notify_apply_delay(i, ms);
 }
+// 測定結果の片道遅延をSub-CHへ適用する。
 static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     auto* d = ctx->d; int i = ctx->ch;
@@ -658,6 +720,7 @@ static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+// 全Sub-CHのURLとメモをタブ区切りでクリップボードへコピーする。
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
@@ -682,6 +745,7 @@ static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     if (!out.empty()) copy_to_clipboard(out);
     return false;
 }
+// Sub-CHを1つ追加する。
 static bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
@@ -699,6 +763,7 @@ static bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+// 指定Sub-CHを削除し、後続チャンネルを前詰めする。
 static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     if (!ctx || !ctx->d) return false;
@@ -739,26 +804,12 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     // shift runtime state down
     for (int i = ch; i < NUM_SUB_CH - 1; ++i) {
         d->sub[i].delay_ms = d->sub[i + 1].delay_ms;
-        float effective = d->sub[i].delay_ms + d->sub_offset_ms;
-        if (effective < 0.0f) effective = 0.0f;
-        d->sub[i].buf.set_delay_ms(d->enabled.load() ? (uint32_t)effective : 0);
-        auto& ms = d->sub[i].measure;
-        std::lock_guard<std::mutex> lk(ms.mtx);
-        ms.result = LatencyResult{};
-        ms.measuring = false;
-        ms.applied = false;
-        ms.last_error.clear();
+        apply_sub_delay_to_buffer(d, i);
+        clear_measure_state(d->sub[i].measure);
     }
     d->sub[NUM_SUB_CH - 1].delay_ms = 0.0f;
-    d->sub[NUM_SUB_CH - 1].buf.set_delay_ms(0);
-    {
-        auto& ms = d->sub[NUM_SUB_CH - 1].measure;
-        std::lock_guard<std::mutex> lk(ms.mtx);
-        ms.result = LatencyResult{};
-        ms.measuring = false;
-        ms.applied = false;
-        ms.last_error.clear();
-    }
+    apply_sub_delay_to_buffer(d, NUM_SUB_CH - 1);
+    clear_measure_state(d->sub[NUM_SUB_CH - 1].measure);
 
     d->sub_ch_count = next;
     d->router.set_active_channels(next);
@@ -767,21 +818,17 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+// RTMP遅延測定を開始する。
 static bool cb_rtmp_measure(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (d->rtmp.prober.is_running()) return false;
-    std::string url = get_obs_stream_url();
-    if (url.empty()) {
-        obs_data_t* s = obs_source_get_settings(d->context);
-        const char* m = obs_data_get_string(s, "rtmp_url_manual");
-        if (m && *m) url = m;
-        obs_data_release(s);
-    }
+    std::string url = resolve_rtmp_url(d);
     if (url.empty()) return false;
     { std::lock_guard<std::mutex> lk(d->rtmp.mtx); d->rtmp.cached_url = url; }
     d->rtmp.prober.start(url, RTMP_PROBE_CNT, RTMP_PROBE_INTV);
     return false;
 }
+// RTMP測定結果をマスター遅延へ適用する。
 static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     RtmpProbeResult r;
@@ -791,6 +838,7 @@ static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+// WebSocketサーバーを起動する。
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (d->router_running.load()) return false;
@@ -804,6 +852,7 @@ static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void* priv) {
     return false;
 }
 
+// WebSocketサーバーを停止する。
 static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d->router_running.load()) return false;
@@ -814,6 +863,7 @@ static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void* priv) {
     return false;
 }
 
+// 選択されたトンネルサービスを起動する。
 static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     obs_data_t* s = obs_source_get_settings(d->context);
@@ -828,6 +878,7 @@ static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+// トンネル種別に応じて入力項目の表示/非表示を切り替える。
 static bool cb_tunnel_type_changed(obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
     int type = (int)obs_data_get_int(settings, "tunnel_type");
     bool is_ngrok = (type == 0);
@@ -842,12 +893,14 @@ static bool cb_tunnel_type_changed(obs_properties_t* props, obs_property_t*, obs
     }
     return true;
 }
+// トンネルを停止する。
 static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     d->tunnel.stop();
     request_properties_refresh(d);
     return false;
 }
+// Sync Flow Step1（Sub-CH測定）を開始する。
 static bool cb_flow_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     std::string sid = d->get_stream_id();
@@ -855,39 +908,39 @@ static bool cb_flow_start(obs_properties_t*, obs_property_t*, void* priv) {
     d->flow.start_step1(d->router, sid);
     return false;
 }
+// Step1の失敗チャンネルのみ再測定する。
 static bool cb_flow_retry_failed(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     d->flow.retry_failed_step1(d->router);
     return false;
 }
+// Step2結果を適用する。
 static bool cb_flow_apply_step2(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     d->flow.apply_step2();
     request_properties_refresh(d);
     return false;
 }
+// Sync Flow Step3（RTMP測定）を開始する。
 static bool cb_flow_start_step3(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
-    std::string url = get_obs_stream_url();
-    if (url.empty()) {
-        obs_data_t* s = obs_source_get_settings(d->context);
-        const char* m = obs_data_get_string(s, "rtmp_url_manual");
-        if (m && *m) url = m;
-        obs_data_release(s);
-    }
+    std::string url = resolve_rtmp_url(d);
     d->flow.start_step3(url);
     return false;
 }
+// Step3結果をマスター遅延へ適用する。
 static bool cb_flow_apply_step3(obs_properties_t*, obs_property_t*, void* priv) {
     static_cast<DelayStreamData*>(priv)->flow.apply_step3();
     return false;
 }
+// Sync Flow状態を初期化する。
 static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     d->flow.reset();
     request_properties_refresh(d);
     return false;
 }
+// 遅延有効/無効を切り替え、各バッファへ反映する。
 static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
@@ -896,10 +949,11 @@ static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, o
     d->enabled.store(en);
     d->master_buf.set_delay_ms(en ? (uint32_t)d->master_delay_ms : 0);
     for (int i = 0; i < NUM_SUB_CH; ++i)
-        d->sub[i].buf.set_delay_ms(en ? (uint32_t)d->sub[i].delay_ms : 0);
+        apply_sub_delay_to_buffer(d, i);
     request_properties_refresh(d);
     return false;
 }
+// Stream IDの有無に応じて起動ボタン状態を更新する。
 static bool cb_stream_id_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
     (void)priv;
     if (!props || !settings) return false;
@@ -913,9 +967,11 @@ static bool cb_stream_id_changed(void* priv, obs_properties_t* props, obs_proper
     }
     return true;
 }
+// host_ip_manual変更時の将来拡張用フック。
 static bool cb_host_ip_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t*) {
     (void)priv; return false;
 }
+// 詳細表示モードに応じて各詳細項目の可視性を切り替える。
 static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamData* d, bool detail) {
     if (!props || !d) return;
     if (auto* p = obs_properties_get(props, "host_ip_manual")) {
@@ -942,6 +998,7 @@ static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamDat
         }
     }
 }
+// 詳細表示モード切り替え時の可視性更新コールバック。
 static bool cb_detail_mode_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!props || !settings || !d) return false;
@@ -950,6 +1007,7 @@ static bool cb_detail_mode_changed(void* priv, obs_properties_t* props, obs_prop
     return true;
 }
 
+// Sync Flowの現在フェーズに応じたUIを構築する。
 static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_add_text(props, "flow_desc",
@@ -1045,318 +1103,378 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
     }
 }
 
+// プロパティ表示に必要な最小状態（配信ID有無/詳細モード）を取得する。
+static void read_properties_view_state(DelayStreamData* d, bool& has_sid, bool& detail_mode) {
+    has_sid = false;
+    detail_mode = false;
+    if (!d || !d->context) return;
+    obs_data_t* s = obs_source_get_settings(d->context);
+    if (!s) return;
+    const char* sid = obs_data_get_string(s, "stream_id");
+    has_sid = (sid && *sid);
+    detail_mode = obs_data_get_bool(s, "detail_mode");
+    obs_data_release(s);
+}
+
+// 詳細モード切替のトグルを追加する。
+static void add_detail_mode_property(obs_properties_t* props, DelayStreamData* d) {
+    obs_property_t* detail_p =
+        obs_properties_add_bool(props, "detail_mode", T_("DetailMode"));
+    obs_property_set_modified_callback2(detail_p, cb_detail_mode_changed, d);
+}
+
+// Stream ID / IP 設定グループ
+static void add_stream_group(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+    obs_properties_t* grp = obs_properties_create();
+    obs_property_t* sid_p =
+        obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
+    obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
+    // 配信IDは自動生成のみ。UIからの編集は不可にする
+    obs_property_set_enabled(sid_p, false);
+    {
+        char info[128];
+        snprintf(info, sizeof(info), T_("AutoIpFmt"), d->auto_ip.c_str());
+        obs_properties_add_text(grp, "auto_ip_info", info, OBS_TEXT_INFO);
+    }
+    obs_property_t* ip_p =
+        obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
+    if (d->router_running.load()) {
+        obs_property_set_enabled(sid_p, false);
+        obs_property_set_enabled(ip_p, false);
+    }
+    obs_properties_add_group(props, "grp_stream", T_("GroupStreamId"), OBS_GROUP_NORMAL, grp);
+}
+
+// WebSocket 設定グループ
+static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_sid) {
+    if (!props || !d) return;
+    bool ws_running = d->router_running.load();
+
+    char ws_title[96];
+    if (ws_running)
+        snprintf(ws_title, sizeof(ws_title), T_("WsRunningFmt"), WS_PORT);
+    else
+        snprintf(ws_title, sizeof(ws_title), "%s", T_("WsStopped"));
+    if (ws_running && !d->ws_send_enabled.load()) {
+        strncat(ws_title, T_("WsPausedSuffix"),
+            sizeof(ws_title) - strlen(ws_title) - 1);
+    }
+
+    obs_properties_t* grp = obs_properties_create();
+    obs_property_t* codec_p = obs_properties_add_list(
+        grp, "audio_codec", T_("AudioCodec"),
+        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+    obs_property_list_add_int(codec_p, "Opus (WebCodecs)", 0);
+    obs_property_list_add_int(codec_p, T_("CodecPcm"), 1);
+    if (ws_running) {
+        obs_property_set_enabled(codec_p, false);
+    }
+
+    if (ws_running) {
+        obs_properties_add_button2(grp, "ws_server_stop_btn",
+            T_("WsServerStop"), cb_ws_server_stop, d);
+    } else {
+        obs_property_t* start_p = obs_properties_add_button2(grp, "ws_server_start_btn",
+            T_("WsServerStart"), cb_ws_server_start, d);
+        obs_property_set_enabled(start_p, has_sid);
+        obs_property_t* note_p =
+            obs_properties_add_text(grp, "ws_server_start_note_sid",
+                T_("WsServerStartNoteSid"), OBS_TEXT_INFO);
+        obs_property_set_visible(note_p, !has_sid);
+    }
+
+    obs_property_t* send_p = obs_properties_add_bool(grp, "ws_send_paused", T_("WsSendPause"));
+    if (!ws_running) {
+        obs_property_set_enabled(send_p, false);
+    }
+    obs_property_t* delay_p = obs_properties_add_bool(grp, "delay_disable", T_("DelayDisable"));
+    if (!ws_running) {
+        obs_property_set_enabled(delay_p, false);
+    }
+    obs_properties_add_group(props, "grp_ws", ws_title, OBS_GROUP_NORMAL, grp);
+}
+
+// Tunnel 設定グループ
+static void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+    TunnelState ts = d->tunnel.state();
+    std::string turl = d->tunnel.url();
+    std::string terr = d->tunnel.error();
+    const char* tunnel_title =
+        (ts == TunnelState::Running)
+            ? T_("TunnelRunning")
+            : T_("TunnelStopped");
+
+    obs_properties_t* grp = obs_properties_create();
+    obs_property_t* type_p = obs_properties_add_list(grp, "tunnel_type", T_("TunnelService"),
+        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+    obs_property_list_add_int(type_p, "ngrok (TCP)", 0);
+    obs_property_list_add_int(type_p, "cloudflared (free)", 1);
+    obs_properties_add_text(grp, "ngrok_exe_path", T_("NgrokExePath"), OBS_TEXT_DEFAULT);
+    obs_properties_add_text(grp, "ngrok_token", T_("NgrokToken"), OBS_TEXT_PASSWORD);
+    obs_properties_add_text(grp, "cloudflared_exe_path", T_("CloudflaredExePath"), OBS_TEXT_DEFAULT);
+    obs_property_set_modified_callback(type_p, cb_tunnel_type_changed);
+
+    int tunnel_type = 0;
+    {
+        obs_data_t* s = obs_source_get_settings(d->context);
+        tunnel_type = (int)obs_data_get_int(s, "tunnel_type");
+        cb_tunnel_type_changed(grp, nullptr, s);
+        obs_data_release(s);
+    }
+
+    bool cloudflared_downloading =
+        (tunnel_type == 1) && d->tunnel.cloudflared_downloading();
+    if (ts == TunnelState::Running) {
+        obs_properties_add_button2(grp, "tunnel_stop_btn",
+            T_("TunnelStop"), cb_tunnel_stop, d);
+    } else if (cloudflared_downloading) {
+        obs_property_t* dl_p =
+            obs_properties_add_button2(grp, "tunnel_downloading_btn",
+                T_("CloudflaredDownloading"), cb_tunnel_stop, d);
+        obs_property_set_enabled(dl_p, false);
+    } else if (ts == TunnelState::Starting) {
+        obs_property_t* starting_p =
+            obs_properties_add_button2(grp, "tunnel_starting_btn",
+                T_("TunnelStarting"), cb_tunnel_stop, d);
+        obs_property_set_enabled(starting_p, false);
+    } else {
+        obs_property_t* start_p =
+            obs_properties_add_button2(grp, "tunnel_start_btn", T_("TunnelStart"), cb_tunnel_start, d);
+        bool ws_running = d->router_running.load();
+        obs_property_set_enabled(start_p, ws_running);
+        if (!ws_running) {
+            obs_properties_add_text(grp, "tunnel_start_note",
+                T_("TunnelStartNote"), OBS_TEXT_INFO);
+        }
+    }
+    if (ts == TunnelState::Running && !turl.empty()) {
+        // URL 表示は「演者別チャンネル」に集約
+    } else if (ts == TunnelState::Error && !terr.empty()) {
+        char eb[256];
+        snprintf(eb, sizeof(eb), T_("TunnelErrorFmt"), terr.c_str());
+        obs_properties_add_text(grp, "tunnel_error", eb, OBS_TEXT_INFO);
+    }
+    obs_properties_add_group(props, "grp_tunnel", tunnel_title, OBS_GROUP_NORMAL, grp);
+}
+
+// Sync Flowグループを追加する。
+static void add_flow_group(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+    obs_properties_t* grp = obs_properties_create();
+    build_flow_panel(grp, d);
+    obs_properties_add_group(props, "grp_flow", T_("GroupSyncFlow"), OBS_GROUP_NORMAL, grp);
+}
+
+// Master遅延/RTMP測定グループを追加する。
+static void add_master_group(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+    obs_properties_t* grp = obs_properties_create();
+    obs_property_t* mp = obs_properties_add_float_slider(
+        grp, "master_delay_ms", T_("MasterDelay"), 0.0, MAX_DELAY_MS, 1.0);
+    obs_property_float_set_suffix(mp, " ms");
+    obs_properties_add_text(grp, "rtmp_url_manual", T_("RtmpUrlManual"), OBS_TEXT_DEFAULT);
+    obs_property_t* rtmp_p = obs_properties_add_button2(
+        grp, "rtmp_measure_btn",
+        d->rtmp.prober.is_running() ? T_("Measuring") : T_("RtmpMeasure"),
+        cb_rtmp_measure, d);
+    if (!d->router_running.load()) {
+        obs_property_set_enabled(rtmp_p, false);
+    }
+    {
+        std::lock_guard<std::mutex> lk(d->rtmp.mtx);
+        if (d->rtmp.result.valid) {
+            char res[128];
+            snprintf(res, sizeof(res), T_("RtmpResultFmt"),
+                     d->rtmp.result.avg_rtt_ms, d->rtmp.result.avg_one_way);
+            obs_properties_add_text(grp, "rtmp_result", res, OBS_TEXT_INFO);
+            char al[64];
+            snprintf(al, sizeof(al), T_("ApplyFmt"), d->rtmp.result.avg_one_way);
+            obs_properties_add_button2(grp, "rtmp_apply_btn", al, cb_rtmp_apply, d);
+        } else {
+            obs_properties_add_text(grp, "rtmp_no_result", T_("RtmpNoResult"), OBS_TEXT_INFO);
+        }
+    }
+    obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
+}
+
+// Sub-CH共通オフセット設定グループを追加する。
+static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+    obs_properties_t* grp = obs_properties_create();
+    {
+        char offset_info[256];
+        snprintf(offset_info, sizeof(offset_info),
+            T_("SubOffsetInfoFmt"), d->sub_offset_ms);
+        obs_properties_add_text(grp, "sub_offset_info", offset_info, OBS_TEXT_INFO);
+    }
+    obs_property_t* op = obs_properties_add_float_slider(
+        grp, "sub_offset_ms",
+        T_("SubOffsetLabel"), -2000.0, 5000.0, 10.0);
+    obs_property_float_set_suffix(op, " ms");
+    obs_properties_add_group(props, "grp_offset",
+        T_("GroupSubOffset"), OBS_GROUP_NORMAL, grp);
+}
+
+// Sub-CHの測定状態に応じてボタン/結果表示を切り替える。
+static void add_sub_channel_measure_controls(obs_properties_t* ch_grp,
+                                             DelayStreamData* d,
+                                             int i,
+                                             size_t nc,
+                                             const char* mk,
+                                             const char* ak,
+                                             const char* rk) {
+    if (nc > 0) {
+        MeasureState& ms = d->sub[i].measure;
+        std::lock_guard<std::mutex> lk(ms.mtx);
+        if (ms.measuring) {
+            obs_property_t* mp = obs_properties_add_button2(
+                ch_grp, mk, T_("Measuring"),
+                cb_sub_measure, &d->btn_ctx[i]);
+            obs_property_set_enabled(mp, false);
+        } else if (ms.result.valid) {
+            char rs[128];
+            snprintf(rs, sizeof(rs), T_("SubResultFmt"),
+                     ms.result.avg_rtt_ms, ms.result.avg_one_way);
+            obs_properties_add_text(ch_grp, rk, rs, OBS_TEXT_INFO);
+            char al[64];
+            snprintf(al, sizeof(al), T_("ApplyFmt"), ms.result.avg_one_way);
+            obs_properties_add_button2(ch_grp, ak, al, cb_sub_apply, &d->btn_ctx[i]);
+            char ml[64];
+            snprintf(ml, sizeof(ml), T_("SubRemeasureFmt"), nc);
+            obs_properties_add_button2(ch_grp, mk, ml,
+                cb_sub_measure, &d->btn_ctx[i]);
+        } else {
+            if (!ms.last_error.empty()) {
+                obs_properties_add_text(ch_grp, rk, ms.last_error.c_str(), OBS_TEXT_INFO);
+            }
+            char ml[64];
+            snprintf(ml, sizeof(ml), T_("SubMeasureFmt"), nc);
+            obs_properties_add_button2(ch_grp, mk, ml,
+                cb_sub_measure, &d->btn_ctx[i]);
+        }
+        return;
+    }
+
+    obs_property_t* mp = obs_properties_add_button2(
+        ch_grp, mk, T_("SubMeasureDisconnected"),
+        cb_sub_measure, &d->btn_ctx[i]);
+    obs_property_set_enabled(mp, false);
+}
+
+// Sub-CH 1件分のUIを構築する。
+static void add_sub_channel_item(obs_properties_t* grp, DelayStreamData* d, int i, int sub_count) {
+    if (!grp || !d) return;
+    d->btn_ctx[i] = { d, i };
+
+    char dk[32], uk[32], mk[32], ak[32], rk[32], nk[32], dk_rm[32];
+    char dn[64], ul[32], us[512], gk[32], gt[32];
+    snprintf(dk, sizeof(dk), "sub%d_delay_ms", i);
+    snprintf(dn, sizeof(dn), "%s", T_("SubDelay"));
+    snprintf(uk, sizeof(uk), "sub%d_url", i);
+    snprintf(mk, sizeof(mk), "sub%d_meas", i);
+    snprintf(ak, sizeof(ak), "sub%d_apply", i);
+    snprintf(rk, sizeof(rk), "sub%d_result", i);
+    snprintf(nk, sizeof(nk), "sub%d_memo", i);
+    snprintf(dk_rm, sizeof(dk_rm), "sub%d_remove", i);
+    snprintf(ul, sizeof(ul), "URL");
+    snprintf(gk, sizeof(gk), "sub%d_group", i);
+    snprintf(gt, sizeof(gt), "Ch.%d", i + 1);
+
+    obs_properties_t* ch_grp = obs_properties_create();
+    std::string url = make_sub_url(d, i + 1);
+    size_t nc = d->router.client_count(i);
+    if (url.empty()) {
+        snprintf(us, sizeof(us), "%s", T_("NotConfigured"));
+    } else {
+        snprintf(us, sizeof(us), "<a href=\"%s\">%s</a>", url.c_str(), url.c_str());
+    }
+
+    obs_property_t* memo_p = obs_properties_add_text(ch_grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
+    if (d->router_running.load()) {
+        obs_property_set_enabled(memo_p, false);
+    }
+    obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
+    obs_property_set_long_description(up, us);
+    obs_property_text_set_info_word_wrap(up, false);
+    obs_property_t* sp = obs_properties_add_float_slider(ch_grp, dk, dn, 0.0, MAX_DELAY_MS, 1.0);
+    obs_property_float_set_suffix(sp, " ms");
+
+    add_sub_channel_measure_controls(ch_grp, d, i, nc, mk, ak, rk);
+
+    char rm_label[32];
+    snprintf(rm_label, sizeof(rm_label), T_("SubRemoveFmt"), i + 1);
+    obs_property_t* rm = obs_properties_add_button2(ch_grp, dk_rm, rm_label,
+        cb_sub_remove, &d->btn_ctx[i]);
+    obs_property_set_long_description(rm, T_("SubRemoveDesc"));
+    if (d->router_running.load() || sub_count <= 1) {
+        obs_property_set_enabled(rm, false);
+    }
+    obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
+}
+
+// Sub-CH 一覧グループ
+static void add_sub_channels_group(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+    obs_properties_t* grp = obs_properties_create();
+    {
+        char copy_all_label[128];
+        snprintf(copy_all_label, sizeof(copy_all_label), T_("SubCopyAll"), d->sub_ch_count);
+        obs_properties_add_button2(grp, "sub_copy_all", copy_all_label, cb_sub_copy_all, d);
+    }
+    {
+        obs_property_t* spc = obs_properties_add_text(grp, "sub_copy_all_spacer", "", OBS_TEXT_INFO);
+        obs_property_set_long_description(spc, " ");
+        obs_property_text_set_info_word_wrap(spc, false);
+    }
+    int sub_count = d->sub_ch_count;
+    for (int i = 0; i < sub_count; ++i) {
+        add_sub_channel_item(grp, d, i, sub_count);
+    }
+    {
+        obs_property_t* spc = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
+        obs_property_set_long_description(spc, " ");
+        obs_property_text_set_info_word_wrap(spc, false);
+    }
+    char add_label[32];
+    snprintf(add_label, sizeof(add_label), T_("SubAddFmt"), d->sub_ch_count + 1);
+    obs_property_t* add_p =
+        obs_properties_add_button2(grp, "sub_add_btn", add_label, cb_sub_add, d);
+    if (d->router_running.load() || d->sub_ch_count >= NUM_SUB_CH) {
+        obs_property_set_enabled(add_p, false);
+    }
+    char sub_group_label[128];
+    snprintf(sub_group_label, sizeof(sub_group_label),
+             T_("GroupSubChannels"), d->sub_ch_count);
+    obs_properties_add_group(props, "grp_sub", sub_group_label, OBS_GROUP_NORMAL, grp);
+}
+
+// OBSプロパティパネル全体を構築する。
 static obs_properties_t* ds_get_properties(void* data) {
     obs_properties_t* props = obs_properties_create();
     if (!data) return props;
     auto* d = static_cast<DelayStreamData*>(data);
-    // Prevent re-entrant calls
+    // 再入防止（OBSのUI更新タイミングで重複呼び出しされることがある）
     if (d->in_get_props.exchange(true)) {
-        return props; // already building properties
+        return props;
     }
 
     maybe_fill_cloudflared_path_from_auto(d);
 
     bool has_sid = false;
     bool detail_mode = false;
-    {
-        obs_data_t* s = obs_source_get_settings(d->context);
-        if (s) {
-            const char* sid = obs_data_get_string(s, "stream_id");
-            has_sid = (sid && *sid);
-            detail_mode = obs_data_get_bool(s, "detail_mode");
-            obs_data_release(s);
-        }
-    }
+    read_properties_view_state(d, has_sid, detail_mode);
 
-    obs_property_t* detail_p =
-        obs_properties_add_bool(props, "detail_mode", T_("DetailMode"));
-    obs_property_set_modified_callback2(detail_p, cb_detail_mode_changed, d);
-
-    // (1) Stream ID / IP
-    {
-        obs_properties_t* grp = obs_properties_create();
-        obs_property_t* sid_p =
-            obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
-        obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
-        // 配信IDは自動生成のみ。UIからの編集は不可にする
-        obs_property_set_enabled(sid_p, false);
-        { char info[128]; snprintf(info, sizeof(info), T_("AutoIpFmt"), d->auto_ip.c_str());
-          obs_properties_add_text(grp, "auto_ip_info", info, OBS_TEXT_INFO); }
-        obs_property_t* ip_p =
-            obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
-        if (d->router_running.load()) {
-            obs_property_set_enabled(sid_p, false);
-            obs_property_set_enabled(ip_p, false);
-        }
-        obs_properties_add_group(props, "grp_stream", T_("GroupStreamId"), OBS_GROUP_NORMAL, grp);
-    }
-
-    // (2) WebSocket
-    {
-        char ws_title[96];
-        if (d->router_running.load())
-            snprintf(ws_title, sizeof(ws_title), T_("WsRunningFmt"), WS_PORT);
-        else
-            snprintf(ws_title, sizeof(ws_title), "%s", T_("WsStopped"));
-        if (d->router_running.load() && !d->ws_send_enabled.load()) {
-            strncat(ws_title, T_("WsPausedSuffix"),
-                sizeof(ws_title) - strlen(ws_title) - 1);
-        }
-        obs_properties_t* grp = obs_properties_create();
-        obs_property_t* codec_p = obs_properties_add_list(
-            grp, "audio_codec", T_("AudioCodec"),
-            OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-        obs_property_list_add_int(codec_p, "Opus (WebCodecs)", 0);
-        obs_property_list_add_int(codec_p, T_("CodecPcm"), 1);
-        if (d->router_running.load()) {
-            obs_property_set_enabled(codec_p, false);
-        }
-
-        if (d->router_running.load()) {
-            obs_properties_add_button2(grp, "ws_server_stop_btn",
-                T_("WsServerStop"), cb_ws_server_stop, d);
-        } else {
-            obs_property_t* start_p = obs_properties_add_button2(grp, "ws_server_start_btn",
-                T_("WsServerStart"), cb_ws_server_start, d);
-            obs_property_set_enabled(start_p, has_sid);
-            obs_property_t* note_p =
-                obs_properties_add_text(grp, "ws_server_start_note_sid",
-                    T_("WsServerStartNoteSid"), OBS_TEXT_INFO);
-            obs_property_set_visible(note_p, !has_sid);
-        }
-        obs_property_t* send_p = obs_properties_add_bool(grp, "ws_send_paused", T_("WsSendPause"));
-        if (!d->router_running.load()) {
-            obs_property_set_enabled(send_p, false);
-        }
-        obs_property_t* delay_p = obs_properties_add_bool(grp, "delay_disable", T_("DelayDisable"));
-        if (!d->router_running.load()) {
-            obs_property_set_enabled(delay_p, false);
-        }
-        obs_properties_add_group(props, "grp_ws", ws_title, OBS_GROUP_NORMAL, grp);
-    }
-
-    // (3) Tunnel
-    {
-        TunnelState ts   = d->tunnel.state();
-        std::string turl = d->tunnel.url();
-        std::string terr = d->tunnel.error();
-        const char* tunnel_title =
-            (ts == TunnelState::Running)
-                ? T_("TunnelRunning")
-                : T_("TunnelStopped");
-        obs_properties_t* grp = obs_properties_create();
-        obs_property_t* type_p = obs_properties_add_list(grp, "tunnel_type", T_("TunnelService"),
-            OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-        obs_property_list_add_int(type_p, "ngrok (TCP)", 0);
-        obs_property_list_add_int(type_p, "cloudflared (free)", 1);
-        obs_properties_add_text(grp, "ngrok_exe_path",       T_("NgrokExePath"), OBS_TEXT_DEFAULT);
-        obs_properties_add_text(grp, "ngrok_token",          T_("NgrokToken"),  OBS_TEXT_PASSWORD);
-        obs_properties_add_text(grp, "cloudflared_exe_path", T_("CloudflaredExePath"), OBS_TEXT_DEFAULT);
-        obs_property_set_modified_callback(type_p, cb_tunnel_type_changed);
-        int tunnel_type = 0;
-        {
-            obs_data_t* s = obs_source_get_settings(d->context);
-            tunnel_type = (int)obs_data_get_int(s, "tunnel_type");
-            cb_tunnel_type_changed(grp, nullptr, s);
-            obs_data_release(s);
-        }
-        bool cloudflared_downloading =
-            (tunnel_type == 1) && d->tunnel.cloudflared_downloading();
-        if (ts == TunnelState::Running) {
-            obs_properties_add_button2(grp, "tunnel_stop_btn",
-                T_("TunnelStop"), cb_tunnel_stop, d);
-        } else if (cloudflared_downloading) {
-            obs_property_t* dl_p =
-                obs_properties_add_button2(grp, "tunnel_downloading_btn",
-                    T_("CloudflaredDownloading"), cb_tunnel_stop, d);
-            obs_property_set_enabled(dl_p, false);
-        } else if (ts == TunnelState::Starting) {
-            obs_property_t* starting_p =
-                obs_properties_add_button2(grp, "tunnel_starting_btn",
-                    T_("TunnelStarting"), cb_tunnel_stop, d);
-            obs_property_set_enabled(starting_p, false);
-        } else {
-            obs_property_t* start_p =
-                obs_properties_add_button2(grp, "tunnel_start_btn", T_("TunnelStart"), cb_tunnel_start, d);
-            bool ws_running = d->router_running.load();
-            obs_property_set_enabled(start_p, ws_running);
-            if (!ws_running) {
-                obs_properties_add_text(grp, "tunnel_start_note",
-                    T_("TunnelStartNote"), OBS_TEXT_INFO);
-            }
-        }
-        if (ts == TunnelState::Running && !turl.empty()) {
-            // URL 表示は「演者別チャンネル」に集約
-        } else if (ts == TunnelState::Error && !terr.empty()) {
-            char eb[256]; snprintf(eb, sizeof(eb), T_("TunnelErrorFmt"), terr.c_str());
-            obs_properties_add_text(grp, "tunnel_error", eb, OBS_TEXT_INFO);
-        }
-        obs_properties_add_group(props, "grp_tunnel", tunnel_title, OBS_GROUP_NORMAL, grp);
-    }
-
-    // (4) Sync Flow
-    {
-        obs_properties_t* grp = obs_properties_create();
-        build_flow_panel(grp, d);
-        obs_properties_add_group(props, "grp_flow", T_("GroupSyncFlow"), OBS_GROUP_NORMAL, grp);
-    }
-
-    // (5) Master / RTMP
-    {
-        obs_properties_t* grp = obs_properties_create();
-        obs_property_t* mp = obs_properties_add_float_slider(
-            grp, "master_delay_ms", T_("MasterDelay"), 0.0, MAX_DELAY_MS, 1.0);
-        obs_property_float_set_suffix(mp, " ms");
-        obs_properties_add_text(grp, "rtmp_url_manual", T_("RtmpUrlManual"), OBS_TEXT_DEFAULT);
-        obs_property_t* rtmp_p = obs_properties_add_button2(
-            grp, "rtmp_measure_btn",
-            d->rtmp.prober.is_running() ? T_("Measuring") : T_("RtmpMeasure"),
-            cb_rtmp_measure, d);
-        if (!d->router_running.load()) {
-            obs_property_set_enabled(rtmp_p, false);
-        }
-        {
-            std::lock_guard<std::mutex> lk(d->rtmp.mtx);
-            if (d->rtmp.result.valid) {
-                char res[128];
-                snprintf(res, sizeof(res), T_("RtmpResultFmt"),
-                         d->rtmp.result.avg_rtt_ms, d->rtmp.result.avg_one_way);
-                obs_properties_add_text(grp, "rtmp_result", res, OBS_TEXT_INFO);
-                char al[64];
-                snprintf(al, sizeof(al), T_("ApplyFmt"), d->rtmp.result.avg_one_way);
-                obs_properties_add_button2(grp, "rtmp_apply_btn", al, cb_rtmp_apply, d);
-            } else {
-                obs_properties_add_text(grp, "rtmp_no_result", T_("RtmpNoResult"), OBS_TEXT_INFO);
-            }
-        }
-        obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
-    }
-
-    // (5.5) Sub-CH Global Offset
-    {
-        obs_properties_t* grp = obs_properties_create();
-        {
-            char offset_info[256];
-            snprintf(offset_info, sizeof(offset_info),
-                T_("SubOffsetInfoFmt"), d->sub_offset_ms);
-            obs_properties_add_text(grp, "sub_offset_info", offset_info, OBS_TEXT_INFO);
-        }
-        obs_property_t* op = obs_properties_add_float_slider(
-            grp, "sub_offset_ms",
-            T_("SubOffsetLabel"), -2000.0, 5000.0, 10.0);
-        obs_property_float_set_suffix(op, " ms");
-        obs_properties_add_group(props, "grp_offset",
-            T_("GroupSubOffset"), OBS_GROUP_NORMAL, grp);
-    }
-
-    // (6) Sub channels
-    {
-        obs_properties_t* grp = obs_properties_create();
-        {
-            char copy_all_label[128];
-            snprintf(copy_all_label, sizeof(copy_all_label), T_("SubCopyAll"), d->sub_ch_count);
-            obs_properties_add_button2(grp, "sub_copy_all", copy_all_label, cb_sub_copy_all, d);
-        }
-        {
-            obs_property_t* spc = obs_properties_add_text(grp, "sub_copy_all_spacer", "", OBS_TEXT_INFO);
-            obs_property_set_long_description(spc, " ");
-            obs_property_text_set_info_word_wrap(spc, false);
-        }
-        int sub_count = d->sub_ch_count;
-        for (int i = 0; i < sub_count; ++i) {
-            d->btn_ctx[i]  = { d, i };
-            char dk[32], uk[32], mk[32], ak[32], rk[32], nk[32], dk_rm[32];
-            char dn[64], ul[32], us[512], gk[32], gt[32];
-            snprintf(dk, sizeof(dk), "sub%d_delay_ms",    i);
-            snprintf(dn, sizeof(dn), "%s", T_("SubDelay"));
-            snprintf(uk, sizeof(uk), "sub%d_url",         i);
-            snprintf(mk, sizeof(mk), "sub%d_meas",        i);
-            snprintf(ak, sizeof(ak), "sub%d_apply",       i);
-            snprintf(rk, sizeof(rk), "sub%d_result",      i);
-            snprintf(nk, sizeof(nk), "sub%d_memo",        i);
-            snprintf(dk_rm, sizeof(dk_rm), "sub%d_remove", i);
-            snprintf(ul, sizeof(ul), "URL");
-            snprintf(gk, sizeof(gk), "sub%d_group", i);
-            snprintf(gt, sizeof(gt), "Ch.%d", i+1);
-            obs_properties_t* ch_grp = obs_properties_create();
-            std::string url = make_sub_url(d, i+1);
-            size_t nc = d->router.client_count(i);
-            const char* url_show = url.empty() ? T_("NotConfigured") : url.c_str();
-            if (url.empty()) {
-                snprintf(us, sizeof(us), "%s", T_("NotConfigured"));
-            } else {
-                snprintf(us, sizeof(us), "<a href=\"%s\">%s</a>", url.c_str(), url.c_str());
-            }
-            obs_property_t* memo_p = obs_properties_add_text(ch_grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
-            if (d->router_running.load()) {
-                obs_property_set_enabled(memo_p, false);
-            }
-            obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
-            obs_property_set_long_description(up, us);
-            obs_property_text_set_info_word_wrap(up, false);
-            obs_property_t* sp = obs_properties_add_float_slider(ch_grp, dk, dn, 0.0, MAX_DELAY_MS, 1.0);
-            obs_property_float_set_suffix(sp, " ms");
-            if (nc > 0) {
-                MeasureState& ms = d->sub[i].measure;
-                std::lock_guard<std::mutex> lk(ms.mtx);
-                if (ms.measuring) {
-                    obs_property_t* mp = obs_properties_add_button2(
-                        ch_grp, mk, T_("Measuring"),
-                        cb_sub_measure, &d->btn_ctx[i]);
-                    obs_property_set_enabled(mp, false);
-                } else if (ms.result.valid) {
-                    char rs[128];
-                    snprintf(rs, sizeof(rs), T_("SubResultFmt"),
-                             ms.result.avg_rtt_ms, ms.result.avg_one_way);
-                    obs_properties_add_text(ch_grp, rk, rs, OBS_TEXT_INFO);
-                    char al[64]; snprintf(al, sizeof(al), T_("ApplyFmt"), ms.result.avg_one_way);
-                    obs_properties_add_button2(ch_grp, ak, al, cb_sub_apply, &d->btn_ctx[i]);
-                    char ml[64];
-                    snprintf(ml, sizeof(ml), T_("SubRemeasureFmt"), nc);
-                    obs_properties_add_button2(ch_grp, mk, ml,
-                        cb_sub_measure, &d->btn_ctx[i]);
-                } else {
-                    if (!ms.last_error.empty()) {
-                        obs_properties_add_text(ch_grp, rk, ms.last_error.c_str(), OBS_TEXT_INFO);
-                    }
-                    char ml[64];
-                    snprintf(ml, sizeof(ml), T_("SubMeasureFmt"), nc);
-                    obs_properties_add_button2(ch_grp, mk, ml,
-                        cb_sub_measure, &d->btn_ctx[i]);
-                }
-            } else {
-                obs_property_t* mp = obs_properties_add_button2(
-                    ch_grp, mk, T_("SubMeasureDisconnected"),
-                    cb_sub_measure, &d->btn_ctx[i]);
-                obs_property_set_enabled(mp, false);
-            }
-            char rm_label[32];
-            snprintf(rm_label, sizeof(rm_label), T_("SubRemoveFmt"), i + 1);
-            obs_property_t* rm = obs_properties_add_button2(ch_grp, dk_rm, rm_label,
-                cb_sub_remove, &d->btn_ctx[i]);
-            obs_property_set_long_description(rm, T_("SubRemoveDesc"));
-            if (d->router_running.load() || sub_count <= 1) {
-                obs_property_set_enabled(rm, false);
-            }
-            obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
-        }
-        {
-            obs_property_t* spc = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
-            obs_property_set_long_description(spc, " ");
-            obs_property_text_set_info_word_wrap(spc, false);
-        }
-        char add_label[32];
-        snprintf(add_label, sizeof(add_label), T_("SubAddFmt"), d->sub_ch_count + 1);
-        obs_property_t* add_p =
-            obs_properties_add_button2(grp, "sub_add_btn", add_label, cb_sub_add, d);
-        if (d->router_running.load() || d->sub_ch_count >= NUM_SUB_CH) {
-            obs_property_set_enabled(add_p, false);
-        }
-        char sub_group_label[128];
-        snprintf(sub_group_label, sizeof(sub_group_label),
-                 T_("GroupSubChannels"), d->sub_ch_count);
-        obs_properties_add_group(props, "grp_sub", sub_group_label, OBS_GROUP_NORMAL, grp);
-    }
+    // UIブロックを順に組み立てる
+    add_detail_mode_property(props, d);
+    add_stream_group(props, d);
+    add_ws_group(props, d, has_sid);
+    add_tunnel_group(props, d);
+    add_flow_group(props, d);
+    add_master_group(props, d);
+    add_sub_offset_group(props, d);
+    add_sub_channels_group(props, d);
 
     apply_detail_mode_visibility(props, d, detail_mode);
 
@@ -1368,6 +1486,7 @@ static obs_properties_t* ds_get_properties(void* data) {
     return props;
 }
 
+// 各設定項目のデフォルト値を定義する。
 static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_bool  (settings, "enabled",               true);
     obs_data_set_default_bool  (settings, "delay_disable",         false);
