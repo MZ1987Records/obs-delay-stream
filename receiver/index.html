@@ -31,7 +31,7 @@
       <div class="block">
         <div class="notification is-dark" id="statusBar" role="status">
           <div class="status-inner">
-            <div class="status-memo" id="infoMemo">—</div>
+            <div class="status-memo" id="infoMemo" hidden></div>
             <span class="icon-text">
             <span class="icon">
               <i id="statusIcon" class="fas fa-info-circle"></i>
@@ -276,7 +276,7 @@
         .then(r => r.ok ? r.json() : null)
         .then(data => {
           if (!data || typeof data.memo !== 'string') return;
-          memoEl.textContent = data.memo.length ? data.memo : '—';
+          updateMemoDisplay(memoEl, data.memo);
         })
         .catch(() => {});
     }
@@ -1010,14 +1010,14 @@
           }
           {
             const memoEl = document.getElementById('infoMemo');
-            if (memoEl) memoEl.textContent = (msg.memo && msg.memo.length) ? msg.memo : '—';
+            if (memoEl) updateMemoDisplay(memoEl, msg.memo);
           }
           break;
 
         case 'memo':
           {
             const memoEl = document.getElementById('infoMemo');
-            if (memoEl) memoEl.textContent = (msg.memo && msg.memo.length) ? msg.memo : '—';
+            if (memoEl) updateMemoDisplay(memoEl, msg.memo);
           }
           break;
 
@@ -1036,6 +1036,18 @@
           showApplied(msg.ms);
           break;
       }
+    }
+
+    function updateMemoDisplay(memoEl, memoText) {
+      if (!memoEl) return;
+      const text = (typeof memoText === 'string') ? memoText.trim() : '';
+      if (!text.length) {
+        memoEl.textContent = '';
+        memoEl.hidden = true;
+        return;
+      }
+      memoEl.textContent = text;
+      memoEl.hidden = false;
     }
 
     // ============================================================
