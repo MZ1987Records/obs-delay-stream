@@ -643,24 +643,32 @@ private:
     }
 
     // ----- WebSocketパスから (stream_id, ch) を解析 -----
-    static bool parse_path(const std::string& path,
-                            std::string& stream_id, int& ch_0idx)
+    enum class PathParseResult {
+        Ok,
+        Invalid,
+        ChOutOfRange,
+    };
+
+    static PathParseResult parse_path(const std::string& path,
+                                      std::string& stream_id, int& ch_0idx)
     {
         std::string p = path;
         if (!p.empty() && p[0] == '/') p = p.substr(1);
 
         auto slash = p.find('/');
-        if (slash == std::string::npos || slash == 0) return false;
+        if (slash == std::string::npos || slash == 0) return PathParseResult::Invalid;
 
         stream_id = sanitize_id(p.substr(0, slash));
         std::string ch_str = p.substr(slash + 1);
         auto q = ch_str.find_first_of("?#");
         if (q != std::string::npos) ch_str = ch_str.substr(0, q);
 
-        int ch_1idx = std::atoi(ch_str.c_str());
-        if (ch_1idx < 1 || ch_1idx > 10) return false;
-        ch_0idx = ch_1idx - 1;
-        return !stream_id.empty();
+        char* end = nullptr;
+        long ch_1idx = std::strtol(ch_str.c_str(), &end, 10);
+        if (end == ch_str.c_str() || *end != '\0') return PathParseResult::Invalid;
+        if (ch_1idx < 1 || ch_1idx > MAX_CH) return PathParseResult::ChOutOfRange;
+        ch_0idx = (int)ch_1idx - 1;
+        return stream_id.empty() ? PathParseResult::Invalid : PathParseResult::Ok;
     }
 
     static bool is_safe_rel_path(const std::string& rel) {
@@ -860,7 +868,13 @@ private:
         auto con = srv->get_con_from_hdl(h);
         std::string path = con->get_resource();
         std::string sid; int ch;
-        if (!parse_path(path, sid, ch)) {
+        auto parse_res = parse_path(path, sid, ch);
+        if (parse_res != PathParseResult::Ok) {
+            if (parse_res == PathParseResult::ChOutOfRange) {
+                con->close(websocketpp::close::status::policy_violation,
+                           "ch_out_of_range");
+                return;
+            }
             con->close(websocketpp::close::status::policy_violation,
                        "invalid path: use /stream_id/ch");
             return;

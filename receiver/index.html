@@ -61,9 +61,9 @@
                   </div>
                   <div class="column is-4">
                     <div class="field">
-                      <label class="label" for="chInput">CH番号 <span class="label-hint">(1〜10)</span></label>
+                      <label class="label" for="chInput">CH番号 <span class="label-hint" id="chHint"></span></label>
                       <div class="control">
-                        <input class="input has-text-centered" type="number" id="chInput" min="1" max="10" value="1">
+                        <input class="input has-text-centered" type="number" id="chInput" min="1" value="1">
                       </div>
                     </div>
                   </div>
@@ -219,9 +219,19 @@
     }
 
     const hostDomain = getHostDomain();
+    const MIN_CH = 1;
+    const MAX_CH = 10;
+    const PING_SAMPLES = 10;
+    const CH_RANGE_TEXT = `${MIN_CH}〜${MAX_CH}`;
 
     const sidInput = document.getElementById('sidInput');
     const chInput = document.getElementById('chInput');
+    const chHint = document.getElementById('chHint');
+    if (chHint) chHint.textContent = `(${CH_RANGE_TEXT})`;
+    if (chInput) {
+      chInput.min = String(MIN_CH);
+      chInput.max = String(MAX_CH);
+    }
 
     function parseShebangParams() {
       if (!location.hash.startsWith('#!')) return null;
@@ -258,7 +268,7 @@
       if (sid && sidInput) sidInput.value = sid;
       if (ch && chInput) {
         const chNum = parseInt(ch, 10);
-        if (!Number.isNaN(chNum) && chNum >= 1 && chNum <= 10) {
+        if (!Number.isNaN(chNum) && chNum >= MIN_CH && chNum <= MAX_CH) {
           chInput.value = String(chNum);
         }
       }
@@ -268,7 +278,7 @@
 
     function fetchMemoPreview(sid, ch) {
       const chNum = parseInt(ch, 10);
-      if (!sid || !Number.isInteger(chNum) || chNum < 1 || chNum > 10) return;
+      if (!sid || !Number.isInteger(chNum) || chNum < MIN_CH || chNum > MAX_CH) return;
       const memoEl = document.getElementById('infoMemo');
       if (!memoEl) return;
       const url = `/memo?sid=${encodeURIComponent(sid)}&ch=${encodeURIComponent(String(chNum))}`;
@@ -570,8 +580,8 @@
 
       if (!sid) { setStatus('配信IDを入力してください', 'err'); return; }
       if (!/^[a-z0-9]+$/i.test(sid)) { setStatus('配信IDは半角英数字のみです', 'err'); return; }
-      if (!Number.isInteger(ch) || ch < 1 || ch > 10) {
-        setStatus('CH番号は1〜10で入力してください', 'err');
+      if (!Number.isInteger(ch) || ch < MIN_CH || ch > MAX_CH) {
+        setStatus(`CH番号は${CH_RANGE_TEXT}で入力してください`, 'err');
         return;
       }
 
@@ -618,7 +628,7 @@
       wsLocal.onerror = () => {
         if (ws !== wsLocal) return;
         lastWsError = true;
-        setStatus('接続エラー — 配信ID・CH番号を確認してください', 'err');
+        setStatus('接続エラー — サーバーに接続できません', 'err');
       };
       wsLocal.onclose = (ev) => {
         if (ws !== wsLocal) return;
@@ -627,6 +637,9 @@
         if (ev && ev.code === 1008 && ev.reason === 'stream_id_mismatch') {
           lastWsError = true;
           setStatus('配信IDが一致しません', 'err');
+        } else if (ev && ev.code === 1008 && ev.reason === 'ch_out_of_range') {
+          lastWsError = true;
+          setStatus(`CH番号が範囲外です (${CH_RANGE_TEXT})`, 'err');
         } else if (!lastWsError) {
           setStatus('切断されました', '');
         }
@@ -1122,11 +1135,11 @@
     // 計測UI
     // ============================================================
     function showMeasuring(n) {
-      setStatus(`遅延計測中... (${n}/10)`, 'mea');
+      setStatus(`遅延計測中... (${n}/${PING_SAMPLES})`, 'mea');
       document.getElementById('latencyContent').innerHTML = `
     <div class="measuring-box">
-      計測中 (${n} / 10 ping)<span class="dots"><span>.</span><span>.</span><span>.</span></span>
-      <progress class="progress is-small is-warning" style="margin-top:6px" value="${n}" max="10">${n}</progress>
+      計測中 (${n} / ${PING_SAMPLES} ping)<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+      <progress class="progress is-small is-warning" style="margin-top:6px" value="${n}" max="${PING_SAMPLES}">${n}</progress>
     </div>`;
     }
 
