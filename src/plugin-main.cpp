@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cctype>
 #include <memory>
+#include <random>
 #include <obs-module.h>
 #include <util/platform.h>
 #include "delay-filter.hpp"
@@ -94,6 +95,18 @@ static std::string sanitize_stream_id(const char* raw) {
         return !std::isalnum((unsigned char)c) && c != '-' && c != '_';
     }), s.end());
     return s;
+}
+
+static std::string generate_stream_id(size_t len = 12) {
+    static const char kChars[] =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::uniform_int_distribution<size_t> dist(0, sizeof(kChars) - 2);
+    std::string out;
+    out.reserve(len);
+    for (size_t i = 0; i < len; ++i) out.push_back(kChars[dist(rng)]);
+    return out;
 }
 
 static std::string read_file_to_string(const char* path) {
@@ -188,6 +201,7 @@ struct DelayStreamData {
     bool          initialized = false;
     std::atomic<bool> create_done{false}; // set true after ds_create completes
     std::atomic<bool> in_get_props{false}; // true while ds_get_properties is running
+    std::atomic<bool> sid_autofill_guard{false};
     std::vector<float> work_buf;
 
     // Thread-safe accessors for stream_id
@@ -464,6 +478,16 @@ static void ds_update(void* data, obs_data_t* settings) {
     d->router.set_audio_codec(audio_codec);
     const char* raw = obs_data_get_string(settings, "stream_id");
     std::string sid = raw ? sanitize_stream_id(raw) : "";
+    if (sid.empty()) {
+        if (!d->sid_autofill_guard.exchange(true)) {
+            sid = generate_stream_id(12);
+            obs_data_set_string(settings, "stream_id", sid.c_str());
+            d->sid_autofill_guard.store(false);
+        } else {
+            // 再入中は現状の値を使う
+            sid = raw ? sanitize_stream_id(raw) : "";
+        }
+    }
     d->set_stream_id(sid);
     d->router.set_stream_id(sid);
     const char* hip = obs_data_get_string(settings, "host_ip_manual");
@@ -846,6 +870,8 @@ static obs_properties_t* ds_get_properties(void* data) {
         obs_property_t* sid_p =
             obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
         obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
+        // 配信IDは自動生成のみ。UIからの編集は不可にする
+        obs_property_set_enabled(sid_p, false);
         { char info[128]; snprintf(info, sizeof(info), T_("AutoIpFmt"), d->auto_ip.c_str());
           obs_properties_add_text(grp, "auto_ip_info", info, OBS_TEXT_INFO); }
         obs_property_t* ip_p =
