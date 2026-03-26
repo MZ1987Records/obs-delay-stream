@@ -80,10 +80,27 @@ static std::string get_local_ip() {
 static void copy_to_clipboard(const std::string& text) {
     if (!OpenClipboard(nullptr)) return;
     EmptyClipboard();
-    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
+    std::wstring w;
+    if (!text.empty()) {
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+                                       static_cast<int>(text.size()),
+                                       nullptr, 0);
+        if (wlen > 0) {
+            w.resize(static_cast<size_t>(wlen));
+            MultiByteToWideChar(CP_UTF8, 0, text.c_str(),
+                                static_cast<int>(text.size()),
+                                &w[0], wlen);
+        }
+    }
+    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, (w.size() + 1) * sizeof(wchar_t));
     if (h) {
-        char* p = static_cast<char*>(GlobalLock(h));
-        if (p) { memcpy(p, text.c_str(), text.size() + 1); GlobalUnlock(h); SetClipboardData(CF_TEXT, h); }
+        wchar_t* p = static_cast<wchar_t*>(GlobalLock(h));
+        if (p) {
+            if (!w.empty()) memcpy(p, w.data(), w.size() * sizeof(wchar_t));
+            p[w.size()] = L'\0';
+            GlobalUnlock(h);
+            SetClipboardData(CF_UNICODETEXT, h);
+        }
     }
     CloseClipboard();
 }
@@ -1193,13 +1210,13 @@ static obs_properties_t* ds_get_properties(void* data) {
             } else {
                 snprintf(us, sizeof(us), "<a href=\"%s\">%s</a>", url.c_str(), url.c_str());
             }
-            obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
-            obs_property_set_long_description(up, us);
-            obs_property_text_set_info_word_wrap(up, false);
             obs_property_t* memo_p = obs_properties_add_text(ch_grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
             if (d->router_running.load()) {
                 obs_property_set_enabled(memo_p, false);
             }
+            obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
+            obs_property_set_long_description(up, us);
+            obs_property_text_set_info_word_wrap(up, false);
             obs_property_t* sp = obs_properties_add_float_slider(ch_grp, dk, dn, 0.0, MAX_DELAY_MS, 1.0);
             obs_property_float_set_suffix(sp, " ms");
             if (nc > 0) {
