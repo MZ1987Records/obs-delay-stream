@@ -609,12 +609,12 @@ private:
         return sid + "/" + std::to_string(ch);
     }
 
-    // ----- 配信IDのサニタイズ (半角英数字のみ許可) -----
+    // ----- 配信IDのサニタイズ (半角英数字のみ許可、大小は保持) -----
     static std::string sanitize_id(const std::string& raw) {
         std::string out;
         for (char c : raw) {
             if (std::isalnum((unsigned char)c))
-                out += (char)std::tolower((unsigned char)c);
+                out += c;
         }
         return out;
     }

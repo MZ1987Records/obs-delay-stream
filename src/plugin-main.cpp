@@ -1294,7 +1294,10 @@ static obs_properties_t* ds_get_properties(void* data) {
         if (d->router_running.load() || d->sub_ch_count >= NUM_SUB_CH) {
             obs_property_set_enabled(add_p, false);
         }
-        obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);
+        char sub_group_label[128];
+        snprintf(sub_group_label, sizeof(sub_group_label),
+                 T_("GroupSubChannels"), d->sub_ch_count);
+        obs_properties_add_group(props, "grp_sub", sub_group_label, OBS_GROUP_NORMAL, grp);
     }
     obs_properties_add_text(props, "about_info",
         "obs-delay-stream v" PLUGIN_VERSION " | (C) 2026 Mazzn1987, Chigiri Tsutsumi | GPL 2.0+",
