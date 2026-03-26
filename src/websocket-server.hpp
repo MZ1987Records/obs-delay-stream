@@ -209,9 +209,13 @@ public:
         }
         if (thread_.joinable()) thread_.join();
 
-        // 4. 状態をクリア（サーバー停止後なのでハンドラは走らない）
+        // 4. 計測結果・適用遅延をキャッシュに退避してから状態をクリア
         {
             std::lock_guard<std::mutex> lk(mtx_);
+            for (auto& [key, cs] : ch_map_) {
+                if (cs.last_result.valid || cs.last_applied_delay >= 0.0)
+                    ch_cache_[key] = { cs.last_result, cs.last_applied_delay };
+            }
             conn_map_.clear();
             ch_map_.clear();
             reset_opus_state();
@@ -801,7 +805,16 @@ private:
         {
             std::lock_guard<std::mutex> lk(mtx_);
             conn_map_[h] = { sid, ch };
-            auto& cs = ch_map_[make_key(sid, ch)];
+            auto key = make_key(sid, ch);
+            auto& cs = ch_map_[key];
+            // 新規エントリかつキャッシュがあれば復元
+            if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
+                auto it = ch_cache_.find(key);
+                if (it != ch_cache_.end()) {
+                    cs.last_result        = it->second.last_result;
+                    cs.last_applied_delay = it->second.last_applied_delay;
+                }
+            }
             cs.conns.insert(h);
             count = cs.conns.size();
             cb = on_conn_change;
@@ -1090,6 +1103,13 @@ private:
     std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;
     // "stream_id/ch_0idx" → ChannelState
     std::map<std::string, ChannelState> ch_map_;
+
+    // stop() 時に退避される計測結果・適用遅延キャッシュ
+    struct ChannelCache {
+        LatencyResult last_result;
+        double        last_applied_delay{-1.0};
+    };
+    std::map<std::string, ChannelCache> ch_cache_;
 
     // 計測スレッド管理
     std::mutex measure_threads_mtx_;
