@@ -21,7 +21,7 @@ OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネ
 
 ## インストール
 
-1. [Releases](https://github.com/burgermate/obs-delay-stream/releases) から最新の `obs-delay-stream-vX.X.X.zip` をダウンロードして解凍
+1. [Releases](https://github.com/MZ1987Records/obs-delay-stream/releases) から最新の `obs-delay-stream-vX.X.X.zip` をダウンロードして解凍
 2. `plugins/obs-delay-stream` を以下のフォルダに配置:
 
 ```
