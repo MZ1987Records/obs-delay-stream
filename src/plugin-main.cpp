@@ -324,6 +324,7 @@ static obs_properties_t* ds_get_properties(void*);
 static void              ds_get_defaults(obs_data_t*);
 static void              ensure_init(DelayStreamData*, uint32_t, uint32_t);
 static void              build_flow_panel(obs_properties_t*, DelayStreamData*);
+static void              apply_sub_delay(DelayStreamData*, int, double);
 
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void*);
@@ -343,6 +344,7 @@ static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void*);
 static bool cb_enabled_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_stream_id_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_host_ip_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
+static bool cb_detail_mode_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void*);
 static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void*);
 
@@ -441,14 +443,27 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
         if (sid != d->get_stream_id()) return;
         if (ch < 0 || ch >= NUM_SUB_CH) return;
         auto& ms = d->sub[ch].measure;
+        bool was_measuring = false;
         {
             std::lock_guard<std::mutex> lk(ms.mtx);
+            was_measuring = ms.measuring;
             ms.result = r;
             ms.measuring = false;
             ms.applied = false;
             ms.last_error = r.valid ? "" : T_("MeasureFailed");
         }
-        request_properties_refresh(d);
+        if (r.valid && was_measuring) {
+            struct Ctx { DelayStreamData* d; int ch; double ms; };
+            auto* c = new Ctx{d, ch, r.avg_one_way};
+            obs_queue_task(OBS_TASK_UI, [](void* p){
+                auto* c = static_cast<Ctx*>(p);
+                apply_sub_delay(c->d, c->ch, c->ms);
+                request_properties_refresh(c->d);
+                delete c;
+            }, c, false);
+        } else {
+            request_properties_refresh(d);
+        }
     };
 
     ds_update(d, settings);
@@ -623,19 +638,23 @@ static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
+    if (!d || i < 0 || i >= NUM_SUB_CH) return;
+    obs_data_t* s = obs_source_get_settings(d->context);
+    char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
+    obs_data_set_double(s, key, ms);
+    obs_data_release(s);
+    d->sub[i].delay_ms = (float)ms;
+    d->sub[i].buf.set_delay_ms((uint32_t)ms);
+    d->router.notify_apply_delay(i, ms);
+}
 static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     auto* d = ctx->d; int i = ctx->ch;
     LatencyResult r;
     { std::lock_guard<std::mutex> lk(d->sub[i].measure.mtx); r = d->sub[i].measure.result; }
     if (!r.valid) return false;
-    obs_data_t* s = obs_source_get_settings(d->context);
-    char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
-    obs_data_set_double(s, key, r.avg_one_way);
-    d->sub[i].delay_ms = (float)r.avg_one_way;
-    d->sub[i].buf.set_delay_ms((uint32_t)r.avg_one_way);
-    obs_data_release(s);
-    d->router.notify_apply_delay(i, r.avg_one_way);
+    apply_sub_delay(d, i, r.avg_one_way);
     request_properties_refresh(d);
     return false;
 }
@@ -897,6 +916,39 @@ static bool cb_stream_id_changed(void* priv, obs_properties_t* props, obs_proper
 static bool cb_host_ip_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t*) {
     (void)priv; return false;
 }
+static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamData* d, bool detail) {
+    if (!props || !d) return;
+    if (auto* p = obs_properties_get(props, "host_ip_manual")) {
+        obs_property_set_visible(p, detail);
+    }
+    int sub_count = d->sub_ch_count;
+    for (int i = 0; i < sub_count; ++i) {
+        char uk[32], dk[32], mk[32], ak[32];
+        snprintf(uk, sizeof(uk), "sub%d_url", i);
+        snprintf(dk, sizeof(dk), "sub%d_delay_ms", i);
+        snprintf(mk, sizeof(mk), "sub%d_meas", i);
+        snprintf(ak, sizeof(ak), "sub%d_apply", i);
+        if (auto* p = obs_properties_get(props, uk)) {
+            obs_property_set_visible(p, detail);
+        }
+        if (auto* p = obs_properties_get(props, dk)) {
+            obs_property_set_visible(p, detail);
+        }
+        if (auto* p = obs_properties_get(props, mk)) {
+            obs_property_set_visible(p, detail);
+        }
+        if (auto* p = obs_properties_get(props, ak)) {
+            obs_property_set_visible(p, detail);
+        }
+    }
+}
+static bool cb_detail_mode_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
+    auto* d = static_cast<DelayStreamData*>(priv);
+    if (!props || !settings || !d) return false;
+    bool detail = obs_data_get_bool(settings, "detail_mode");
+    apply_detail_mode_visibility(props, d, detail);
+    return true;
+}
 
 static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
@@ -1005,14 +1057,20 @@ static obs_properties_t* ds_get_properties(void* data) {
     maybe_fill_cloudflared_path_from_auto(d);
 
     bool has_sid = false;
+    bool detail_mode = false;
     {
         obs_data_t* s = obs_source_get_settings(d->context);
         if (s) {
             const char* sid = obs_data_get_string(s, "stream_id");
             has_sid = (sid && *sid);
+            detail_mode = obs_data_get_bool(s, "detail_mode");
             obs_data_release(s);
         }
     }
+
+    obs_property_t* detail_p =
+        obs_properties_add_bool(props, "detail_mode", T_("DetailMode"));
+    obs_property_set_modified_callback2(detail_p, cb_detail_mode_changed, d);
 
     // (1) Stream ID / IP
     {
@@ -1299,6 +1357,9 @@ static obs_properties_t* ds_get_properties(void* data) {
                  T_("GroupSubChannels"), d->sub_ch_count);
         obs_properties_add_group(props, "grp_sub", sub_group_label, OBS_GROUP_NORMAL, grp);
     }
+
+    apply_detail_mode_visibility(props, d, detail_mode);
+
     obs_properties_add_text(props, "about_info",
         "obs-delay-stream v" PLUGIN_VERSION " | (C) 2026 Mazzn1987, Chigiri Tsutsumi | GPL 2.0+",
         OBS_TEXT_INFO);
@@ -1310,6 +1371,7 @@ static obs_properties_t* ds_get_properties(void* data) {
 static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_bool  (settings, "enabled",               true);
     obs_data_set_default_bool  (settings, "delay_disable",         false);
+    obs_data_set_default_bool  (settings, "detail_mode",           false);
     obs_data_set_default_bool  (settings, "ws_send_paused",        false);
     obs_data_set_default_bool  (settings, "ws_send_enabled",       true);
     obs_data_set_default_bool  (settings, "ws_enabled",            true);
