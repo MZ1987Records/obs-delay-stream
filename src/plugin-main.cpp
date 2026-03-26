@@ -345,7 +345,7 @@ bool obs_module_load(void) {
 }
 void obs_module_unload(void) {}
 
-static const char* ds_get_name(void*) { return "Delay Stream (obs-delay-stream)"; }
+static const char* ds_get_name(void*) { return "obs-delay-stream"; }
 
 static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     blog(LOG_INFO, "[obs-delay-stream] ds_create START");

@@ -281,7 +281,7 @@ echo  Install dir: %OBS_INSTALL_DIR%\plugins\obs-delay-stream
 echo.
 echo  1. Open OBS Studio
 echo  2. Right-click audio source - Filters - click +
-echo  3. Select "Delay Stream (delay + WebSocket)"
+echo  3. Select "obs-delay-stream"
 echo.
 pause
 exit /b 0

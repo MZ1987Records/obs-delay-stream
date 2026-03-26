@@ -154,7 +154,7 @@ data\locale\en-US.ini
 
 1. OBS Studioを起動
 2. 音声ソース（マイク・デスクトップ音声など）を右クリック
-3. **フィルター** → **＋** → **「Delay Stream (遅延 + WebSocket配信)」** を選択
+3. **フィルター** → **＋** → **「obs-delay-stream」** を選択
 4. GUIパネルが開けばインストール成功
 
 ---
