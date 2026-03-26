@@ -16,10 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Pandoc
+      - name: Install Pandoc and wkhtmltopdf
         shell: pwsh
         run: |
-          choco install pandoc -y
+          choco install pandoc wkhtmltopdf -y
 
       - name: Detect Windows SDK
         shell: pwsh
@@ -113,7 +113,7 @@ jobs:
           $src = "$env:GITHUB_WORKSPACE/README.md"
           $dst = "$env:GITHUB_WORKSPACE/dist/README.pdf"
           if (-Not (Test-Path $src)) { throw "README.md not found." }
-          pandoc $src -o $dst
+          pandoc $src -o $dst --pdf-engine=wkhtmltopdf
 
       - name: Pack artifact
         shell: pwsh
