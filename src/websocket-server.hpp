@@ -20,7 +20,8 @@
  *   Browser → OBS: {"type":"pong","seq":N}
  *   OBS → Browser: {"type":"latency_result","avg_rtt":X,"one_way":Y,"min":A,"max":B,"samples":N}
  *   OBS → Browser: {"type":"apply_delay","ms":X}
- *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N}  ← 接続直後に送信
+ *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N,"memo":"..."}  ← 接続直後に送信
+ *   OBS → Browser: {"type":"memo","ch":N,"memo":"..."}  ← メモ変更通知
  *   Browser → OBS: {"type":"audio_codec","mode":"pcm"}  ← Opus不可時のPCM要求
  *
  * v2.0 changes:
@@ -64,6 +65,7 @@
 #include <mutex>
 #include <map>
 #include <set>
+#include <array>
 #include <vector>
 #include <chrono>
 #include <string>
@@ -95,6 +97,7 @@ using Ms         = std::chrono::duration<double, std::milli>;
 
 static constexpr uint32_t MAGIC_AUDI = 0x41554449u; // "AUDI"
 static constexpr uint32_t MAGIC_OPUS = 0x4F505553u; // "OPUS"
+static constexpr int MAX_CH = 10;
 
 // ============================================================
 // LatencyResult
@@ -234,6 +237,21 @@ public:
     std::string stream_id() const {
         std::lock_guard<std::mutex> lk(mtx_);
         return stream_id_;
+    }
+
+    void set_sub_memo(int ch, const std::string& memo) {
+        if (ch < 0 || ch >= MAX_CH) return;
+        std::string sid;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            if (sub_memo_[ch] == memo) return;
+            sub_memo_[ch] = memo;
+            sid = stream_id_;
+        }
+        if (sid.empty()) return;
+        std::string msg = "{\"type\":\"memo\",\"ch\":" + std::to_string(ch + 1)
+                        + ",\"memo\":\"" + json_escape(memo) + "\"}";
+        broadcast_text(sid, ch, msg);
     }
 
     // ----- 音声送信 (ch: 0-indexed) -----
@@ -574,6 +592,56 @@ private:
         return out;
     }
 
+    static std::string json_escape(const std::string& s) {
+        std::string out;
+        out.reserve(s.size() + 8);
+        for (unsigned char c : s) {
+            switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"':  out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out.push_back((char)c);
+                }
+            }
+        }
+        return out;
+    }
+
+    static std::string url_decode(const std::string& s) {
+        std::string out;
+        out.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ++i) {
+            unsigned char c = (unsigned char)s[i];
+            if (c == '%' && i + 2 < s.size()
+                && std::isxdigit((unsigned char)s[i + 1])
+                && std::isxdigit((unsigned char)s[i + 2])) {
+                auto hex = [](unsigned char v) -> int {
+                    if (v >= '0' && v <= '9') return v - '0';
+                    if (v >= 'a' && v <= 'f') return 10 + (v - 'a');
+                    if (v >= 'A' && v <= 'F') return 10 + (v - 'A');
+                    return 0;
+                };
+                int hi = hex((unsigned char)s[i + 1]);
+                int lo = hex((unsigned char)s[i + 2]);
+                out.push_back((char)((hi << 4) | lo));
+                i += 2;
+            } else if (c == '+') {
+                out.push_back(' ');
+            } else {
+                out.push_back((char)c);
+            }
+        }
+        return out;
+    }
+
     // ----- WebSocketパスから (stream_id, ch) を解析 -----
     static bool parse_path(const std::string& path,
                             std::string& stream_id, int& ch_0idx)
@@ -813,6 +881,7 @@ private:
         size_t count = 0;
         LatencyResult cached_result;
         double cached_delay = -1.0;
+        std::string memo;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             conn_map_[h] = { sid, ch };
@@ -831,15 +900,16 @@ private:
             cb = on_conn_change;
             cached_result = cs.last_result;
             cached_delay  = cs.last_applied_delay;
+            if (ch >= 0 && ch < MAX_CH) memo = sub_memo_[ch];
         }
         if (cb) cb(sid, ch, count);
 
         // session_info
-        char info[256];
-        snprintf(info, sizeof(info),
-            "{\"type\":\"session_info\",\"stream_id\":\"%s\",\"ch\":%d}",
-            sid.c_str(), ch + 1);
-        try { srv->send(h, std::string(info), websocketpp::frame::opcode::text); }
+        std::string info = "{\"type\":\"session_info\",\"stream_id\":\"" + sid
+                         + "\",\"ch\":" + std::to_string(ch + 1);
+        if (!memo.empty()) info += ",\"memo\":\"" + json_escape(memo) + "\"";
+        info += "}";
+        try { srv->send(h, info, websocketpp::frame::opcode::text); }
         catch (...) {}
 
         // 計測済みの遅延情報があれば再接続クライアントへ即送信
@@ -938,10 +1008,66 @@ private:
         websocketpp::connection_hdl hdl = h;
         try {
             auto con = srv->get_con_from_hdl(hdl);
-            std::string path = con->get_resource();
-            auto q = path.find_first_of("?#");
-            if (q != std::string::npos) path = path.substr(0, q);
+            std::string raw = con->get_resource();
+            std::string path = raw;
+            std::string query;
+            auto qpos = path.find('?');
+            if (qpos != std::string::npos) {
+                query = path.substr(qpos + 1);
+                path = path.substr(0, qpos);
+            }
+            auto hpos = path.find('#');
+            if (hpos != std::string::npos) path = path.substr(0, hpos);
             if (path.empty()) path = "/";
+            if (path == "/memo") {
+                std::string sid_param;
+                int ch_1idx = -1;
+                size_t pos = 0;
+                while (pos < query.size()) {
+                    size_t amp = query.find('&', pos);
+                    if (amp == std::string::npos) amp = query.size();
+                    std::string kv = query.substr(pos, amp - pos);
+                    size_t eq = kv.find('=');
+                    std::string key = (eq == std::string::npos) ? kv : kv.substr(0, eq);
+                    std::string val = (eq == std::string::npos) ? "" : kv.substr(eq + 1);
+                    if (key == "sid") sid_param = url_decode(val);
+                    else if (key == "ch") ch_1idx = std::atoi(val.c_str());
+                    pos = amp + 1;
+                }
+
+                std::string sid = sanitize_id(sid_param);
+                if (sid.empty() || ch_1idx < 1 || ch_1idx > MAX_CH) {
+                    con->set_status(websocketpp::http::status_code::bad_request);
+                    con->replace_header("Content-Type", "text/plain; charset=utf-8");
+                    con->set_body("Bad Request");
+                    return;
+                }
+
+                std::string current_sid;
+                std::string memo;
+                {
+                    std::lock_guard<std::mutex> lk(mtx_);
+                    current_sid = stream_id_;
+                    if (ch_1idx - 1 >= 0 && ch_1idx - 1 < MAX_CH) {
+                        memo = sub_memo_[ch_1idx - 1];
+                    }
+                }
+                if (current_sid.empty() || sid != current_sid) {
+                    con->set_status(websocketpp::http::status_code::not_found);
+                    con->replace_header("Content-Type", "text/plain; charset=utf-8");
+                    con->set_body("Not Found");
+                    return;
+                }
+
+                std::string body = "{\"ok\":true,\"stream_id\":\"" + current_sid
+                                 + "\",\"ch\":" + std::to_string(ch_1idx)
+                                 + ",\"memo\":\"" + json_escape(memo) + "\"}";
+                con->set_status(websocketpp::http::status_code::ok);
+                con->replace_header("Content-Type", "application/json; charset=utf-8");
+                con->replace_header("Cache-Control", "no-store");
+                con->set_body(std::move(body));
+                return;
+            }
             if (path == "/" || path == "/index.html") {
                 if (!body.empty()) {
                     con->set_status(websocketpp::http::status_code::ok);
@@ -1114,6 +1240,7 @@ private:
     std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;
     // "stream_id/ch_0idx" → ChannelState
     std::map<std::string, ChannelState> ch_map_;
+    std::array<std::string, MAX_CH> sub_memo_{};
 
     // stop() 時に退避される計測結果・適用遅延キャッシュ
     struct ChannelCache {

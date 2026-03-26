@@ -30,12 +30,15 @@
     <div class="container is-max-desktop">
       <div class="block">
         <div class="notification is-dark" id="statusBar" role="status">
-          <span class="icon-text">
+          <div class="status-inner">
+            <div class="status-memo" id="infoMemo">—</div>
+            <span class="icon-text">
             <span class="icon">
               <i id="statusIcon" class="fas fa-info-circle"></i>
             </span>
             <span id="statusText">待機中 — 接続ボタンを押してください</span>
-          </span>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -82,7 +85,7 @@
                       <span class="icon">
                         <i class="fas fa-stop"></i>
                       </span>
-                      <span>停止</span>
+                      <span>切断</span>
                     </button>
                   </div>
                 </div>
@@ -259,8 +262,24 @@
           chInput.value = String(chNum);
         }
       }
+      if (sid && ch) fetchMemoPreview(sid, ch);
     }
     applyUrlParams();
+
+    function fetchMemoPreview(sid, ch) {
+      const chNum = parseInt(ch, 10);
+      if (!sid || !Number.isInteger(chNum) || chNum < 1 || chNum > 10) return;
+      const memoEl = document.getElementById('infoMemo');
+      if (!memoEl) return;
+      const url = `/memo?sid=${encodeURIComponent(sid)}&ch=${encodeURIComponent(String(chNum))}`;
+      fetch(url, { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data || typeof data.memo !== 'string') return;
+          memoEl.textContent = data.memo.length ? data.memo : '—';
+        })
+        .catch(() => {});
+    }
 
     function updateUrlPreview() {
       const sid = sidInput.value.trim();
@@ -988,6 +1007,17 @@
           if (msg.stream_id) document.getElementById('sidInput').value = msg.stream_id;
           if (msg.ch !== undefined && msg.ch !== null) {
             document.getElementById('chInput').value = String(msg.ch);
+          }
+          {
+            const memoEl = document.getElementById('infoMemo');
+            if (memoEl) memoEl.textContent = (msg.memo && msg.memo.length) ? msg.memo : '—';
+          }
+          break;
+
+        case 'memo':
+          {
+            const memoEl = document.getElementById('infoMemo');
+            if (memoEl) memoEl.textContent = (msg.memo && msg.memo.length) ? msg.memo : '—';
           }
           break;
 

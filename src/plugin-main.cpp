@@ -187,7 +187,6 @@ struct DelayStreamData {
     StreamRouter  router;
     std::atomic<bool> router_running{false};
     std::array<ChCtx, NUM_SUB_CH> btn_ctx;
-    std::array<ChCtx, NUM_SUB_CH> copy_ctx;
     struct SubChannel {
         float        delay_ms = 0.0f;
         DelayBuffer  buf;
@@ -304,7 +303,7 @@ static void              build_flow_panel(obs_properties_t*, DelayStreamData*);
 
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void*);
-static bool cb_sub_copy_url(obs_properties_t*, obs_property_t*, void*);
+static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void*);
 static bool cb_rtmp_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void*);
 static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void*);
@@ -366,7 +365,6 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     d->host_ip  = d->auto_ip;
     for (int i = 0; i < NUM_SUB_CH; ++i) {
         d->btn_ctx[i]         = { d, i };
-        d->copy_ctx[i]        = { d, i };
     }
     d->flow.on_update      = [d]() { request_properties_refresh(d); };
     d->flow.on_ch_measured = [d](int, LatencyResult) { request_properties_refresh(d); };
@@ -501,6 +499,9 @@ static void ds_update(void* data, obs_data_t* settings) {
     for (int i = 0; i < NUM_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
         d->sub[i].delay_ms = (float)obs_data_get_double(settings, key);
+        char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
+        const char* memo = obs_data_get_string(settings, memo_key);
+        d->router.set_sub_memo(i, memo ? memo : "");
         // Apply base delay + global offset (clamp to 0)
         float effective = d->sub[i].delay_ms + d->sub_offset_ms;
         if (effective < 0.0f) effective = 0.0f;
@@ -586,11 +587,27 @@ static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
-static bool cb_sub_copy_url(obs_properties_t*, obs_property_t*, void* priv) {
-    auto* ctx = static_cast<ChCtx*>(priv);
-    std::string url = make_sub_url(ctx->d, ctx->ch + 1);
-    if (url.empty()) return false;
-    copy_to_clipboard(url);
+static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
+    auto* d = static_cast<DelayStreamData*>(priv);
+    if (!d) return false;
+    obs_data_t* s = obs_source_get_settings(d->context);
+    std::string out;
+    out.reserve(512);
+    for (int i = 0; i < NUM_SUB_CH; ++i) {
+        std::string url = make_sub_url(d, i + 1);
+        char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
+        const char* memo = obs_data_get_string(s, memo_key);
+        const char* url_show = url.empty() ? T_("NotConfigured") : url.c_str();
+        if (!out.empty()) out += "\r\n";
+        out += "Ch.";
+        out += std::to_string(i + 1);
+        out += "\t";
+        if (memo && *memo) out += memo;
+        out += "\t";
+        out += url_show;
+    }
+    obs_data_release(s);
+    if (!out.empty()) copy_to_clipboard(out);
     return false;
 }
 static bool cb_rtmp_measure(obs_properties_t*, obs_property_t*, void* priv) {
@@ -1033,10 +1050,15 @@ static obs_properties_t* ds_get_properties(void* data) {
     // (6) Sub channels
     {
         obs_properties_t* grp = obs_properties_create();
+        obs_properties_add_button2(grp, "sub_copy_all", T_("SubCopyAll"), cb_sub_copy_all, d);
+        {
+            obs_property_t* spc = obs_properties_add_text(grp, "sub_copy_all_spacer", "", OBS_TEXT_INFO);
+            obs_property_set_long_description(spc, " ");
+            obs_property_text_set_info_word_wrap(spc, false);
+        }
         for (int i = 0; i < NUM_SUB_CH; ++i) {
             d->btn_ctx[i]  = { d, i };
-            d->copy_ctx[i] = { d, i };
-            char dk[32], uk[32], mk[32], ak[32], rk[32], ck[32];
+            char dk[32], uk[32], mk[32], ak[32], rk[32], nk[32];
             char dn[64], ul[32], us[512];
             snprintf(dk, sizeof(dk), "sub%d_delay_ms",    i);
             snprintf(dn, sizeof(dn), "%s", T_("SubDelay"));
@@ -1044,7 +1066,7 @@ static obs_properties_t* ds_get_properties(void* data) {
             snprintf(mk, sizeof(mk), "sub%d_meas",        i);
             snprintf(ak, sizeof(ak), "sub%d_apply",       i);
             snprintf(rk, sizeof(rk), "sub%d_result",      i);
-            snprintf(ck, sizeof(ck), "sub%d_copy",        i);
+            snprintf(nk, sizeof(nk), "sub%d_memo",        i);
             snprintf(ul, sizeof(ul), "Ch.%d", i+1);
             if (i > 0) {
                 char sk[32];
@@ -1064,11 +1086,12 @@ static obs_properties_t* ds_get_properties(void* data) {
             obs_property_t* up = obs_properties_add_text(grp, uk, ul, OBS_TEXT_INFO);
             obs_property_set_long_description(up, us);
             obs_property_text_set_info_word_wrap(up, false);
+            obs_property_t* memo_p = obs_properties_add_text(grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
+            if (d->router_running.load()) {
+                obs_property_set_enabled(memo_p, false);
+            }
             obs_property_t* sp = obs_properties_add_float_slider(grp, dk, dn, 0.0, MAX_DELAY_MS, 1.0);
             obs_property_float_set_suffix(sp, " ms");
-            if (!url.empty()) {
-                obs_properties_add_button2(grp, ck, T_("SubCopyUrl"), cb_sub_copy_url, &d->copy_ctx[i]);
-            }
             if (nc > 0) {
                 MeasureState& ms = d->sub[i].measure;
                 std::lock_guard<std::mutex> lk(ms.mtx);
@@ -1130,5 +1153,7 @@ static void ds_get_defaults(obs_data_t* settings) {
     for (int i = 0; i < NUM_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
         obs_data_set_default_double(settings, key, 0.0);
+        char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
+        obs_data_set_default_string(settings, memo_key, "");
     }
 }
