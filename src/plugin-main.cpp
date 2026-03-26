@@ -1159,12 +1159,10 @@ static obs_properties_t* ds_get_properties(void* data) {
     {
         obs_properties_t* grp = obs_properties_create();
         {
-            char count_info[64];
-            snprintf(count_info, sizeof(count_info), T_("SubCountInfoFmt"), d->sub_ch_count);
-            obs_properties_add_text(grp, "sub_count_info", count_info, OBS_TEXT_INFO);
+            char copy_all_label[128];
+            snprintf(copy_all_label, sizeof(copy_all_label), T_("SubCopyAll"), d->sub_ch_count);
+            obs_properties_add_button2(grp, "sub_copy_all", copy_all_label, cb_sub_copy_all, d);
         }
-        obs_properties_add_text(grp, "sub_remove_note", T_("SubRemoveNote"), OBS_TEXT_INFO);
-        obs_properties_add_button2(grp, "sub_copy_all", T_("SubCopyAll"), cb_sub_copy_all, d);
         {
             obs_property_t* spc = obs_properties_add_text(grp, "sub_copy_all_spacer", "", OBS_TEXT_INFO);
             obs_property_set_long_description(spc, " ");
@@ -1174,7 +1172,7 @@ static obs_properties_t* ds_get_properties(void* data) {
         for (int i = 0; i < sub_count; ++i) {
             d->btn_ctx[i]  = { d, i };
             char dk[32], uk[32], mk[32], ak[32], rk[32], nk[32], dk_rm[32];
-            char dn[64], ul[32], us[512];
+            char dn[64], ul[32], us[512], gk[32], gt[32];
             snprintf(dk, sizeof(dk), "sub%d_delay_ms",    i);
             snprintf(dn, sizeof(dn), "%s", T_("SubDelay"));
             snprintf(uk, sizeof(uk), "sub%d_url",         i);
@@ -1183,14 +1181,10 @@ static obs_properties_t* ds_get_properties(void* data) {
             snprintf(rk, sizeof(rk), "sub%d_result",      i);
             snprintf(nk, sizeof(nk), "sub%d_memo",        i);
             snprintf(dk_rm, sizeof(dk_rm), "sub%d_remove", i);
-            snprintf(ul, sizeof(ul), "Ch.%d", i+1);
-            if (i > 0) {
-                char sk[32];
-                snprintf(sk, sizeof(sk), "sub%d_spacer", i);
-                obs_property_t* spc = obs_properties_add_text(grp, sk, "", OBS_TEXT_INFO);
-                obs_property_set_long_description(spc, " ");
-                obs_property_text_set_info_word_wrap(spc, false);
-            }
+            snprintf(ul, sizeof(ul), "URL");
+            snprintf(gk, sizeof(gk), "sub%d_group", i);
+            snprintf(gt, sizeof(gt), "Ch.%d", i+1);
+            obs_properties_t* ch_grp = obs_properties_create();
             std::string url = make_sub_url(d, i+1);
             size_t nc = d->router.client_count(i);
             const char* url_show = url.empty() ? T_("NotConfigured") : url.c_str();
@@ -1199,57 +1193,58 @@ static obs_properties_t* ds_get_properties(void* data) {
             } else {
                 snprintf(us, sizeof(us), "<a href=\"%s\">%s</a>", url.c_str(), url.c_str());
             }
-            obs_property_t* up = obs_properties_add_text(grp, uk, ul, OBS_TEXT_INFO);
+            obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
             obs_property_set_long_description(up, us);
             obs_property_text_set_info_word_wrap(up, false);
-            obs_property_t* memo_p = obs_properties_add_text(grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
+            obs_property_t* memo_p = obs_properties_add_text(ch_grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
             if (d->router_running.load()) {
                 obs_property_set_enabled(memo_p, false);
             }
-            obs_property_t* sp = obs_properties_add_float_slider(grp, dk, dn, 0.0, MAX_DELAY_MS, 1.0);
+            obs_property_t* sp = obs_properties_add_float_slider(ch_grp, dk, dn, 0.0, MAX_DELAY_MS, 1.0);
             obs_property_float_set_suffix(sp, " ms");
             if (nc > 0) {
                 MeasureState& ms = d->sub[i].measure;
                 std::lock_guard<std::mutex> lk(ms.mtx);
                 if (ms.measuring) {
                     obs_property_t* mp = obs_properties_add_button2(
-                        grp, mk, T_("Measuring"),
+                        ch_grp, mk, T_("Measuring"),
                         cb_sub_measure, &d->btn_ctx[i]);
                     obs_property_set_enabled(mp, false);
                 } else if (ms.result.valid) {
                     char rs[128];
                     snprintf(rs, sizeof(rs), T_("SubResultFmt"),
                              ms.result.avg_rtt_ms, ms.result.avg_one_way);
-                    obs_properties_add_text(grp, rk, rs, OBS_TEXT_INFO);
+                    obs_properties_add_text(ch_grp, rk, rs, OBS_TEXT_INFO);
                     char al[64]; snprintf(al, sizeof(al), T_("ApplyFmt"), ms.result.avg_one_way);
-                    obs_properties_add_button2(grp, ak, al, cb_sub_apply, &d->btn_ctx[i]);
+                    obs_properties_add_button2(ch_grp, ak, al, cb_sub_apply, &d->btn_ctx[i]);
                     char ml[64];
                     snprintf(ml, sizeof(ml), T_("SubRemeasureFmt"), nc);
-                    obs_properties_add_button2(grp, mk, ml,
+                    obs_properties_add_button2(ch_grp, mk, ml,
                         cb_sub_measure, &d->btn_ctx[i]);
                 } else {
                     if (!ms.last_error.empty()) {
-                        obs_properties_add_text(grp, rk, ms.last_error.c_str(), OBS_TEXT_INFO);
+                        obs_properties_add_text(ch_grp, rk, ms.last_error.c_str(), OBS_TEXT_INFO);
                     }
                     char ml[64];
                     snprintf(ml, sizeof(ml), T_("SubMeasureFmt"), nc);
-                    obs_properties_add_button2(grp, mk, ml,
+                    obs_properties_add_button2(ch_grp, mk, ml,
                         cb_sub_measure, &d->btn_ctx[i]);
                 }
             } else {
                 obs_property_t* mp = obs_properties_add_button2(
-                    grp, mk, T_("SubMeasureDisconnected"),
+                    ch_grp, mk, T_("SubMeasureDisconnected"),
                     cb_sub_measure, &d->btn_ctx[i]);
                 obs_property_set_enabled(mp, false);
             }
             char rm_label[32];
             snprintf(rm_label, sizeof(rm_label), T_("SubRemoveFmt"), i + 1);
-            obs_property_t* rm = obs_properties_add_button2(grp, dk_rm, rm_label,
+            obs_property_t* rm = obs_properties_add_button2(ch_grp, dk_rm, rm_label,
                 cb_sub_remove, &d->btn_ctx[i]);
             obs_property_set_long_description(rm, T_("SubRemoveDesc"));
             if (d->router_running.load() || sub_count <= 1) {
                 obs_property_set_enabled(rm, false);
             }
+            obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
         }
         {
             obs_property_t* spc = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
