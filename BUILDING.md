@@ -1,238 +1,185 @@
 # ビルド手順（Windows）
 
-## 最短手順（推奨）: `build.bat` を実行
+## 最短手順（推奨）
 
-`build.bat` は **OBS Studio の自動ダウンロード・自動ビルド** と
-`websocketpp/asio` の取得、プラグインのビルドとインストールまで **一括** で行います。
-そのため通常は手動のビルド手順は不要です。
+`build.bat` は以下を一括実行します。
+
+- OBS Studio ソースの自動取得/ビルド（未準備時）
+- `websocketpp` / `asio` の取得
+- プラグインの CMake 構成/ビルド
+- OBS へのインストール（ProgramData 既定）
 
 ```powershell
-# このREADMEがあるフォルダで実行
 cd C:\obs-delay-stream
 .\build.bat
 ```
 
-既存の OBS ソースを使いたい場合は、パスを指定できます。
+既存の OBS ソースを使う場合:
 
 ```powershell
 .\build.bat D:\dev\obs-studio
 ```
 
-設定は `build.env` でも指定できます（`build.env.sample` 参照）。
+receiver ファイルだけ更新する場合:
 
+```powershell
+.\build.bat --receiver-only
 ```
+
+## build.bat の設定
+
+`build.env`（`build.env.sample` 参照）に以下を指定できます。
+
+```text
 OBS_SOURCE_DIR=D:\dev\obs-studio
 OBS_LEGACY_INSTALL=0
 OBS_CI=1
 ```
 
-> **補足:** インストール先はデフォルトで `C:\ProgramData\obs-studio` です。
-> レガシー配置（`C:\Program Files\obs-studio`）に入れる場合は `OBS_LEGACY_INSTALL=1` を指定してください。
-> コピーに失敗する場合は管理者権限で実行してください。
+- `OBS_SOURCE_DIR`: OBS Studio ソースのパス
+- `OBS_LEGACY_INSTALL`: `1` で Program Files レイアウト、`0` で ProgramData レイアウト（既定）
+- `OBS_CI`: `1` でインストール/`pause` をスキップ
 
-## 必要なもの（公式準拠）
+既定インストール先:
+
+- ProgramData（推奨）: `C:\ProgramData\obs-studio`
+- legacy: `C:\Program Files\obs-studio`
+
+## 必要環境
 
 - OS: Windows 10 1909+ / Windows 11
-- Visual Studio 2022 17.13.2 以上（https://visualstudio.microsoft.com/）「C++によるデスクトップ開発」、Windows 11 SDK 10.0.22621.0 以上、C++ ATL for v143、MSVC v143 を含める
-- CMake 3.16 以上（https://cmake.org/download/）
-- Git for Windows（https://gitforwindows.org/）
-- OBS Studio ソースコード（手動ビルドの場合のみ。`build.bat` は自動取得）
+- Visual Studio 2022（Desktop development with C++、MSVC v143、Windows SDK）
+- CMake 3.16+
+- Git for Windows
 
----
+## 手動ビルド（必要時のみ）
 
-## 手動ビルド手順（必要な場合のみ）
-
-### Step 1 — OBS Studioのビルド
-
-> **重要:** `build.bat` はデフォルトで OBS Studio を **自動ダウンロード・自動ビルド** します。
-> そのため、通常はユーザが手動で OBS をビルドする必要はありません。
-> 既存の OBS ソースを使いたい場合のみ、手動ビルドや `OBS_SOURCE_DIR` の指定を行ってください。
-
-OBS公式ドキュメント（https://github.com/obsproject/obs-studio/wiki/build-instructions-for-windows）に従ってOBSをビルドします。
+### 1. OBS Studio をビルド
 
 ```powershell
-# 1. OBSソースをクローン（サブモジュール含む）
-# 例: プラグイン配下の third_party に展開
 git clone --recursive https://github.com/obsproject/obs-studio.git C:\obs-delay-stream\third_party\obs-studio
 cd C:\obs-delay-stream\third_party\obs-studio
-
-# 2. CMakeプリセットを確認
 cmake --list-presets
-
-# 3. Windows x64プリセットで構成
 cmake --preset windows-x64
-
-# 4. ビルド
-cmake --build --preset windows-x64 --config RelWithDebInfo
+cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
 ```
 
-> **Tips:** OBSのフルビルドには15〜30分かかります。
-> `build_x64` フォルダが生成されれば次のステップに進めます。
-
----
-
-### Step 2 — サードパーティライブラリの取得（header-only）
+### 2. 依存ライブラリを取得
 
 ```powershell
-# プラグインのフォルダへ移動 (このREADMEがあるフォルダ)
-cd C:\obs-delay-stream   # ← ZIPを展開した場所
-
-# third_party フォルダ作成
+cd C:\obs-delay-stream
 mkdir third_party
 cd third_party
-
-# websocketpp (header-only WebSocketライブラリ)
 git clone https://github.com/zaphoyd/websocketpp.git
-
-# asio (Boostなしで使えるネットワークライブラリ)
 git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git
-
-cd ..
 ```
 
-完了後のフォルダ構成:
-```
-obs-delay-stream/
-  third_party/
-    websocketpp/
-      websocketpp/       ← ヘッダーファイルがここに入る
-    asio/
-      asio/include/      ← ヘッダーファイルがここに入る
-  src/
-    plugin-main.cpp
-    ...
-  CMakeLists.txt
-  README.md
-```
-
----
-
-### Step 3 — プラグインのビルド
+### 3. プラグインを構成/ビルド
 
 ```powershell
-# プラグインのフォルダで実行
 cd C:\obs-delay-stream
-
-# ビルドフォルダを作成してCMake構成
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
   -DOBS_SOURCE_DIR=C:\obs-delay-stream\third_party\obs-studio `
   -DOBS_PLUGIN_LEGACY_INSTALL=OFF
-
-# ビルド実行
-cmake --build build --config RelWithDebInfo
+cmake --build build --config RelWithDebInfo --parallel
 ```
 
-成功すると `build\RelWithDebInfo\obs-delay-stream.dll` が生成されます。
+生成物:
 
----
+- `build\RelWithDebInfo\obs-delay-stream.dll`
+- `build\receiver\index.html`（`@PROJECT_VERSION@` 展開済み）
 
-### Step 4 — OBSへのインストール
+### 4. OBS へインストール
 
-方法A: cmake --install（手動ビルド時の推奨）
+推奨（CMake install）:
 
 ```powershell
-cmake --install build --config RelWithDebInfo `
-  --prefix "C:\ProgramData\obs-studio"
+cmake --install build --config RelWithDebInfo --prefix "C:\ProgramData\obs-studio"
 ```
 
-方法B: 手動コピー
+legacy 配置:
 
+```powershell
+cmake --install build --config RelWithDebInfo --prefix "C:\Program Files\obs-studio"
 ```
+
+手動コピー時は、DLL だけでなく `receiver` 一式も必要です。
+
+ProgramData 配置の例:
+
+```text
 build\RelWithDebInfo\obs-delay-stream.dll
-  → C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\
-
-data\locale\en-US.ini
-  → C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\
+  -> C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\
+data\locale\*.ini
+  -> C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\
+build\receiver\index.html
+receiver\ui.css
+receiver\*.svg
+receiver\third_party\**
+  -> C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\
 ```
 
-> **補足:** `C:\Program Files\obs-studio\obs-plugins\64bit` はレガシー扱いで、将来のOBSで無効化予定です。
-> レガシーへ入れる場合は、CMake構成時に `-DOBS_PLUGIN_LEGACY_INSTALL=ON` を指定し、`cmake --install` の `--prefix` を `C:\Program Files\obs-studio` にしてください。
+### 5. 動作確認
 
----
+1. OBS Studio を起動
+2. 音声ソースを右クリック
+3. フィルター -> `+` -> `obs-delay-stream`
+4. GUI が開けば完了
 
-### Step 5 — 動作確認
-
-1. OBS Studioを起動
-2. 音声ソース（マイク・デスクトップ音声など）を右クリック
-3. **フィルター** → **＋** → **「obs-delay-stream」** を選択
-4. GUIパネルが開けばインストール成功
-
----
-
-## よくあるビルドエラーと対処法
+## よくあるエラー
 
 ### `Could not find libobs`
-```
-CMake Error: Could not find libobs
-```
-**対処:** `OBS_SOURCE_DIR` のパスが正しいか確認。OBSのビルドが完了しているか確認。
 
-```powershell
-# パスを絶対パスで指定し直す
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
-  -DOBS_SOURCE_DIR="C:\obs-studio"
-```
-
----
+- `OBS_SOURCE_DIR` が OBS ソースのルートを指しているか確認
+- `OBS_SOURCE_DIR\build_x64\libobs\RelWithDebInfo\obs.lib` の存在を確認
 
 ### `Cannot open include file: 'websocketpp/...'`
-**対処:** `third_party/websocketpp` が正しくクローンされているか確認。
 
-```powershell
-ls third_party\websocketpp\websocketpp\server.hpp
-# ファイルが存在すればOK
-```
+- `third_party\websocketpp\websocketpp\server.hpp` の存在を確認
 
----
+### receiver ページの見た目が崩れる / 404
 
-### `LNK2019: unresolved external symbol`（リンクエラー）
-**対処:** Visual Studioの **x64** ビルドになっているか確認。
+- `receiver` 配下（`ui.css`, `*.svg`, `third_party`）がインストール先にコピーされているか確認
+- `index.html` は `build\receiver\index.html` を使う
 
-```powershell
-# -A x64 が指定されているか確認
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 ...
-```
+## 現在の主要ファイル構成
 
----
-
-### OBSに読み込まれない（フィルター一覧に表示されない）
-- `.dll` のコピー先が正しいか確認（`C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\`）
-- `en-US.ini` のコピー先が正しいか確認（`C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\`）
-- OBSを管理者権限で起動してみる
-- OBSのログ（`%APPDATA%\obs-studio\logs\`）でエラーを確認
-
----
-
-## ファイル構成
-
-```
+```text
 obs-delay-stream/
+  .github/workflows/build.yml      リリースビルド（タグ push）
+  cmake/
+    embed_html.cmake               receiver HTML 埋め込みヘルパー
+  data/locale/
+    en-US.ini
+    ja-JP.ini
+  receiver/
+    index.html                     受信ページテンプレート（@PROJECT_VERSION@ を展開）
+    ui.css
+    *.svg
+    third_party/
+      bulma.min.css
+      fontawesome/
+      opus-decoder/
   src/
-    plugin-main.cpp       OBSプラグイン本体・GUI
-    delay-filter.hpp      リングバッファ遅延処理
-    websocket-server.hpp  WebSocketルーター（パスルーティング）
-    rtmp-prober.hpp       RTMPハンドシェイク遅延計測
-    sync-flow.hpp         同期フロー管理（3ステップ自動化）
-    tunnel-manager.hpp    ngrok/cloudflared子プロセス管理
-  third_party/            （git cloneで追加）
+    plugin-main.cpp                プラグイン本体
+    constants.hpp                  共有定数
+    delay-filter.hpp               遅延バッファ処理
+    websocket-server.hpp           WebSocket/HTTP サーバー
+    rtmp-prober.hpp                RTMP 遅延計測
+    sync-flow.hpp                  同期フロー制御
+    tunnel-manager.hpp             cloudflared/ngrok 管理
+  third_party/                     （ローカル取得。通常は Git 管理外）
+    obs-studio/
     websocketpp/
     asio/
-  cmake/
-    embed_html.cmake      receiver HTML埋め込み用CMakeヘルパー
-  data/locale/
-    en-US.ini             英語ロケール
-    ja-JP.ini             日本語ロケール
-  receiver/
-    index.html            パフォーマー受信ページ（Chrome用）
-    third_party/
-      opus-decoder/       Opus WASM デコーダ
-  build.bat               ワンクリックビルドスクリプト
-  build.env.sample        ビルド設定サンプル
-  release_port.bat        ポート解放ユーティリティ
+  build.bat
+  build.env.sample
   CMakeLists.txt
   README.md
   BUILDING.md
-  LICENSE
-  CHANGELOG.md
-  THIRD_PARTY_NOTICES
 ```
+
+補足:
+
+- `build/generated/receiver_index_html.hpp` はビルド時の生成ファイルです。
+- `build/receiver/index.html` は `receiver/index.html` から configure された出力です。

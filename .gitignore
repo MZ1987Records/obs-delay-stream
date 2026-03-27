@@ -33,6 +33,7 @@ Makefile
 # IDE / Editor
 .claude/*
 !.claude/skills/
+!.claude/commands/
 .vs/
 .vscode/
 .idea/

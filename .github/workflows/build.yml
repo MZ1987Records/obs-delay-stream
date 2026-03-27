@@ -13,15 +13,35 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      OBS_STUDIO_REF: master
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Pandoc and wkhtmltopdf
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install markdown PDF tools
         shell: pwsh
         run: |
-          choco install pandoc wkhtmltopdf -y
+          npm install --no-save md-to-pdf github-markdown-css
+
+      - name: Convert README to PDF
+        shell: pwsh
+        run: |
+          $src = "$env:GITHUB_WORKSPACE/README.md"
+          $dist = "$env:GITHUB_WORKSPACE/dist"
+          $dst = "$dist/README.pdf"
+          $css = "$env:GITHUB_WORKSPACE/node_modules/github-markdown-css/github-markdown-light.css"
+          if (-Not (Test-Path $src)) { throw "README.md not found." }
+          if (-Not (Test-Path $css)) { throw "github-markdown CSS not found: $css" }
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          npx md-to-pdf $src --dest $dist --stylesheet $css --body-class "markdown-body"
+          if (-Not (Test-Path $dst)) { throw "PDF was not generated: $dst" }
 
       - name: Detect Windows SDK
+        id: sdk
         shell: pwsh
         run: |
           $sdkRoot = "C:\\Program Files (x86)\\Windows Kits\\10\\Lib"
@@ -30,6 +50,17 @@ jobs:
           $ver = $dirs | ForEach-Object { [version]$_ } | Sort-Object -Descending | Select-Object -First 1
           $verStr = $ver.ToString()
           Add-Content $env:GITHUB_ENV "WINSDK_VERSION=$verStr"
+          Add-Content $env:GITHUB_OUTPUT "version=$verStr"
+
+      - name: Resolve OBS ref
+        id: obs
+        shell: pwsh
+        run: |
+          $sha = (git ls-remote https://github.com/obsproject/obs-studio.git "refs/heads/$env:OBS_STUDIO_REF" | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+          if (-Not $sha) { throw "Failed to resolve OBS ref: $env:OBS_STUDIO_REF" }
+          Add-Content $env:GITHUB_ENV "OBS_STUDIO_SHA=$sha"
+          Add-Content $env:GITHUB_OUTPUT "sha=$sha"
+          Write-Host "OBS ref $env:OBS_STUDIO_REF => $sha"
 
       - name: Prepare third_party
         shell: pwsh
@@ -40,8 +71,23 @@ jobs:
         shell: pwsh
         run: |
           if (-Not (Test-Path "third_party/obs-studio")) {
-            git clone --recursive https://github.com/obsproject/obs-studio.git third_party/obs-studio
+            git clone --filter=blob:none --no-checkout https://github.com/obsproject/obs-studio.git third_party/obs-studio
           }
+          Set-Location third_party/obs-studio
+          git fetch --depth 1 origin $env:OBS_STUDIO_SHA
+          git checkout --force $env:OBS_STUDIO_SHA
+          git submodule update --init --recursive --depth 1
+
+      - name: Restore OBS build cache
+        id: obs-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/obs-studio/build_x64
+          key: ${{ runner.os }}-obs-build-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
+          restore-keys: |
+            ${{ runner.os }}-obs-build-${{ steps.obs.outputs.sha }}-sdk-
+            ${{ runner.os }}-obs-build-${{ steps.obs.outputs.sha }}-
+            ${{ runner.os }}-obs-build-
 
       - name: Patch OBS SDK version
         shell: pwsh
@@ -54,7 +100,21 @@ jobs:
           if ($raw -eq $patched) { Write-Host "No preset SDK version to replace." }
           $patched | Set-Content $presetPath -Encoding UTF8
 
+      - name: Check OBS build outputs
+        id: obs-build-check
+        shell: pwsh
+        run: |
+          $libobs = "third_party/obs-studio/build_x64/libobs/RelWithDebInfo/obs.lib"
+          if (Test-Path $libobs) {
+            Write-Host "OBS build cache hit: $libobs"
+            Add-Content $env:GITHUB_OUTPUT "skip=true"
+          } else {
+            Write-Host "OBS build cache miss: $libobs"
+            Add-Content $env:GITHUB_OUTPUT "skip=false"
+          }
+
       - name: Build OBS Studio
+        if: steps.obs-build-check.outputs.skip != 'true'
         shell: pwsh
         run: |
           Set-Location third_party/obs-studio
@@ -106,14 +166,6 @@ jobs:
           New-Item -ItemType Directory -Force $dist | Out-Null
           $prefix = "$dist/For Program Files (legacy)"
           cmake --install build --config RelWithDebInfo --prefix $prefix
-
-      - name: Convert README to PDF
-        shell: pwsh
-        run: |
-          $src = "$env:GITHUB_WORKSPACE/README.md"
-          $dst = "$env:GITHUB_WORKSPACE/dist/README.pdf"
-          if (-Not (Test-Path $src)) { throw "README.md not found." }
-          pandoc $src -o $dst --pdf-engine=wkhtmltopdf
 
       - name: Pack artifact
         shell: pwsh

@@ -1,6 +1,6 @@
 # obs-delay-stream  v3.0.0
 
-OBSにパフォーマー向けWebSocket配信機能を追加するプラグインです。各参加者への遅延時間が自動計測され、タイミングが揃うように自動調整されます。IP隠蔽トンネル機能つき。
+OBSにパフォーマー向けWebSocket配信機能を追加するプラグインです。各パフォーマーへの遅延時間が自動計測され、タイミングが揃うように自動調整されます。IP隠蔽トンネル機能つき。
 
 [BOOTH](https://mz1987records.booth.pm/) | [バグ報告](https://github.com/MZ1987Records/obs-delay-stream/issues/new/choose)
 
