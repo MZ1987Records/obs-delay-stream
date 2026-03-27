@@ -32,6 +32,17 @@
   <section class="section">
     <div class="container is-max-desktop">
       <div class="block">
+        <div class="notification is-warning" id="browserWarning" hidden>
+          <span class="icon-text">
+            <span class="icon">
+              <i class="fas fa-exclamation-triangle" aria-hidden="true"></i>
+            </span>
+            <span>このページはChrome以外のブラウザでは正常に動作しない場合があります。Chromeの利用を推奨します。</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="block">
         <div class="notification is-dark" id="statusBar" role="status">
           <div class="status-inner">
             <div class="status-memo" id="infoMemo" hidden></div>
@@ -287,6 +298,25 @@
       if (sid && ch) fetchMemoPreview(sid, ch);
     }
     applyUrlParams();
+
+    function isChromeBrowser() {
+      const uaData = navigator.userAgentData;
+      if (uaData && Array.isArray(uaData.brands)) {
+        return uaData.brands.some((brand) => brand.brand === 'Google Chrome');
+      }
+      const ua = navigator.userAgent || '';
+      const hasChromeToken = /Chrome\/\d+/.test(ua) || /CriOS\/\d+/.test(ua);
+      if (!hasChromeToken) return false;
+      const nonChromeToken = /(Edg|OPR|Opera|SamsungBrowser|UCBrowser|YaBrowser|Vivaldi)\//.test(ua);
+      return !nonChromeToken;
+    }
+
+    function updateBrowserWarning() {
+      const warning = document.getElementById('browserWarning');
+      if (!warning) return;
+      warning.hidden = isChromeBrowser();
+    }
+    updateBrowserWarning();
 
     function loadConfig() {
       fetch('/config', { cache: 'no-store' })
