@@ -2,21 +2,30 @@
 setlocal EnableExtensions DisableDelayedExpansion
 chcp 437 > nul
 title obs-delay-stream Build Script
+for %%I in ("%~dp0.") do set "PLUGIN_DIR=%%~fI"
+set "PLUGIN_VERSION=unknown"
+if exist "%PLUGIN_DIR%\CMakeLists.txt" (
+    for /f "usebackq tokens=3 delims= )" %%V in (`findstr /B /C:"project(obs-delay-stream VERSION " "%PLUGIN_DIR%\CMakeLists.txt"`) do (
+        set "PLUGIN_VERSION=%%V"
+    )
+)
+set "BANNER_VERSION="
+if not "%PLUGIN_VERSION%"=="unknown" set "BANNER_VERSION= v%PLUGIN_VERSION%"
 
 echo ================================================================
-echo  obs-delay-stream v1.7.0  Build Script
+echo  obs-delay-stream%BANNER_VERSION%  Build Script
 echo ================================================================
 echo.
 
-rem 環境変数の説明:
-rem - OBS_SOURCE_DIR: OBS Studio のソースパス（例: D:\dev\obs-studio）。未指定なら third_party\obs-studio を使用
-rem - OBS_LEGACY_INSTALL: 1=Program Files のレガシー配置, 0=ProgramData の推奨配置（未指定は0）
-rem - OBS_CI: 1=CIモード（インストールとpauseを無効化）
-rem - build.env に KEY=VALUE 形式で記述（空白を入れない）。例は build.env.sample
-rem オプション:
-rem - --receiver-only / --receiver / /receiver-only / /receiver : receiver のみインストール
+rem Environment variables:
+rem - OBS_SOURCE_DIR: OBS Studio source path (example: D:\dev\obs-studio).
+rem   If not set, use third_party\obs-studio.
+rem - OBS_LEGACY_INSTALL: 1=legacy Program Files layout, 0=recommended ProgramData layout (default: 0).
+rem - OBS_CI: 1=CI mode (skip install and pause).
+rem - You can define KEY=VALUE entries in build.env. See build.env.sample.
+rem Options:
+rem - --receiver-only / --receiver / /receiver-only / /receiver : install receiver files only.
 
-for %%I in ("%~dp0.") do set "PLUGIN_DIR=%%~fI"
 set "OBS_SOURCE_DIR="
 set "OBS_LEGACY_INSTALL="
 set "OBS_CI="
@@ -246,21 +255,9 @@ if errorlevel 1 (
     goto :error
 )
 
-copy /Y "%PLUGIN_DIR%\receiver\favicon.svg" "%RECEIVER_DEST%\"
+copy /Y "%PLUGIN_DIR%\receiver\*.svg" "%RECEIVER_DEST%\"
 if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver favicon.svg.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\navbar-bg.svg" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver navbar-bg.svg.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\obs-delay-stream-title.svg" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver obs-delay-stream-title.svg.
+    echo [ERROR] Failed to copy receiver svg files.
     goto :error
 )
 
@@ -314,21 +311,9 @@ if errorlevel 1 (
     goto :error
 )
 
-copy /Y "%PLUGIN_DIR%\receiver\favicon.svg" "%RECEIVER_DEST%\"
+copy /Y "%PLUGIN_DIR%\receiver\*.svg" "%RECEIVER_DEST%\"
 if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver favicon.svg.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\navbar-bg.svg" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver navbar-bg.svg.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\obs-delay-stream-title.svg" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver obs-delay-stream-title.svg.
+    echo [ERROR] Failed to copy receiver svg files.
     goto :error
 )
 

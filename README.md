@@ -1,6 +1,8 @@
 # obs-delay-stream  v2.1.0
 
-OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネル機能を追加するプラグインです。
+OBSにパフォーマー向けWebSocket配信機能を追加するプラグインです。各参加者への遅延時間が自動計測され、タイミングが揃うように自動調整されます。IP隠蔽トンネル機能つき。
+
+[BOOTH](https://mz1987records.booth.pm/) | [バグ報告](https://github.com/MZ1987Records/obs-delay-stream/issues/new/choose)
 
 <p align="center">
   <img src="receiver/obs-delay-stream-logo.svg" alt="obs-delay-stream logo" width="280">
@@ -10,22 +12,22 @@ OBSに音声遅延 + パフォーマー向けWebSocket配信 + IP隠蔽トンネ
 
 ## 機能一覧
 
-| 機能 | 説明 |
+| 機能セクション | 内容 |
 |------|------|
-| 遅延処理 ON/OFF | 音声をms単位で遅延。OFFでパススルー |
-| サブCH配信 ON/OFF | パフォーマー向けWebSocket配信の個別停止 |
-| 配信ID | 複数配信者のURL重複防止。半角英数字 |
-| サブCH x10 | 各chに個別遅延設定。受信URL発行 |
-| 同期フロー | 3ステップで全員を自動一括最適化 |
-| パフォーマー遅延計測 | ping/pong RTTでサブch遅延の参考値を算出 |
-| RTMP遅延計測 | ハンドシェイクRTTでマスター遅延の参考値を算出 |
-| トンネル内蔵 | ngrok / cloudflared でIPを隠したURLを発行 |
+| 演者別チャンネル設定 | 演者ごとの名前を管理します。詳細編集モードでは個別に同期設定を調整できます |
+| 配信ID / IP | 配信IDとホストIPは自動設定されます。詳細モードではホストIPを手動設定できます |
+| WebSocket | 配信サーバーの起動・停止と送信制御を行います |
+| トンネル | cloudflared で公開URLを発行します。IPを直接公開せずに外部共有できます |
+| URL配布 | 演者用URLの一括コピーができます。共有時の手間や配布ミスを減らせます |
+| 同期フロー | 演者側・RTMP側の遅延を3ステップで計測・反映します。案内に沿って全体のタイミングを揃えられます |
+| マスター / RTMP | マスター遅延の手動調整とRTMP計測結果の適用ができます。配信経路を含めたズレの微調整に使えます |
+| サブCH 全体オフセット | 全サブCHへ共通オフセットを加算します。最終的な体感差をまとめて補正できます |
 
 ---
 
 ## インストール
 
-1. [Releases](https://github.com/MZ1987Records/obs-delay-stream/releases) から最新の `obs-delay-stream-vX.X.X.zip` をダウンロードして解凍
+1. [Releases](https://github.com/MZ1987Records/obs-delay-stream/releases) または [BOOTH](https://mz1987records.booth.pm/) から最新の `obs-delay-stream-vX.X.X.zip` をダウンロードして解凍
 2. ZIP内に `For ProgramData` と `For Program Files (legacy)` の2種類が入っています。使用中のOBS配置に合わせて選択してください
 
 ### ProgramData 配置（推奨）
@@ -69,31 +71,25 @@ C:\Program Files\obs-studio\data\obs-plugins\
 ### 初期設定
 
 1. フィルターパネルを開く
-2. **配信ID** を設定（例: `myshow2024`）
+2. **演者別チャンネル設定** で各パフォーマーの名前を入力
+3. **WebSocketサーバー起動** ボタンを押す
 
-### パフォーマーへの接続案内
+### トンネル使用時（IP隠蔽・推奨）
 
-配布用のURL（`https://.../#!/{sid}/{ch}`）を共有し、開いてもらう。
-
-### トンネル使用時（IP隠蔽）
-
-**cloudflaredの場合（推奨・無料・認証不要）:**
-1. `cloudflared.exe path` は未入力でOK（カスタム指定したい場合のみ exe のパスを入力）
+1. `cloudflared.exe path` は `auto` のままでOK（カスタム指定したい場合のみ exe のパスを入力）
 2. 「トンネルを起動」ボタンを押す（デフォルトでは初回に exe が自動ダウンロードされる）
 3. `https://xxxx.trycloudflare.com` 形式のURLが発行される
-4. CH別URL（`https://.../#!/{sid}/{ch}`）をコピーしてパフォーマーに共有
 
 > **注意:** セキュリティソフトが `*.trycloudflare.com` をブロックしてトンネル接続に失敗することがあります。
 > その場合は `*.trycloudflare.com` を例外（許可）に追加してください。
 
-※ 自動ダウンロードの保存先:
+※ 自動ダウンロードされた exe の保存先:
 `%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared.exe`
 
-**ngrokの場合:**
-1. https://ngrok.com でアカウント作成 → アクセストークンを取得
-2. https://ngrok.com/download から `ngrok.exe` をダウンロード
-3. OBSのフィルターGUIでパスとトークンを設定（自動ダウンロード非対応）
-4. 「トンネルを起動」ボタンを押す
+### パフォーマーへの接続案内
+
+**演者用URL一覧をコピー** ボタンを押し、Discordなどにペーストして共有する。
+各パフォーマーに、対応する自分のURLを開いてもらう。
 
 ### 同期フロー（推奨手順）
 
@@ -101,17 +97,6 @@ C:\Program Files\obs-studio\data\obs-plugins\
 2. 「同期フロー開始」ボタンを押す
 3. Step1: 自動計測完了後、提案値を確認して「一括反映」
 4. Step3: RTMP計測完了後、マスター遅延を確認して「反映して完了」
-
----
-
-## ポート
-
-| 用途 | ポート | プロトコル |
-|------|--------|-----------|
-| WebSocket（全CH共有） | 19000 | TCP |
-
-ファイアウォールで **TCP 19000** の受信を許可してください（LAN運用の場合）。
-トンネル使用時はファイアウォール設定不要です。
 
 ---
 

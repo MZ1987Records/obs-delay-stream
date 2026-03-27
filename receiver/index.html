@@ -22,6 +22,9 @@
         <a class="navbar-item" href="https://github.com/MZ1987Records/obs-delay-stream" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
           <span class="icon"><i class="fab fa-github"></i></span>
         </a>
+        <a class="navbar-item" href="https://mz1987records.booth.pm/" target="_blank" rel="noopener noreferrer" aria-label="Booth">
+          <span class="icon"><img src="booth-logo-icon.svg" alt="" class="ds-navbar-icon-img"></span>
+        </a>
       </div>
     </div>
   </nav>
@@ -191,6 +194,7 @@
           <ul>
             <li>Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。</li>
             <li>LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。</li>
+            <li>セキュリティソフトに接続をブロックされる場合は、例外に *.trycloudflare.com を追加してください。</li>
           </ul>
         </div>
       </div>
@@ -220,7 +224,7 @@
 
     const hostDomain = getHostDomain();
     const MIN_CH = 1;
-    let MAX_CH = 10;
+    let MAX_CH = 20;
     const PING_SAMPLES = 10;
     let CH_RANGE_TEXT = `${MIN_CH}〜${MAX_CH}`;
 

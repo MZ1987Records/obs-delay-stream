@@ -27,7 +27,8 @@
 #include <cstdio>
 #include <algorithm>
 
-static constexpr int FLOW_NUM_CH   = 10;
+#include "constants.hpp"
+
 static constexpr int FLOW_PINGS    = 10;
 static constexpr int FLOW_PING_INT = 150; // ms
 
@@ -60,7 +61,7 @@ struct ChSummary {
 // ============================================================
 struct FlowResult {
     // Step1
-    std::array<ChSummary, FLOW_NUM_CH> channels{};
+    std::array<ChSummary, MAX_SUB_CH> channels{};
     int    connected_count  = 0;
     int    measured_count   = 0;
     double max_one_way_ms   = 0.0; // 基準(最大片道遅延)
@@ -89,7 +90,7 @@ public:
     SyncFlow() { reset(); }
     void set_active_channels(int n) {
         if (n < 1) n = 1;
-        if (n > FLOW_NUM_CH) n = FLOW_NUM_CH;
+        if (n > MAX_SUB_CH) n = MAX_SUB_CH;
         std::lock_guard<std::mutex> lk(mtx_);
         active_ch_ = n;
     }
@@ -105,7 +106,7 @@ public:
     // ----- ステップ1開始 -----
     // router: StreamRouter, rtmp_url: RTMP接続先URL
     bool start_step1(StreamRouter& router, const std::string& stream_id) {
-        int active = FLOW_NUM_CH;
+        int active = MAX_SUB_CH;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             if (phase_ != FlowPhase::Idle) return false;
@@ -147,7 +148,7 @@ public:
     // ----- ステップ1: 失敗CHのみ再計測 -----
     bool retry_failed_step1(StreamRouter& router) {
         int retry_count = 0;
-        int active = FLOW_NUM_CH;
+        int active = MAX_SUB_CH;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             if (phase_ != FlowPhase::Step1_Done) return false;
@@ -293,7 +294,7 @@ private:
 
     mutable std::mutex mtx_;
     FlowPhase          phase_         = FlowPhase::Idle;
-    int                active_ch_     = FLOW_NUM_CH;
+    int                active_ch_     = MAX_SUB_CH;
     std::atomic<int>   pending_count_{0};
     FlowResult         result_;
     RtmpProber         prober_;

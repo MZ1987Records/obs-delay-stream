@@ -121,14 +121,16 @@ else()
   set(OBS_PLUGIN_DATA_DIR "plugins/obs-delay-stream/data")
 endif()
 
+file(GLOB CONFIGURE_DEPENDS RECEIVER_SVG_FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/receiver/*.svg"
+)
+
 install(TARGETS obs-delay-stream LIBRARY DESTINATION "${OBS_PLUGIN_BIN_DIR}")
 install(DIRECTORY data/locale/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/locale")
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html"
   receiver/ui.css
-  receiver/favicon.svg
-  receiver/navbar-bg.svg
-  receiver/obs-delay-stream-title.svg
+  ${RECEIVER_SVG_FILES}
   DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver"
 )
 install(DIRECTORY receiver/third_party/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver/third_party")
@@ -146,9 +148,7 @@ add_custom_command(TARGET obs-delay-stream POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy
     "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html"
     "${CMAKE_CURRENT_SOURCE_DIR}/receiver/ui.css"
-    "${CMAKE_CURRENT_SOURCE_DIR}/receiver/favicon.svg"
-    "${CMAKE_CURRENT_SOURCE_DIR}/receiver/navbar-bg.svg"
-    "${CMAKE_CURRENT_SOURCE_DIR}/receiver/obs-delay-stream-title.svg"
+    ${RECEIVER_SVG_FILES}
     "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver/"
   COMMAND ${CMAKE_COMMAND} -E make_directory
     "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver/third_party"

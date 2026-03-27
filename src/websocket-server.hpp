@@ -5,7 +5,7 @@
  *
  * StreamRouter: 単一ポート(19000)でパスルーティングを行う WebSocketサーバー
  *
- * 接続URL: ws://[IP]:19000/[配信ID]/[ch番号(1-10)]
+ * 接続URL: ws://[IP]:19000/[配信ID]/[ch番号(1-20)]
  *   例: ws://192.168.1.10:19000/myshow2024/1
  *
  * 配信IDが一致するchへのみ音声・pingを届ける。
@@ -75,6 +75,8 @@
 #include <cctype>
 #include <memory>
 
+#include "constants.hpp"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -97,7 +99,6 @@ using Ms         = std::chrono::duration<double, std::milli>;
 
 static constexpr uint32_t MAGIC_AUDI = 0x41554449u; // "AUDI"
 static constexpr uint32_t MAGIC_OPUS = 0x4F505553u; // "OPUS"
-static constexpr int MAX_CH = 10;
 
 // ============================================================
 // LatencyResult
@@ -241,7 +242,7 @@ public:
 
     void set_active_channels(int n) {
         if (n < 1) n = 1;
-        if (n > MAX_CH) n = MAX_CH;
+        if (n > MAX_SUB_CH) n = MAX_SUB_CH;
         std::shared_ptr<WsServer> srv;
         std::vector<ConnHandle> to_close;
         {
@@ -267,7 +268,7 @@ public:
     }
 
     void set_sub_memo(int ch, const std::string& memo) {
-        if (ch < 0 || ch >= MAX_CH) return;
+        if (ch < 0 || ch >= MAX_SUB_CH) return;
         std::string sid;
         {
             std::lock_guard<std::mutex> lk(mtx_);
@@ -896,7 +897,7 @@ private:
         auto con = srv->get_con_from_hdl(h);
         std::string path = con->get_resource();
         std::string sid; int ch;
-        int max_ch = MAX_CH;
+        int max_ch = MAX_SUB_CH;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             max_ch = active_ch_max_;
@@ -947,7 +948,7 @@ private:
             cb = on_conn_change;
             cached_result = cs.last_result;
             cached_delay  = cs.last_applied_delay;
-            if (ch >= 0 && ch < MAX_CH) memo = sub_memo_[ch];
+            if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
         }
         if (cb) cb(sid, ch, count);
 
@@ -1067,12 +1068,12 @@ private:
             if (hpos != std::string::npos) path = path.substr(0, hpos);
             if (path.empty()) path = "/";
             if (path == "/config") {
-                int active = MAX_CH;
+                int active = MAX_SUB_CH;
                 {
                     std::lock_guard<std::mutex> lk(mtx_);
                     active = active_ch_max_;
                 }
-                std::string resp = "{\"ok\":true,\"max_ch\":" + std::to_string(MAX_CH)
+                std::string resp = "{\"ok\":true,\"max_ch\":" + std::to_string(MAX_SUB_CH)
                                  + ",\"active_ch\":" + std::to_string(active) + "}";
                 con->set_status(websocketpp::http::status_code::ok);
                 con->replace_header("Content-Type", "application/json; charset=utf-8");
@@ -1097,7 +1098,7 @@ private:
                 }
 
                 std::string sid = sanitize_id(sid_param);
-                int active = MAX_CH;
+                int active = MAX_SUB_CH;
                 {
                     std::lock_guard<std::mutex> lk(mtx_);
                     active = active_ch_max_;
@@ -1114,7 +1115,7 @@ private:
                 {
                     std::lock_guard<std::mutex> lk(mtx_);
                     current_sid = stream_id_;
-                    if (ch_1idx - 1 >= 0 && ch_1idx - 1 < MAX_CH) {
+                    if (ch_1idx - 1 >= 0 && ch_1idx - 1 < MAX_SUB_CH) {
                         memo = sub_memo_[ch_1idx - 1];
                     }
                 }
@@ -1301,13 +1302,13 @@ private:
     std::atomic<bool>  opus_reset_pending_{false};
     std::atomic<int>   opus_bitrate_kbps_{96};
     std::vector<OpusEnc> opus_;
-    int active_ch_max_ = MAX_CH;
+    int active_ch_max_ = MAX_SUB_CH;
 
     // conn_handle → ConnInfo
     std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;
     // "stream_id/ch_0idx" → ChannelState
     std::map<std::string, ChannelState> ch_map_;
-    std::array<std::string, MAX_CH> sub_memo_{};
+    std::array<std::string, MAX_SUB_CH> sub_memo_{};
 
     // stop() 時に退避される計測結果・適用遅延キャッシュ
     struct ChannelCache {

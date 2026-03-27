@@ -52,6 +52,11 @@ body {
   padding-left: 0.75rem;
   padding-right: 0.75rem;
 }
+.ds-navbar-icon-img {
+  width: 1em;
+  height: 1em;
+  display: block;
+}
 
 .box,
 .input,
