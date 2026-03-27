@@ -3,9 +3,9 @@
 /*
  * websocket-server.hpp
  *
- * StreamRouter: 単一ポート(19000)でパスルーティングを行う WebSocketサーバー
+ * StreamRouter: 単一ポート(WS_PORT)でパスルーティングを行う WebSocketサーバー
  *
- * 接続URL: ws://[IP]:19000/[配信ID]/[ch番号(1-20)]
+ * 接続URL: ws://[IP]:[PORT]/[配信ID]/[ch番号(1-20)]
  *   例: ws://192.168.1.10:19000/myshow2024/1
  *
  * 配信IDが一致するchへのみ音声・pingを届ける。

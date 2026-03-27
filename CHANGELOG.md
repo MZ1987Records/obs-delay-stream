@@ -68,4 +68,4 @@
 - 同期フロー（3 ステップで全パフォーマーの遅延を自動最適化）
 - パフォーマー遅延計測（ping/pong RTT）
 - RTMP 遅延計測（ハンドシェイク RTT）
-- ngrok / cloudflared トンネル内蔵（IP 隠蔽）
+- cloudflared トンネル内蔵（IP 隠蔽）

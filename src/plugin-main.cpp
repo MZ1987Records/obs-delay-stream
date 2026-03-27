@@ -223,6 +223,7 @@ struct DelayStreamData {
     std::string   stream_id;
     std::string   host_ip;
     std::string   auto_ip;
+    std::atomic<int> ws_port{WS_PORT};
     float         master_delay_ms = 0.0f;
     float         sub_offset_ms   = 0.0f; // global offset added to all sub-ch after Sync Flow
     int           sub_ch_count    = 1; // active sub-channel count (1..MAX_SUB_CH)
@@ -400,8 +401,9 @@ static std::string make_sub_url(DelayStreamData* d, int ch1) {
         std::string ip = d->get_host_ip();
         if (ip.empty()) ip = d->auto_ip;
         if (ip.empty()) return "";
+        int ws_port = d->ws_port.load(std::memory_order_relaxed);
         char buf[256];
-        snprintf(buf, sizeof(buf), "http://%s:%d", ip.c_str(), WS_PORT);
+        snprintf(buf, sizeof(buf), "http://%s:%d", ip.c_str(), ws_port);
         base = buf;
     }
     if (!base.empty() && base.back() == '/') base.pop_back();
@@ -681,6 +683,14 @@ static void ds_update(void* data, obs_data_t* settings) {
     }
     d->set_stream_id(sid);
     d->router.set_stream_id(sid);
+    {
+        int ws_port = (int)obs_data_get_int(settings, "ws_port");
+        if (ws_port < 1 || ws_port > 65535) {
+            ws_port = WS_PORT;
+            obs_data_set_int(settings, "ws_port", ws_port);
+        }
+        d->ws_port.store(ws_port, std::memory_order_relaxed);
+    }
     const char* hip = obs_data_get_string(settings, "host_ip_manual");
     {
         std::lock_guard<std::mutex> lk(d->stream_id_mtx);
@@ -928,11 +938,12 @@ static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void* priv) {
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (d->router_running.load()) return false;
-    if (d->router.start(WS_PORT)) {
+    int ws_port = d->ws_port.load(std::memory_order_relaxed);
+    if (d->router.start((uint16_t)ws_port)) {
         d->router_running.store(true);
-        blog(LOG_INFO, "[obs-delay-stream] WebSocket server started on port %d", WS_PORT);
+        blog(LOG_INFO, "[obs-delay-stream] WebSocket server started on port %d", ws_port);
     } else {
-        blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", WS_PORT);
+        blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", ws_port);
     }
     request_properties_refresh(d);
     return false;
@@ -949,35 +960,16 @@ static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void* priv) {
     return false;
 }
 
-// 選択されたトンネルサービスを起動する。
+// cloudflaredトンネルを起動する。
 static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     obs_data_t* s = obs_source_get_settings(d->context);
-    int type = (int)obs_data_get_int(s, "tunnel_type");
-    const char* exe = type == 0
-        ? obs_data_get_string(s, "ngrok_exe_path")
-        : obs_data_get_string(s, "cloudflared_exe_path");
-    const char* tok = obs_data_get_string(s, "ngrok_token");
+    const char* exe = obs_data_get_string(s, "cloudflared_exe_path");
     obs_data_release(s);
-    d->tunnel.start(type == 0 ? TunnelType::Ngrok : TunnelType::Cloudflared,
-        exe ? exe : "", tok ? tok : "", WS_PORT);
+    int ws_port = d->ws_port.load(std::memory_order_relaxed);
+    d->tunnel.start(exe ? exe : "", ws_port);
     request_properties_refresh(d);
     return false;
-}
-// トンネル種別に応じて入力項目の表示/非表示を切り替える。
-static bool cb_tunnel_type_changed(obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
-    int type = (int)obs_data_get_int(settings, "tunnel_type");
-    bool is_ngrok = (type == 0);
-    if (auto* p = obs_properties_get(props, "ngrok_exe_path")) {
-        obs_property_set_visible(p, is_ngrok);
-    }
-    if (auto* p = obs_properties_get(props, "ngrok_token")) {
-        obs_property_set_visible(p, is_ngrok);
-    }
-    if (auto* p = obs_properties_get(props, "cloudflared_exe_path")) {
-        obs_property_set_visible(p, !is_ngrok);
-    }
-    return true;
 }
 // トンネルを停止する。
 static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void* priv) {
@@ -1063,7 +1055,7 @@ static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamDat
     if (auto* p = obs_properties_get(props, "host_ip_manual")) {
         obs_property_set_visible(p, detail);
     }
-    if (auto* p = obs_properties_get(props, "tunnel_type")) {
+    if (auto* p = obs_properties_get(props, "ws_port")) {
         obs_property_set_visible(p, detail);
     }
     int sub_count = d->sub_ch_count;
@@ -1236,7 +1228,7 @@ static void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
     obs_property_set_long_description(about_p,
         "v" PLUGIN_VERSION " | (C) 2026 Mazzn1987, Chigiri Tsutsumi | GPL 2.0+<br>"
         "<a href=\"https://github.com/MZ1987Records/obs-delay-stream\">GitHub</a> | "
-        "<a href=\"https://mz1987records.booth.pm/\">Booth</a>");
+        "<a href=\"https://mz1987records.booth.pm/items/8134637\">Booth</a>");
     obs_property_text_set_info_word_wrap(about_p, false);
 
     obs_property_t* detail_p =
@@ -1262,9 +1254,12 @@ static void add_stream_group(obs_properties_t* props, DelayStreamData* d) {
     }
     obs_property_t* ip_p =
         obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
+    obs_property_t* port_p =
+        obs_properties_add_int(grp, "ws_port", T_("WsPort"), 1, 65535, 1);
     if (d->router_running.load()) {
         obs_property_set_enabled(sid_p, false);
         obs_property_set_enabled(ip_p, false);
+        obs_property_set_enabled(port_p, false);
     }
     obs_properties_add_group(props, "grp_stream", T_("GroupStreamId"), OBS_GROUP_NORMAL, grp);
 }
@@ -1273,10 +1268,13 @@ static void add_stream_group(obs_properties_t* props, DelayStreamData* d) {
 static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_sid) {
     if (!props || !d) return;
     bool ws_running = d->router_running.load();
+    int ws_port = ws_running
+        ? (int)d->router.port()
+        : d->ws_port.load(std::memory_order_relaxed);
 
     char ws_title[96];
     if (ws_running)
-        snprintf(ws_title, sizeof(ws_title), T_("WsRunningFmt"), WS_PORT);
+        snprintf(ws_title, sizeof(ws_title), T_("WsRunningFmt"), ws_port);
     else
         snprintf(ws_title, sizeof(ws_title), "%s", T_("WsStopped"));
     if (ws_running && !d->ws_send_enabled.load()) {
@@ -1330,25 +1328,10 @@ static void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
             : T_("TunnelStopped");
 
     obs_properties_t* grp = obs_properties_create();
-    obs_property_t* type_p = obs_properties_add_list(grp, "tunnel_type", T_("TunnelService"),
-        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-    obs_property_list_add_int(type_p, "ngrok (TCP)", 0);
-    obs_property_list_add_int(type_p, "cloudflared (recommended)", 1);
-    obs_properties_add_text(grp, "ngrok_exe_path", T_("NgrokExePath"), OBS_TEXT_DEFAULT);
-    obs_properties_add_text(grp, "ngrok_token", T_("NgrokToken"), OBS_TEXT_PASSWORD);
     obs_properties_add_text(grp, "cloudflared_exe_path", T_("CloudflaredExePath"), OBS_TEXT_DEFAULT);
-    obs_property_set_modified_callback(type_p, cb_tunnel_type_changed);
-
-    int tunnel_type = 0;
-    {
-        obs_data_t* s = obs_source_get_settings(d->context);
-        tunnel_type = (int)obs_data_get_int(s, "tunnel_type");
-        cb_tunnel_type_changed(grp, nullptr, s);
-        obs_data_release(s);
-    }
 
     bool cloudflared_downloading =
-        (tunnel_type == 1) && d->tunnel.cloudflared_downloading();
+        d->tunnel.cloudflared_downloading();
     if (ts == TunnelState::Running) {
         obs_properties_add_button2(grp, "tunnel_stop_btn",
             T_("TunnelStop"), cb_tunnel_stop, d);
@@ -1661,14 +1644,12 @@ static void ds_get_defaults(obs_data_t* settings) {
     // Ch.1 既定名を A にするため、次の自動払い出しは B から開始する。
     obs_data_set_default_int   (settings, "sub_memo_auto_counter", 1);
     obs_data_set_default_int   (settings, "audio_codec",           0);
+    obs_data_set_default_int   (settings, "ws_port",               WS_PORT);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");
     obs_data_set_default_double(settings, "master_delay_ms",       0.0);
     obs_data_set_default_double(settings, "sub_offset_ms",         0.0);
     obs_data_set_default_string(settings, "rtmp_url_manual",       "");
-    obs_data_set_default_int   (settings, "tunnel_type",           1);
-    obs_data_set_default_string(settings, "ngrok_exe_path",        "C:\\ngrok\\ngrok.exe");
-    obs_data_set_default_string(settings, "ngrok_token",           "");
     obs_data_set_default_string(settings, "cloudflared_exe_path",  "auto");
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);

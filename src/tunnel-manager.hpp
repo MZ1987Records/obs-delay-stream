@@ -2,37 +2,26 @@
 /*
  * tunnel-manager.hpp
  *
- * ngrok または cloudflared を子プロセスとして起動し、
+ * cloudflared を子プロセスとして起動し、
  * 取得したパブリックURL (wss://) を返す。
  *
- * ngrok:
- *   起動: ngrok.exe tcp 19000 --authtoken <token>
- *         (または事前に `ngrok config add-authtoken` 済みなら tokenなしでも可)
- *   URL取得: http://127.0.0.1:4040/api/tunnels をポーリング
- *   URL形式: tcp://X.tcp.ngrok.io:NNNNN → ws://X.tcp.ngrok.io:NNNNN に変換
- *   ※ ngrokのTCPトンネルはTLS非対応のためws://になる
- *     (有料プランでTLS対応ドメインを使えばwss://も可能)
- *
  * cloudflared:
- *   起動: cloudflared.exe tunnel --url http://localhost:19000
+ *   起動: cloudflared.exe tunnel --url http://localhost:<WS_PORT>
  *   URL取得: stderr に出力される "https://xxxx.trycloudflare.com" を捕捉
  *   URL形式: https:// → wss:// に変換
  *   ※ 無料・認証不要・固定でない（起動毎にURLが変わる）
  */
 
-// Windows headers in correct order (winsock2 before windows)
+// Windows headers
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
 #include <ShlObj.h>
 #include <urlmon.h>
-#pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Urlmon.lib")
 
@@ -50,10 +39,7 @@
 #include <chrono>
 #include <algorithm>
 
-// ============================================================
-// TunnelType
-// ============================================================
-enum class TunnelType { Ngrok, Cloudflared };
+#include "constants.hpp"
 
 // ============================================================
 // TunnelState
@@ -98,22 +84,16 @@ public:
         return downloading_cloudflared_.load();
     }
 
-    TunnelManager()  { WSADATA w{}; WSAStartup(MAKEWORD(2,2), &w); }
+    TunnelManager() = default;
     ~TunnelManager() { stop(); }
 
     // ----- 起動 -----
-    // exe_path: ngrok.exe または cloudflared.exe のフルパス
-    // token   : ngrokのみ使用 (空文字列なら設定ファイルのトークンを使用)
-    bool start(TunnelType type,
-               const std::string& exe_path,
-               const std::string& token = "",
-               int ws_port = 19000)
+    // exe_path: cloudflared.exe のフルパス（"auto" または空で自動取得）
+    bool start(const std::string& exe_path, int ws_port)
     {
         if (state_.load() == TunnelState::Running ||
             state_.load() == TunnelState::Starting) return false;
 
-        type_     = type;
-        token_    = token;
         ws_port_  = ws_port;
         {
             std::lock_guard<std::mutex> lk(mtx_);
@@ -121,31 +101,27 @@ public:
             error_    = "";
         }
 
-        if (type_ == TunnelType::Cloudflared) {
-            requested_exe_path_ = exe_path;
-            bool is_auto = exe_path.empty() || _stricmp(exe_path.c_str(), "auto") == 0;
-            if (!is_auto) {
-                std::string expanded = expand_allowed_env_vars(exe_path);
-                std::string resolved;
-                std::string err;
-                if (!resolve_cloudflared_path(expanded, resolved, err)) {
-                    set_error(err);
-                    return false;
-                }
-                exe_path_ = resolved;
+        requested_exe_path_ = exe_path;
+        bool is_auto = exe_path.empty() || _stricmp(exe_path.c_str(), "auto") == 0;
+        if (!is_auto) {
+            std::string expanded = expand_allowed_env_vars(exe_path);
+            std::string resolved;
+            std::string err;
+            if (!resolve_cloudflared_path(expanded, resolved, err)) {
+                set_error(err);
+                return false;
+            }
+            exe_path_ = resolved;
+            set_cloudflared_downloading(false);
+        } else {
+            std::string auto_path = get_default_cloudflared_path();
+            if (file_exists(auto_path)) {
+                exe_path_ = auto_path;
                 set_cloudflared_downloading(false);
             } else {
-                std::string auto_path = get_default_cloudflared_path();
-                if (file_exists(auto_path)) {
-                    exe_path_ = auto_path;
-                    set_cloudflared_downloading(false);
-                } else {
-                    exe_path_.clear();
-                    set_cloudflared_downloading(true);
-                }
+                exe_path_.clear();
+                set_cloudflared_downloading(true);
             }
-        } else {
-            exe_path_ = expand_allowed_env_vars(exe_path);
         }
 
         state_ = TunnelState::Starting;
@@ -178,8 +154,7 @@ public:
     std::string url()   const { std::lock_guard<std::mutex> lk(mtx_); return url_; }
     std::string error() const { std::lock_guard<std::mutex> lk(mtx_); return error_; }
 
-    // 各chの受信URL生成
-    // ngrok TCPはパスルーティング対応: ws://host:port/stream_id/ch
+    // 各chの受信URL生成（wss://host/stream_id/ch）
     std::string make_ch_url(const std::string& stream_id, int ch_1idx) const {
         std::lock_guard<std::mutex> lk(mtx_);
         if (url_.empty() || stream_id.empty()) return "";
@@ -396,7 +371,7 @@ private:
     // メインループ
     // ============================================================
     void run_loop() {
-        if (type_ == TunnelType::Cloudflared && exe_path_.empty()) {
+        if (exe_path_.empty()) {
             std::string resolved;
             std::string err;
             set_cloudflared_downloading(true);
@@ -409,112 +384,12 @@ private:
             exe_path_ = resolved;
             set_cloudflared_downloading(false);
         }
-        bool ok = (type_ == TunnelType::Ngrok)
-            ? run_ngrok()
-            : run_cloudflared();
+        bool ok = run_cloudflared();
 
         if (!ok && !stop_requested_) {
             state_ = TunnelState::Error;
         }
         kill_child();
-    }
-
-    // ---- ngrok ----
-    bool run_ngrok() {
-        // コマンドライン構築
-        char args[512];
-        if (!token_.empty())
-            snprintf(args, sizeof(args),
-                "tcp %d --authtoken %s --log stdout",
-                ws_port_, token_.c_str());
-        else
-            snprintf(args, sizeof(args),
-                "tcp %d --log stdout", ws_port_);
-
-        if (!launch_process(exe_path_, args)) {
-            if (!last_launch_error_.empty())
-                set_error(std::string("ngrok.exe launch failed: ") + last_launch_error_);
-            else
-                set_error("ngrok.exe launch failed. Check path and token.");
-            return false;
-        }
-
-        // ngrok local API からURLを取得 (最大30秒ポーリング)
-        std::string tunnel_url;
-        for (int retry = 0; retry < 60 && !stop_requested_; ++retry) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            tunnel_url = fetch_ngrok_url();
-            if (!tunnel_url.empty()) break;
-        }
-        if (tunnel_url.empty()) {
-            set_error("ngrok トンネルURLの取得がタイムアウトしました。\n"
-                      "トークンとネットワーク接続を確認してください。");
-            return false;
-        }
-
-        // tcp:// → ws:// に変換
-        if (tunnel_url.rfind("tcp://", 0) == 0)
-            tunnel_url = "ws://" + tunnel_url.substr(6);
-
-        set_url(tunnel_url);
-        state_ = TunnelState::Running;
-        if (on_url_ready) on_url_ready(tunnel_url);
-
-        // プロセス終了を監視
-        while (!stop_requested_) {
-            DWORD exit_code = STILL_ACTIVE;
-            {
-                std::lock_guard<std::mutex> lk(proc_mtx_);
-                if (proc_handle_ != INVALID_HANDLE_VALUE)
-                    GetExitCodeProcess(proc_handle_, &exit_code);
-                else
-                    break;
-            }
-            if (exit_code != STILL_ACTIVE) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        }
-        return true;
-    }
-
-    // ngrok local API (http://127.0.0.1:4040/api/tunnels) からURLを取得
-    std::string fetch_ngrok_url() {
-        // 簡易HTTP GETをWinsockで実装
-        SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
-        if (s == INVALID_SOCKET) return "";
-
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port   = htons(4040);
-        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-
-        // タイムアウト設定 (1秒)
-        DWORD to = 1000;
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&to, sizeof(to));
-        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&to, sizeof(to));
-
-        if (connect(s, (sockaddr*)&addr, sizeof(addr)) != 0) {
-            closesocket(s); return "";
-        }
-        const char* req =
-            "GET /api/tunnels HTTP/1.0\r\n"
-            "Host: 127.0.0.1:4040\r\n\r\n";
-        send(s, req, (int)strlen(req), 0);
-
-        std::string resp;
-        char buf[4096];
-        int n;
-        while ((n = recv(s, buf, sizeof(buf)-1, 0)) > 0) {
-            buf[n] = 0; resp += buf;
-        }
-        closesocket(s);
-
-        // "public_url":"tcp://..." を抜き出す
-        auto pos = resp.find("\"public_url\":\"");
-        if (pos == std::string::npos) return "";
-        pos += 14;
-        auto end = resp.find("\"", pos);
-        if (end == std::string::npos) return "";
-        return resp.substr(pos, end - pos);
     }
 
     // ---- cloudflared ----
@@ -698,11 +573,9 @@ private:
     }
 
     std::string  log_file_path_;
-    TunnelType   type_          = TunnelType::Ngrok;
     std::string  exe_path_;
     std::string  requested_exe_path_;
-    std::string  token_;
-    int          ws_port_       = 19000;
+    int          ws_port_       = WS_PORT;
 
     std::string  url_;
     std::string  error_;
@@ -717,6 +590,4 @@ private:
     std::mutex           proc_mtx_;
     HANDLE proc_handle_   = INVALID_HANDLE_VALUE;
     HANDLE thread_handle_ = INVALID_HANDLE_VALUE;
-    HANDLE pipe_read_     = INVALID_HANDLE_VALUE;
-    HANDLE pipe_write_    = INVALID_HANDLE_VALUE;
 };

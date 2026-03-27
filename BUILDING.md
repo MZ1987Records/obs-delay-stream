@@ -167,7 +167,7 @@ obs-delay-stream/
     websocket-server.hpp           WebSocket/HTTP サーバー
     rtmp-prober.hpp                RTMP 遅延計測
     sync-flow.hpp                  同期フロー制御
-    tunnel-manager.hpp             cloudflared/ngrok 管理
+    tunnel-manager.hpp             cloudflared 管理
   third_party/                     （ローカル取得。通常は Git 管理外）
     obs-studio/
     websocketpp/

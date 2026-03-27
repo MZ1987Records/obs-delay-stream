@@ -22,7 +22,7 @@
         <a class="navbar-item" href="https://github.com/MZ1987Records/obs-delay-stream" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
           <span class="icon"><i class="fab fa-github"></i></span>
         </a>
-        <a class="navbar-item" href="https://mz1987records.booth.pm/" target="_blank" rel="noopener noreferrer" aria-label="Booth">
+        <a class="navbar-item" href="https://mz1987records.booth.pm/items/8134637" target="_blank" rel="noopener noreferrer" aria-label="Booth">
           <span class="icon"><img src="booth-logo-icon.svg" alt="" class="ds-navbar-icon-img"></span>
         </a>
       </div>
@@ -210,9 +210,9 @@
     }
 
     function buildUrl(ip, sid, ch) {
-      // cloudflared/ngrok/https時はポートなしwss://
+      // cloudflared/https時はポートなしwss://
       const hasScheme = /^(wss?|https?):\/\//.test(ip);
-      const isTunnel = ip.includes('trycloudflare.com') || ip.includes('ngrok.io')
+      const isTunnel = ip.includes('trycloudflare.com')
         || hasScheme || location.protocol === 'https:';
       const cleanIp = ip.replace(/^(wss?|https?):\/\//, '').replace(/\/.*$/, '');
       if (isTunnel) {
