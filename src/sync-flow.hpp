@@ -5,11 +5,10 @@
  * 3ステップ同期フローを管理するクラス
  *
  * Step1: 接続中の全CHを並列計測（10回ping）
- * Step2: 最大片道遅延を基準に各CHの追加遅延を算出・確認表示
+ * Step2: （廃止）
  * Step3: RTMP遅延計測 → マスター遅延 = パフォーマー基準 + RTMP片道遅延 を算出・確認表示
  *
- * 「遅い側に合わせる」設計:
- *   各サブch遅延 = max_one_way - ch_one_way  (差分を追加)
+ * マスター遅延の設計:
  *   マスター遅延 = max_one_way + rtmp_one_way (パフォーマー基準 + 配信遅延)
  */
 
@@ -39,7 +38,6 @@ enum class FlowPhase {
     Idle,           // 待機中
     Step1_Measuring,// ステップ1: 全CH並列計測中
     Step1_Done,     // ステップ1完了 → 確認待ち
-    Step2_Applied,  // ステップ2: サブch遅延反映済み → 確認待ち
     Step3_Measuring,// ステップ3: RTMP計測中
     Step3_Done,     // ステップ3完了 → 確認待ち
     Complete,       // 全完了
@@ -82,8 +80,6 @@ public:
     std::function<void()>                          on_update;
     // 各CH計測完了通知
     std::function<void(int ch, LatencyResult)>     on_ch_measured;
-    // サブch遅延一括書き込み要求
-    std::function<void(const FlowResult&)>         on_apply_sub;
     // マスター遅延書き込み要求
     std::function<void(double master_ms)>          on_apply_master;
 
@@ -181,26 +177,11 @@ public:
         return true;
     }
 
-    // ----- ステップ2: サブch遅延一括反映 -----
-    bool apply_step2() {
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            if (phase_ != FlowPhase::Step1_Done) return false;
-        }
-        if (on_apply_sub) on_apply_sub(result_);
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            phase_ = FlowPhase::Step2_Applied;
-        }
-        if (on_update) on_update();
-        return true;
-    }
-
     // ----- ステップ3開始: RTMP計測 -----
     bool start_step3(const std::string& rtmp_url) {
         {
             std::lock_guard<std::mutex> lk(mtx_);
-            if (phase_ != FlowPhase::Step2_Applied) return false;
+            if (phase_ != FlowPhase::Step1_Done) return false;
             if (rtmp_url.empty()) return false;
             phase_ = FlowPhase::Step3_Measuring;
         }

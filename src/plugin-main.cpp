@@ -52,6 +52,8 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
 
 // OBSプロセス内では本フィルタを1インスタンスだけ許可する。
 static std::atomic<bool> g_delay_stream_filter_exists{false};
+static constexpr float   SUB_ADJUST_MIN_MS = -500.0f;
+static constexpr float   SUB_ADJUST_MAX_MS = 500.0f;
 
 // ローカルネットワークで利用しやすいIPv4アドレスを優先して取得する。
 static std::string get_local_ip() {
@@ -239,6 +241,7 @@ struct DelayStreamData {
     std::array<ChCtx, MAX_SUB_CH> btn_ctx;
     struct SubChannel {
         float        delay_ms = 0.0f;
+        float        adjust_ms = 0.0f;
         DelayBuffer  buf;
         MeasureState measure;
     };
@@ -273,18 +276,30 @@ struct DelayStreamData {
     }
 };
 
-// Sub-CHの最終遅延値（base + global offset）を算出して、無効時は0にする。
-static uint32_t calc_effective_sub_delay_ms(const DelayStreamData* d, float base_delay_ms) {
-    if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
-    float effective = base_delay_ms + d->sub_offset_ms;
+// Sub-CHの最終遅延値（base + adjust + global offset）を算出する。
+static float calc_effective_sub_delay_value_ms(const DelayStreamData* d,
+                                               float base_delay_ms,
+                                               float adjust_ms) {
+    if (!d) return 0.0f;
+    float effective = base_delay_ms + adjust_ms + d->sub_offset_ms;
     if (effective < 0.0f) effective = 0.0f;
-    return static_cast<uint32_t>(effective);
+    return effective;
+}
+
+// Sub-CHの最終遅延値（base + adjust + global offset）を算出して、無効時は0にする。
+static uint32_t calc_effective_sub_delay_ms(const DelayStreamData* d,
+                                            float base_delay_ms,
+                                            float adjust_ms) {
+    if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
+    return static_cast<uint32_t>(
+        calc_effective_sub_delay_value_ms(d, base_delay_ms, adjust_ms));
 }
 
 // 指定Sub-CHのバッファ遅延を現在設定へ反映する。
 static void apply_sub_delay_to_buffer(DelayStreamData* d, int ch) {
     if (!d || ch < 0 || ch >= MAX_SUB_CH) return;
-    d->sub[ch].buf.set_delay_ms(calc_effective_sub_delay_ms(d, d->sub[ch].delay_ms));
+    d->sub[ch].buf.set_delay_ms(
+        calc_effective_sub_delay_ms(d, d->sub[ch].delay_ms, d->sub[ch].adjust_ms));
 }
 
 // 測定状態を初期値へ戻す。
@@ -368,21 +383,6 @@ static void request_properties_refresh(DelayStreamData* d) {
     }
 }
 
-// Sync FlowのStep2結果をSub-CH遅延設定へ書き戻す。
-static void write_sub_delays(DelayStreamData* d, const FlowResult& r) {
-    obs_data_t* s = obs_source_get_settings(d->context);
-    for (int i = 0; i < MAX_SUB_CH; ++i) {
-        if (!r.channels[i].measured) continue;
-        char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
-        obs_data_set_double(s, key, r.channels[i].proposed_delay);
-        d->sub[i].delay_ms = (float)r.channels[i].proposed_delay;
-        d->sub[i].buf.set_delay_ms((uint32_t)r.channels[i].proposed_delay);
-        d->router.notify_apply_delay(i, r.channels[i].proposed_delay);
-    }
-    obs_data_release(s);
-    // Note: ds_update will be called by OBS when settings change
-}
-
 // マスター遅延を設定へ書き戻し、必要ならバッファへ反映する。
 static void write_master_delay(DelayStreamData* d, double ms) {
     obs_data_t* s = obs_source_get_settings(d->context);
@@ -431,7 +431,7 @@ static void              build_flow_panel(obs_properties_t*, DelayStreamData*);
 static void              apply_sub_delay(DelayStreamData*, int, double);
 
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void*);
-static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void*);
+static bool cb_sub_adjust_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_add(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void*);
@@ -441,7 +441,6 @@ static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void*);
 static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_start(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_retry_failed(obs_properties_t*, obs_property_t*, void*);
-static bool cb_flow_apply_step2(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_start_step3(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_apply_step3(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void*);
@@ -513,16 +512,6 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     }
     d->flow.on_update      = [d]() { request_properties_refresh(d); };
     d->flow.on_ch_measured = [d](int, LatencyResult) { request_properties_refresh(d); };
-    d->flow.on_apply_sub = [d](const FlowResult& r) {
-        struct Ctx { DelayStreamData* d; FlowResult r; };
-        auto* c = new Ctx{d, r};
-        obs_queue_task(OBS_TASK_UI, [](void* p){
-            auto* c = static_cast<Ctx*>(p);
-            write_sub_delays(c->d, c->r);
-            request_properties_refresh(c->d);
-            delete c;
-        }, c, false);
-    };
     d->flow.on_apply_master = [d](double ms) {
         struct Ctx { DelayStreamData* d; double ms; };
         auto* c = new Ctx{d, ms};
@@ -561,16 +550,15 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
         if (sid != d->get_stream_id()) return;
         if (ch < 0 || ch >= MAX_SUB_CH) return;
         auto& ms = d->sub[ch].measure;
-        bool was_measuring = false;
+        bool should_apply = r.valid;
         {
             std::lock_guard<std::mutex> lk(ms.mtx);
-            was_measuring = ms.measuring;
             ms.result = r;
             ms.measuring = false;
-            ms.applied = false;
+            ms.applied = should_apply;
             ms.last_error = r.valid ? "" : T_("MeasureFailed");
         }
-        if (r.valid && was_measuring) {
+        if (should_apply) {
             struct Ctx { DelayStreamData* d; int ch; double ms; };
             auto* c = new Ctx{d, ch, r.avg_one_way};
             obs_queue_task(OBS_TASK_UI, [](void* p){
@@ -605,7 +593,6 @@ static void ds_destroy(void* data) {
         // 2. コールバックをnull化（停止後なので競合しない）
         d->flow.on_update       = nullptr;
         d->flow.on_ch_measured  = nullptr;
-        d->flow.on_apply_sub    = nullptr;
         d->flow.on_apply_master = nullptr;
         d->rtmp.prober.on_result = nullptr;
         d->tunnel.on_url_ready  = nullptr;
@@ -629,7 +616,7 @@ static void ensure_init(DelayStreamData* d, uint32_t sr, uint32_t ch) {
     d->master_buf.set_delay_ms((uint32_t)d->master_delay_ms);
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         d->sub[i].buf.init(sr, ch);
-        d->sub[i].buf.set_delay_ms((uint32_t)d->sub[i].delay_ms);
+        apply_sub_delay_to_buffer(d, i);
     }
     d->work_buf.resize(65536 * ch, 0.0f);
     d->initialized = true;
@@ -730,6 +717,16 @@ static void ds_update(void* data, obs_data_t* settings) {
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
         d->sub[i].delay_ms = (float)obs_data_get_double(settings, key);
+        char adjust_key[32]; snprintf(adjust_key, sizeof(adjust_key), "sub%d_adjust_ms", i);
+        float adjust = (float)obs_data_get_double(settings, adjust_key);
+        if (adjust < SUB_ADJUST_MIN_MS) {
+            adjust = SUB_ADJUST_MIN_MS;
+            obs_data_set_double(settings, adjust_key, adjust);
+        } else if (adjust > SUB_ADJUST_MAX_MS) {
+            adjust = SUB_ADJUST_MAX_MS;
+            obs_data_set_double(settings, adjust_key, adjust);
+        }
+        d->sub[i].adjust_ms = adjust;
         char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         const char* memo = obs_data_get_string(settings, memo_key);
         d->router.set_sub_memo(i, memo ? memo : "");
@@ -808,6 +805,34 @@ static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
+// 追加遅延スライダー変更を即時反映する。
+static bool cb_sub_adjust_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
+    auto* ctx = static_cast<ChCtx*>(priv);
+    if (!ctx || !ctx->d || !settings) return false;
+    auto* d = ctx->d;
+    int i = ctx->ch;
+    if (i < 0 || i >= MAX_SUB_CH) return false;
+
+    char key[32];
+    snprintf(key, sizeof(key), "sub%d_adjust_ms", i);
+    float adjust = (float)obs_data_get_double(settings, key);
+    if (adjust < SUB_ADJUST_MIN_MS) {
+        adjust = SUB_ADJUST_MIN_MS;
+        obs_data_set_double(settings, key, adjust);
+    } else if (adjust > SUB_ADJUST_MAX_MS) {
+        adjust = SUB_ADJUST_MAX_MS;
+        obs_data_set_double(settings, key, adjust);
+    }
+
+    d->sub[i].adjust_ms = adjust;
+    apply_sub_delay_to_buffer(d, i);
+    d->router.notify_apply_delay(
+        i,
+        calc_effective_sub_delay_value_ms(
+            d, d->sub[i].delay_ms, d->sub[i].adjust_ms));
+    request_properties_refresh(d);
+    return false;
+}
 // 指定Sub-CHの遅延を設定値と実バッファへ反映する。
 static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
     if (!d || i < 0 || i >= MAX_SUB_CH) return;
@@ -817,18 +842,10 @@ static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
     obs_data_release(s);
     d->sub[i].delay_ms = (float)ms;
     apply_sub_delay_to_buffer(d, i);
-    d->router.notify_apply_delay(i, ms);
-}
-// 測定結果の片道遅延をSub-CHへ適用する。
-static bool cb_sub_apply(obs_properties_t*, obs_property_t*, void* priv) {
-    auto* ctx = static_cast<ChCtx*>(priv);
-    auto* d = ctx->d; int i = ctx->ch;
-    LatencyResult r;
-    { std::lock_guard<std::mutex> lk(d->sub[i].measure.mtx); r = d->sub[i].measure.result; }
-    if (!r.valid) return false;
-    apply_sub_delay(d, i, r.avg_one_way);
-    request_properties_refresh(d);
-    return false;
+    d->router.notify_apply_delay(
+        i,
+        calc_effective_sub_delay_value_ms(
+            d, d->sub[i].delay_ms, d->sub[i].adjust_ms));
 }
 // 全Sub-CHのURLと名前の一覧をMarkdown箇条書き形式でクリップボードへコピーする。
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
@@ -911,6 +928,12 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
         double v = obs_data_get_double(s, key_from);
         obs_data_set_double(s, key_to, v);
 
+        char adjust_from[32], adjust_to[32];
+        snprintf(adjust_from, sizeof(adjust_from), "sub%d_adjust_ms", i + 1);
+        snprintf(adjust_to,   sizeof(adjust_to),   "sub%d_adjust_ms", i);
+        double av = obs_data_get_double(s, adjust_from);
+        obs_data_set_double(s, adjust_to, av);
+
         char memo_from[32], memo_to[32];
         snprintf(memo_from, sizeof(memo_from), "sub%d_memo", i + 1);
         snprintf(memo_to,   sizeof(memo_to),   "sub%d_memo", i);
@@ -922,6 +945,8 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     {
         char key_last[32]; snprintf(key_last, sizeof(key_last), "sub%d_delay_ms", MAX_SUB_CH - 1);
         obs_data_set_double(s, key_last, 0.0);
+        char adjust_last[32]; snprintf(adjust_last, sizeof(adjust_last), "sub%d_adjust_ms", MAX_SUB_CH - 1);
+        obs_data_set_double(s, adjust_last, 0.0);
     }
     obs_data_set_int(s, "sub_ch_count", next);
     obs_data_release(s);
@@ -929,10 +954,12 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     // shift runtime state down
     for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
         d->sub[i].delay_ms = d->sub[i + 1].delay_ms;
+        d->sub[i].adjust_ms = d->sub[i + 1].adjust_ms;
         apply_sub_delay_to_buffer(d, i);
         clear_measure_state(d->sub[i].measure);
     }
     d->sub[MAX_SUB_CH - 1].delay_ms = 0.0f;
+    d->sub[MAX_SUB_CH - 1].adjust_ms = 0.0f;
     apply_sub_delay_to_buffer(d, MAX_SUB_CH - 1);
     clear_measure_state(d->sub[MAX_SUB_CH - 1].measure);
 
@@ -1021,13 +1048,6 @@ static bool cb_flow_retry_failed(obs_properties_t*, obs_property_t*, void* priv)
     d->flow.retry_failed_step1(d->router);
     return false;
 }
-// Step2結果を適用する。
-static bool cb_flow_apply_step2(obs_properties_t*, obs_property_t*, void* priv) {
-    auto* d = static_cast<DelayStreamData*>(priv);
-    d->flow.apply_step2();
-    request_properties_refresh(d);
-    return false;
-}
 // Sync Flow Step3（RTMP測定）を開始する。
 static bool cb_flow_start_step3(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
@@ -1089,21 +1109,22 @@ static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamDat
     }
     int sub_count = d->sub_ch_count;
     for (int i = 0; i < sub_count; ++i) {
-        char uk[32], dk[32], mk[32], ak[32];
+        char uk[32], aj[32], mk[32];
         snprintf(uk, sizeof(uk), "sub%d_url", i);
-        snprintf(dk, sizeof(dk), "sub%d_delay_ms", i);
+        snprintf(aj, sizeof(aj), "sub%d_adjust_ms", i);
         snprintf(mk, sizeof(mk), "sub%d_meas", i);
-        snprintf(ak, sizeof(ak), "sub%d_apply", i);
         if (auto* p = obs_properties_get(props, uk)) {
             obs_property_set_visible(p, detail);
         }
-        if (auto* p = obs_properties_get(props, dk)) {
+        char ei[32];
+        snprintf(ei, sizeof(ei), "sub%d_effective_info", i);
+        if (auto* p = obs_properties_get(props, ei)) {
+            obs_property_set_visible(p, detail);
+        }
+        if (auto* p = obs_properties_get(props, aj)) {
             obs_property_set_visible(p, detail);
         }
         if (auto* p = obs_properties_get(props, mk)) {
-            obs_property_set_visible(p, detail);
-        }
-        if (auto* p = obs_properties_get(props, ak)) {
             obs_property_set_visible(p, detail);
         }
     }
@@ -1183,46 +1204,46 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
         break;
     }
     case FlowPhase::Step1_Done: {
-        char buf[1024];
-        snprintf(buf, sizeof(buf), T_("FlowStep1DoneFmt"), res.max_one_way_ms);
+        char buf[1536];
+        snprintf(buf, sizeof(buf), "%s", T_("FlowStep1DoneApplied"));
+        obs_data_t* s = obs_source_get_settings(d->context);
         for (int i = 0; i < sub_count; ++i) {
             if (!res.channels[i].connected) continue;
-            char line[80];
-            if (res.channels[i].measured)
-                snprintf(line, sizeof(line), "\n  Ch%-2d %.1f ms -> +%.1f ms",
-                         i+1, res.channels[i].one_way_ms, res.channels[i].proposed_delay);
-            else
-                snprintf(line, sizeof(line), "\n  Ch%-2d %s", i+1, T_("FlowChFailed"));
+            char memo_key[32];
+            snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
+            const char* memo = s ? obs_data_get_string(s, memo_key) : "";
+            std::string name = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
+            char line[192];
+            if (res.channels[i].measured) {
+                // 個別計測の自動適用後、現在の基準遅延値を表示する。
+                snprintf(line, sizeof(line), "\n  Ch.%d %s : %.1f ms",
+                         i + 1, name.c_str(), d->sub[i].delay_ms);
+            } else {
+                snprintf(line, sizeof(line), "\n  Ch.%d %s : %s",
+                         i + 1, name.c_str(), T_("FlowChFailed"));
+            }
             strncat(buf, line, sizeof(buf)-strlen(buf)-1);
         }
+        if (s) obs_data_release(s);
         obs_properties_add_text(props, "flow_s1_result", buf, OBS_TEXT_INFO);
         // 失敗CHがあればリトライボタンを表示
         if (res.measured_count < res.connected_count)
             obs_properties_add_button2(props, "flow_retry_btn",
                 T_("FlowRetryFailed"), cb_flow_retry_failed, d);
-        obs_properties_add_button2(props, "flow_apply2_btn",
-            T_("FlowApplyStep2"), cb_flow_apply_step2, d);
+        obs_properties_add_button2(props, "flow_s3_btn",
+            T_("FlowStep2Start"), cb_flow_start_step3, d);
         obs_properties_add_button2(props, "flow_cancel_s1d", T_("Cancel"), cb_flow_reset, d);
         break;
     }
-    case FlowPhase::Step2_Applied: {
-        char buf[256];
-        snprintf(buf, sizeof(buf), T_("FlowStep2DoneFmt"), res.max_one_way_ms);
-        obs_properties_add_text(props, "flow_s2_done", buf, OBS_TEXT_INFO);
-        obs_properties_add_button2(props, "flow_s3_btn",
-            T_("FlowStep3Start"), cb_flow_start_step3, d);
-        obs_properties_add_button2(props, "flow_cancel_s2a", T_("Cancel"), cb_flow_reset, d);
-        break;
-    }
     case FlowPhase::Step3_Measuring:
-        obs_properties_add_text(props, "flow_s3_prog", T_("FlowStep3Measuring"), OBS_TEXT_INFO);
+        obs_properties_add_text(props, "flow_s3_prog", T_("FlowStep2Measuring"), OBS_TEXT_INFO);
         obs_properties_add_button2(props, "flow_cancel_s3m", T_("Cancel"), cb_flow_reset, d);
         break;
     case FlowPhase::Step3_Done: {
         char buf[512];
         if (res.rtmp_valid) {
             snprintf(buf, sizeof(buf),
-                T_("FlowStep3ResultFmt"),
+                T_("FlowStep2ResultFmt"),
                 res.rtmp_one_way_ms, res.max_one_way_ms, res.master_delay_ms);
             obs_properties_add_text(props, "flow_s3_result", buf, OBS_TEXT_INFO);
             char al[80];
@@ -1490,7 +1511,6 @@ static void add_sub_channel_measure_controls(obs_properties_t* ch_grp,
                                              int i,
                                              size_t nc,
                                              const char* mk,
-                                             const char* ak,
                                              const char* rk) {
     if (nc > 0) {
         MeasureState& ms = d->sub[i].measure;
@@ -1505,9 +1525,6 @@ static void add_sub_channel_measure_controls(obs_properties_t* ch_grp,
             snprintf(rs, sizeof(rs), T_("SubResultFmt"),
                      ms.result.avg_rtt_ms, ms.result.avg_one_way);
             obs_properties_add_text(ch_grp, rk, rs, OBS_TEXT_INFO);
-            char al[64];
-            snprintf(al, sizeof(al), T_("ApplyFmt"), ms.result.avg_one_way);
-            obs_properties_add_button2(ch_grp, ak, al, cb_sub_apply, &d->btn_ctx[i]);
             char ml[64];
             snprintf(ml, sizeof(ml), T_("SubRemeasureFmt"), nc);
             obs_properties_add_button2(ch_grp, mk, ml,
@@ -1535,16 +1552,15 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     if (!grp || !d) return;
     d->btn_ctx[i] = { d, i };
 
-    char dk[32], uk[32], mk[32], ak[32], rk[32], nk[32], dk_rm[32];
-    char dn[64], ul[32], us[512], gk[32], gt[32];
-    snprintf(dk, sizeof(dk), "sub%d_delay_ms", i);
-    snprintf(dn, sizeof(dn), "%s", T_("SubDelay"));
+    char uk[32], mk[32], rk[32], nk[32], dk_rm[32], ajk[32], eik[32];
+    char ul[32], us[512], gk[32], gt[32];
     snprintf(uk, sizeof(uk), "sub%d_url", i);
     snprintf(mk, sizeof(mk), "sub%d_meas", i);
-    snprintf(ak, sizeof(ak), "sub%d_apply", i);
     snprintf(rk, sizeof(rk), "sub%d_result", i);
     snprintf(nk, sizeof(nk), "sub%d_memo", i);
     snprintf(dk_rm, sizeof(dk_rm), "sub%d_remove", i);
+    snprintf(ajk, sizeof(ajk), "sub%d_adjust_ms", i);
+    snprintf(eik, sizeof(eik), "sub%d_effective_info", i);
     snprintf(ul, sizeof(ul), "URL");
     snprintf(gk, sizeof(gk), "sub%d_group", i);
     snprintf(gt, sizeof(gt), "Ch.%d", i + 1);
@@ -1565,10 +1581,19 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
     obs_property_set_long_description(up, us);
     obs_property_text_set_info_word_wrap(up, false);
-    obs_property_t* sp = obs_properties_add_float_slider(ch_grp, dk, dn, 0.0, MAX_DELAY_MS, 1.0);
-    obs_property_float_set_suffix(sp, " ms");
+    obs_property_t* sp = obs_properties_add_int_slider(
+        ch_grp, ajk, T_("SubAdjust"),
+        (int)SUB_ADJUST_MIN_MS, (int)SUB_ADJUST_MAX_MS, 1);
+    obs_property_int_set_suffix(sp, " ms");
+    obs_property_set_modified_callback2(sp, cb_sub_adjust_changed, &d->btn_ctx[i]);
+    char ei[192];
+    float effective = calc_effective_sub_delay_value_ms(
+        d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
+    snprintf(ei, sizeof(ei), T_("SubDelayEffectiveInfoFmt"),
+             effective, d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms);
+    obs_properties_add_text(ch_grp, eik, ei, OBS_TEXT_INFO);
 
-    add_sub_channel_measure_controls(ch_grp, d, i, nc, mk, ak, rk);
+    add_sub_channel_measure_controls(ch_grp, d, i, nc, mk, rk);
 
     char rm_label[32];
     snprintf(rm_label, sizeof(rm_label), T_("SubRemoveFmt"), i + 1);
@@ -1695,6 +1720,8 @@ static void ds_get_defaults(obs_data_t* settings) {
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
         obs_data_set_default_double(settings, key, 0.0);
+        char adjust_key[32]; snprintf(adjust_key, sizeof(adjust_key), "sub%d_adjust_ms", i);
+        obs_data_set_default_double(settings, adjust_key, 0.0);
         char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         if (i == 0) {
             std::string default_memo = make_default_sub_memo(0);
