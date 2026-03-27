@@ -50,6 +50,9 @@ OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
 #define T_(s) obs_module_text(s)
 
+// OBSプロセス内では本フィルタを1インスタンスだけ許可する。
+static std::atomic<bool> g_delay_stream_filter_exists{false};
+
 // ローカルネットワークで利用しやすいIPv4アドレスを優先して取得する。
 static std::string get_local_ip() {
     ULONG buf_size = 15000;
@@ -217,6 +220,8 @@ struct ChCtx { DelayStreamData* d; int ch; };
 
 struct DelayStreamData {
     obs_source_t* context      = nullptr;
+    bool is_duplicate_instance = false;
+    bool owns_singleton_slot   = false;
     std::atomic<bool> enabled{true};
     std::atomic<bool> ws_send_enabled{true};
     mutable std::mutex stream_id_mtx;  // protects stream_id, host_ip
@@ -479,10 +484,19 @@ static const char* ds_get_name(void*) { return "obs-delay-stream"; }
 
 // フィルタインスタンスを生成して各コンポーネントを初期化する。
 static void* ds_create(obs_data_t* settings, obs_source_t* source) {
+    bool already_exists =
+        g_delay_stream_filter_exists.exchange(true, std::memory_order_acq_rel);
     blog(LOG_INFO, "[obs-delay-stream] ds_create START");
     auto* d = new DelayStreamData();
     blog(LOG_INFO, "[obs-delay-stream] ds_create: DelayStreamData allocated at %p", (void*)d);
+    d->is_duplicate_instance = already_exists;
+    d->owns_singleton_slot   = !already_exists;
     d->context  = source;
+    if (d->is_duplicate_instance) {
+        blog(LOG_WARNING, "[obs-delay-stream] duplicate filter instance created as warning-only");
+        d->create_done.store(true);
+        return d;
+    }
     {
         auto html = load_receiver_index_html();
         if (html.empty()) {
@@ -579,25 +593,32 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
 // フィルタインスタンス破棄時に各コンポーネントを安全に停止する。
 static void ds_destroy(void* data) {
     auto* d = static_cast<DelayStreamData*>(data);
+    if (!d) return;
+    bool release_singleton_slot = d->owns_singleton_slot;
     // 1. 各コンポーネントの停止（内部スレッドの join を含む）
-    d->flow.reset();
-    d->rtmp.prober.cancel();
-    d->tunnel.stop();
-    d->router.stop();
+    if (!d->is_duplicate_instance) {
+        d->flow.reset();
+        d->rtmp.prober.cancel();
+        d->tunnel.stop();
+        d->router.stop();
 
-    // 2. コールバックをnull化（停止後なので競合しない）
-    d->flow.on_update       = nullptr;
-    d->flow.on_ch_measured  = nullptr;
-    d->flow.on_apply_sub    = nullptr;
-    d->flow.on_apply_master = nullptr;
-    d->rtmp.prober.on_result = nullptr;
-    d->tunnel.on_url_ready  = nullptr;
-    d->tunnel.on_error      = nullptr;
-    d->tunnel.on_stopped    = nullptr;
-    d->tunnel.on_download_state = nullptr;
-    d->router.clear_callbacks();
+        // 2. コールバックをnull化（停止後なので競合しない）
+        d->flow.on_update       = nullptr;
+        d->flow.on_ch_measured  = nullptr;
+        d->flow.on_apply_sub    = nullptr;
+        d->flow.on_apply_master = nullptr;
+        d->rtmp.prober.on_result = nullptr;
+        d->tunnel.on_url_ready  = nullptr;
+        d->tunnel.on_error      = nullptr;
+        d->tunnel.on_stopped    = nullptr;
+        d->tunnel.on_download_state = nullptr;
+        d->router.clear_callbacks();
+    }
 
     delete d;
+    if (release_singleton_slot) {
+        g_delay_stream_filter_exists.store(false, std::memory_order_release);
+    }
 }
 
 // サンプルレート/チャンネル変更時に内部バッファを再初期化する。
@@ -617,6 +638,13 @@ static void ensure_init(DelayStreamData* d, uint32_t sr, uint32_t ch) {
 // OBS設定値を内部状態へ同期する。
 static void ds_update(void* data, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(data);
+    if (d->is_duplicate_instance) {
+        d->enabled.store(false, std::memory_order_relaxed);
+        d->ws_send_enabled.store(false, std::memory_order_relaxed);
+        d->detail_mode.store(false, std::memory_order_relaxed);
+        d->prev_stream_id_has_user_value = obs_data_has_user_value(settings, "stream_id");
+        return;
+    }
     bool stream_id_has_user_value = obs_data_has_user_value(settings, "stream_id");
     bool reset_to_defaults =
         d->create_done.load(std::memory_order_relaxed) &&
@@ -717,6 +745,7 @@ static void ds_update(void* data, obs_data_t* settings) {
 // マスター遅延適用とSub-CH配信用の音声分岐を行う。
 static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
     auto* d = static_cast<DelayStreamData*>(data);
+    if (d->is_duplicate_instance) return audio;
     if (!audio || audio->frames == 0) return audio;
     const audio_output_info* info = audio_output_get_info(obs_get_audio());
     uint32_t sr = info ? info->samples_per_sec : 48000;
@@ -1231,9 +1260,17 @@ static void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
         "<a href=\"https://mz1987records.booth.pm/items/8134637\">Booth</a>");
     obs_property_text_set_info_word_wrap(about_p, false);
 
-    obs_property_t* detail_p =
-        obs_properties_add_bool(grp, "detail_mode", T_("DetailMode"));
-    obs_property_set_modified_callback2(detail_p, cb_detail_mode_changed, d);
+    if (d->is_duplicate_instance) {
+        obs_properties_add_text(
+            grp,
+            "duplicate_instance_warning",
+            "複数の obs-delay-stream フィルタを使用することはできません。",
+            OBS_TEXT_INFO);
+    } else {
+        obs_property_t* detail_p =
+            obs_properties_add_bool(grp, "detail_mode", T_("DetailMode"));
+        obs_property_set_modified_callback2(detail_p, cb_detail_mode_changed, d);
+    }
 
     obs_properties_add_group(props, "grp_plugin", T_("Plugin"), OBS_GROUP_NORMAL, grp);
 }
@@ -1617,6 +1654,10 @@ static obs_properties_t* ds_get_properties(void* data) {
 
     // UIブロックを順に組み立てる
     add_plugin_group(props, d);
+    if (d->is_duplicate_instance) {
+        d->in_get_props.store(false);
+        return props;
+    }
     add_sub_channels_group(props, d, detail_mode);
     add_stream_group(props, d);
     add_ws_group(props, d, has_sid);
