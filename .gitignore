@@ -57,3 +57,7 @@ Thumbs.db
 
 # Local env
 build.env
+
+# Receiver frontend build
+/receiver/dist/
+/receiver/node_modules/

@@ -24,7 +24,7 @@ rem - OBS_LEGACY_INSTALL: 1=legacy Program Files layout, 0=recommended ProgramDa
 rem - OBS_CI: 1=CI mode (skip install and pause).
 rem - You can define KEY=VALUE entries in build.env. See build.env.sample.
 rem Options:
-rem - --receiver-only / --receiver / /receiver-only / /receiver : install receiver files only.
+rem - --receiver-only / --receiver / /receiver-only / /receiver : build and install receiver files only.
 
 set "OBS_SOURCE_DIR="
 set "OBS_LEGACY_INSTALL="
@@ -77,6 +77,7 @@ set OBS_INSTALL_DIR=C:\ProgramData\obs-studio
 if "%OBS_LEGACY_INSTALL%"=="" set OBS_LEGACY_INSTALL=0
 if "%OBS_LEGACY_INSTALL%"=="1" set OBS_INSTALL_DIR=C:\Program Files\obs-studio
 set BUILD_DIR=%PLUGIN_DIR%\build
+set RECEIVER_BUILD_DIR=%BUILD_DIR%\receiver_dist
 set CI_MODE=0
 if /I "%OBS_CI%"=="1" set CI_MODE=1
 if /I "%CI%"=="true" set CI_MODE=1
@@ -99,6 +100,13 @@ if errorlevel 1 (
     goto :error
 )
 echo   git: OK
+
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] npm not found. Install Node.js 20+ from: https://nodejs.org/
+    goto :error
+)
+echo   npm: OK
 
 set VSWHERE="%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not exist %VSWHERE% (
@@ -243,42 +251,15 @@ if errorlevel 1 (
     goto :error
 )
 
-copy /Y "%BUILD_DIR%\receiver\index.html" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver index.html.
+if not exist "%RECEIVER_BUILD_DIR%\index.html" (
+    echo [ERROR] Missing receiver build output: %RECEIVER_BUILD_DIR%\index.html
+    echo         Re-run the build and check receiver npm build logs.
     goto :error
 )
 
-copy /Y "%PLUGIN_DIR%\receiver\receiver.js" "%RECEIVER_DEST%\"
+xcopy /E /I /Y "%RECEIVER_BUILD_DIR%" "%RECEIVER_DEST%\" >nul
 if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver receiver.js.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\ui.css" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver ui.css.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\*.svg" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver svg files.
-    goto :error
-)
-
-if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\i18next.min.js" (
-    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\i18next.min.js
-    goto :error
-)
-if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\LICENSE" (
-    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\LICENSE
-    goto :error
-)
-
-xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver third_party files.
+    echo [ERROR] Failed to copy receiver build output.
     goto :error
 )
 if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
@@ -287,6 +268,10 @@ if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
 )
 if not exist "%RECEIVER_DEST%\third_party\i18next\LICENSE" (
     echo [ERROR] Failed to deploy receiver asset: third_party\i18next\LICENSE
+    goto :error
+)
+if not exist "%RECEIVER_DEST%\index.html" (
+    echo [ERROR] Failed to deploy receiver asset: index.html
     goto :error
 )
 
@@ -320,42 +305,12 @@ set RECEIVER_DEST=%OBS_INSTALL_DIR%\data\obs-plugins\obs-delay-stream\receiver
 
 if not exist "%RECEIVER_DEST%" mkdir "%RECEIVER_DEST%"
 
-copy /Y "%PLUGIN_DIR%\receiver\index.html" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver index.html.
-    goto :error
-)
+call :build_receiver_assets
+if errorlevel 1 goto :error
 
-copy /Y "%PLUGIN_DIR%\receiver\receiver.js" "%RECEIVER_DEST%\"
+xcopy /E /I /Y "%RECEIVER_BUILD_DIR%" "%RECEIVER_DEST%\" >nul
 if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver receiver.js.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\ui.css" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver ui.css.
-    goto :error
-)
-
-copy /Y "%PLUGIN_DIR%\receiver\*.svg" "%RECEIVER_DEST%\"
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver svg files.
-    goto :error
-)
-
-if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\i18next.min.js" (
-    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\i18next.min.js
-    goto :error
-)
-if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\LICENSE" (
-    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\LICENSE
-    goto :error
-)
-
-xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
-if errorlevel 1 (
-    echo [ERROR] Failed to copy receiver third_party files.
+    echo [ERROR] Failed to copy receiver build output.
     goto :error
 )
 if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
@@ -364,6 +319,10 @@ if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
 )
 if not exist "%RECEIVER_DEST%\third_party\i18next\LICENSE" (
     echo [ERROR] Failed to deploy receiver asset: third_party\i18next\LICENSE
+    goto :error
+)
+if not exist "%RECEIVER_DEST%\index.html" (
+    echo [ERROR] Failed to deploy receiver asset: index.html
     goto :error
 )
 
@@ -376,6 +335,43 @@ echo  Receiver : %RECEIVER_DEST%
 echo.
 if "%CI_MODE%"=="1" exit /b 0
 pause
+exit /b 0
+
+:build_receiver_assets
+echo.
+echo ================================================================
+echo  [Receiver Build] Building receiver assets with npm...
+echo ================================================================
+echo.
+
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] npm not found. Install Node.js 20+ from: https://nodejs.org/
+    exit /b 1
+)
+
+if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
+if exist "%RECEIVER_BUILD_DIR%" rmdir /s /q "%RECEIVER_BUILD_DIR%"
+
+set "RECEIVER_BUILD_OUT_DIR=%RECEIVER_BUILD_DIR%"
+set "RECEIVER_PROJECT_VERSION=%PLUGIN_VERSION%"
+pushd "%PLUGIN_DIR%\receiver"
+npm run build
+set "RECEIVER_BUILD_RC=%ERRORLEVEL%"
+popd
+set "RECEIVER_BUILD_OUT_DIR="
+set "RECEIVER_PROJECT_VERSION="
+
+if not "%RECEIVER_BUILD_RC%"=="0" (
+    echo [ERROR] Receiver npm build failed.
+    exit /b 1
+)
+if not exist "%RECEIVER_BUILD_DIR%\index.html" (
+    echo [ERROR] Receiver build output missing: %RECEIVER_BUILD_DIR%\index.html
+    exit /b 1
+)
+
+echo   Receiver build OK: %RECEIVER_BUILD_DIR%
 exit /b 0
 
 :skip_install

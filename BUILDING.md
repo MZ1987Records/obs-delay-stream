@@ -6,6 +6,7 @@
 
 - OBS Studio ソースの自動取得/ビルド（未準備時）
 - `websocketpp` / `asio` の取得
+- receiver リソースの npm ビルド
 - プラグインの CMake 構成/ビルド
 - OBS へのインストール（ProgramData 既定）
 
@@ -51,6 +52,7 @@ OBS_CI=1
 - Visual Studio 2022（Desktop development with C++、MSVC v143、Windows SDK）
 - CMake 3.16+
 - Git for Windows
+- Node.js 20+（npm 必須）
 
 ## 手動ビルド（必要時のみ）
 
@@ -87,7 +89,7 @@ cmake --build build --config RelWithDebInfo --parallel
 生成物:
 
 - `build\RelWithDebInfo\obs-delay-stream.dll`
-- `build\receiver\index.html`（`@PROJECT_VERSION@` 展開済み）
+- `build\receiver_dist\`（receiver 配布一式）
 
 ### 4. OBS へインストール
 
@@ -103,7 +105,7 @@ legacy 配置:
 cmake --install build --config RelWithDebInfo --prefix "C:\Program Files\obs-studio"
 ```
 
-手動コピー時は、DLL だけでなく `receiver` 一式も必要です。
+手動コピー時は、DLL だけでなく `build\receiver_dist` 一式も必要です。
 
 ProgramData 配置の例:
 
@@ -112,11 +114,7 @@ build\RelWithDebInfo\obs-delay-stream.dll
   -> C:\ProgramData\obs-studio\plugins\obs-delay-stream\bin\64bit\
 data\locale\*.ini
   -> C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\
-build\receiver\index.html
-receiver\receiver.js
-receiver\ui.css
-receiver\*.svg
-receiver\third_party\**
+build\receiver_dist\**
   -> C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\receiver\
 ```
 
@@ -140,8 +138,8 @@ receiver\third_party\**
 
 ### receiver ページの見た目が崩れる / 404
 
-- `receiver` 配下（`receiver.js`, `ui.css`, `*.svg`, `third_party`）がインストール先にコピーされているか確認
-- `index.html` は `build\receiver\index.html` を使う
+- `build\receiver_dist\index.html` が生成されているか確認
+- `build\receiver_dist` 一式がインストール先にコピーされているか確認
 
 ## 現在の主要ファイル構成
 
@@ -158,6 +156,9 @@ obs-delay-stream/
     receiver.js                    受信ページロジック
     ui.css
     *.svg
+    package.json                   npm ビルド定義
+    scripts/
+      build.mjs                    receiver 配布用出力を生成
     third_party/
       bulma.min.css
       fontawesome/
@@ -184,4 +185,4 @@ obs-delay-stream/
 補足:
 
 - `build/generated/receiver_index_html.hpp` はビルド時の生成ファイルです。
-- `build/receiver/index.html` は `receiver/index.html` から configure された出力です。
+- `build/receiver_dist` は receiver の npm ビルド出力です。

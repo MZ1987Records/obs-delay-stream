@@ -1,0 +1,9 @@
+{
+  "name": "obs-delay-stream-receiver",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Build scripts for obs-delay-stream receiver assets",
+  "scripts": {
+    "build": "node ./scripts/build.mjs"
+  }
+}

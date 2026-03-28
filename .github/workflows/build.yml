@@ -278,6 +278,7 @@ jobs:
           )
           $requiredFiles = @(
             "index.html",
+            "receiver.js",
             "ui.css",
             "third_party/i18next/i18next.min.js",
             "third_party/i18next/LICENSE"
