@@ -57,6 +57,32 @@ body {
   height: 1em;
   display: block;
 }
+.ds-lang-switcher {
+  gap: 0.35rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+.ds-lang-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.ds-lang-link {
+  color: #9aa4b2 !important;
+  text-decoration: none;
+}
+.ds-lang-link:hover {
+  color: #f8fafc !important;
+  text-decoration: underline;
+}
+.ds-lang-current {
+  color: #f8fafc;
+}
+.ds-lang-sep {
+  color: #6b7280;
+}
 
 .box,
 .input,

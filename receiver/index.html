@@ -20,6 +20,7 @@
           <img src="obs-delay-stream-title.svg" alt="obs-delay-stream" class="ds-navbar-logo">
         </div>
         <span class="navbar-item is-size-7 ml-auto">receiver v@PROJECT_VERSION@</span>
+        <div class="navbar-item is-size-7 ds-lang-switcher" id="langSwitcher" aria-label="Language"></div>
         <a class="navbar-item" href="https://github.com/MZ1987Records/obs-delay-stream" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
           <span class="icon"><i class="fab fa-github"></i></span>
         </a>
@@ -61,7 +62,7 @@
         <div class="column is-flex">
           <article class="message is-flex is-flex-direction-column is-flex-grow-1">
             <div class="message-header">
-              <p data-i18n="ui.connectionSettings">接続設定</p>
+              <p><span data-i18n="ui.connectionSettings">接続設定</span> <span class="label-hint" data-i18n="ui.connectionSettingsNote">（通常は変更不要）</span></p>
             </div>
             <div class="message-body is-flex-grow-1">
               <div class="block">
@@ -220,6 +221,7 @@
           ui: {
             browserWarning: 'このページはChrome以外のブラウザでは正常に動作しない場合があります。Chromeの利用を推奨します。',
             connectionSettings: '接続設定',
+            connectionSettingsNote: '（通常は変更不要）',
             streamId: '配信ID',
             streamIdHint: '(半角英数字)',
             streamIdPlaceholder: 'myshow2024',
@@ -292,6 +294,10 @@
           codec: {
             opusUnavailable: 'Opusデコーダを利用できません（PCMに切替）',
             opusDecodeFailed: 'Opusデコードに失敗しました（PCMに切替）'
+          },
+          lang: {
+            switchToEn: 'Switch to English',
+            switchToJa: '日本語に切り替え'
           }
         }
       },
@@ -300,6 +306,7 @@
           ui: {
             browserWarning: 'This page may not work correctly in browsers other than Chrome. Chrome is recommended.',
             connectionSettings: 'Connection Settings',
+            connectionSettingsNote: '(Usually no changes needed)',
             streamId: 'Stream ID',
             streamIdHint: '(alphanumeric)',
             streamIdPlaceholder: 'myshow2024',
@@ -372,6 +379,10 @@
           codec: {
             opusUnavailable: 'Opus decoder unavailable (switched to PCM)',
             opusDecodeFailed: 'Opus decode failed (switched to PCM)'
+          },
+          lang: {
+            switchToEn: 'Switch to English',
+            switchToJa: '日本語に切り替え'
           }
         }
       }
@@ -402,6 +413,52 @@
       return i18next.t(key, opts || {});
     }
 
+    function buildLanguageHref(lang) {
+      const u = new URL(location.href);
+      u.searchParams.set('lang', lang);
+      return u.toString();
+    }
+
+    function makeLanguageNode(lang) {
+      const label = lang.toUpperCase();
+      if (lang === activeLang) {
+        const current = document.createElement('span');
+        current.className = 'ds-lang-current';
+        current.textContent = label;
+        current.setAttribute('aria-current', 'true');
+        return current;
+      }
+      const link = document.createElement('a');
+      link.className = 'ds-lang-link';
+      link.href = buildLanguageHref(lang);
+      link.textContent = label;
+      link.setAttribute('hreflang', lang);
+      link.setAttribute('lang', lang);
+      link.setAttribute('aria-label', lang === 'en' ? t('lang.switchToEn') : t('lang.switchToJa'));
+      return link;
+    }
+
+    function renderLanguageSwitcher() {
+      const root = document.getElementById('langSwitcher');
+      if (!root) return;
+      root.textContent = '';
+
+      const icon = document.createElement('span');
+      icon.className = 'icon is-small';
+      icon.innerHTML = '<i class="fas fa-globe" aria-hidden="true"></i>';
+      root.appendChild(icon);
+
+      const links = document.createElement('span');
+      links.className = 'ds-lang-links';
+      links.appendChild(makeLanguageNode('en'));
+      const sep = document.createElement('span');
+      sep.className = 'ds-lang-sep';
+      sep.textContent = '|';
+      links.appendChild(sep);
+      links.appendChild(makeLanguageNode('ja'));
+      root.appendChild(links);
+    }
+
     function applyStaticI18n() {
       document.querySelectorAll('[data-i18n]').forEach((el) => {
         el.textContent = t(el.dataset.i18n);
@@ -420,6 +477,7 @@
       });
     }
     applyStaticI18n();
+    renderLanguageSwitcher();
 
     // ============================================================
     // URL プレビュー
