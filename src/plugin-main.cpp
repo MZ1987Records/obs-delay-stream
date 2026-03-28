@@ -257,6 +257,20 @@ static int clamp_sub_ch_count(int v) {
     return v;
 }
 
+static int normalize_opus_sample_rate(int v) {
+    switch (v) {
+    case 0:
+    case 8000:
+    case 12000:
+    case 16000:
+    case 24000:
+    case 48000:
+        return v;
+    default:
+        return 0;
+    }
+}
+
 // ファイル全体を文字列として読み込む。
 static std::string read_file_to_string(const char* path) {
     if (!path || !*path) return "";
@@ -1009,6 +1023,25 @@ static void ds_update(void* data, obs_data_t* settings) {
     }
     int audio_codec = (int)obs_data_get_int(settings, "audio_codec");
     d->router.set_audio_codec(audio_codec);
+    {
+        int bitrate = (int)obs_data_get_int(settings, "opus_bitrate_kbps");
+        if (bitrate < 6) {
+            bitrate = 6;
+            obs_data_set_int(settings, "opus_bitrate_kbps", bitrate);
+        } else if (bitrate > 510) {
+            bitrate = 510;
+            obs_data_set_int(settings, "opus_bitrate_kbps", bitrate);
+        }
+        d->router.set_opus_bitrate_kbps(bitrate);
+    }
+    {
+        int sample_rate = normalize_opus_sample_rate(
+            (int)obs_data_get_int(settings, "opus_sample_rate"));
+        if (sample_rate != (int)obs_data_get_int(settings, "opus_sample_rate")) {
+            obs_data_set_int(settings, "opus_sample_rate", sample_rate);
+        }
+        d->router.set_opus_target_sample_rate(sample_rate);
+    }
     const char* raw = obs_data_get_string(settings, "stream_id");
     std::string sid = raw ? sanitize_stream_id(raw) : "";
     if (sid.empty()) {
@@ -1458,6 +1491,9 @@ static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamDat
     if (auto* p = obs_properties_get(props, "ws_port")) {
         obs_property_set_visible(p, detail);
     }
+    if (auto* p = obs_properties_get(props, "opus_sample_rate")) {
+        obs_property_set_visible(p, detail);
+    }
     int sub_count = d->sub_ch_count;
     for (int i = 0; i < sub_count; ++i) {
         char uk[32], aj[32], mk[32];
@@ -1695,10 +1731,25 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     obs_property_t* codec_p = obs_properties_add_list(
         grp, "audio_codec", T_("AudioCodec"),
         OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-    obs_property_list_add_int(codec_p, "Opus (WebCodecs)", 0);
+    obs_property_list_add_int(codec_p, "Opus", 0);
     obs_property_list_add_int(codec_p, T_("CodecPcm"), 1);
+
+    obs_property_t* opus_bitrate_p = obs_properties_add_int(
+        grp, "opus_bitrate_kbps", T_("OpusBitrateKbps"), 6, 510, 1);
+    obs_property_t* opus_sample_rate_p = obs_properties_add_list(
+        grp, "opus_sample_rate", T_("OpusSampleRate"),
+        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+    obs_property_list_add_int(opus_sample_rate_p, T_("OpusSampleRateAuto"), 0);
+    obs_property_list_add_int(opus_sample_rate_p, "8000", 8000);
+    obs_property_list_add_int(opus_sample_rate_p, "12000", 12000);
+    obs_property_list_add_int(opus_sample_rate_p, "16000", 16000);
+    obs_property_list_add_int(opus_sample_rate_p, "24000", 24000);
+    obs_property_list_add_int(opus_sample_rate_p, "48000", 48000);
+
     if (ws_running) {
         obs_property_set_enabled(codec_p, false);
+        obs_property_set_enabled(opus_bitrate_p, false);
+        obs_property_set_enabled(opus_sample_rate_p, false);
     }
 
     if (ws_running) {
@@ -2080,6 +2131,8 @@ static void ds_get_defaults(obs_data_t* settings) {
     // Ch.1 既定名を A にするため、次の自動払い出しは B から開始する。
     obs_data_set_default_int   (settings, "sub_memo_auto_counter", 1);
     obs_data_set_default_int   (settings, "audio_codec",           0);
+    obs_data_set_default_int   (settings, "opus_bitrate_kbps",     96);
+    obs_data_set_default_int   (settings, "opus_sample_rate",      0);
     obs_data_set_default_int   (settings, "ws_port",               WS_PORT);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");

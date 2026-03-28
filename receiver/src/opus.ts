@@ -227,7 +227,7 @@ function decodeOpusPacketWebCodecs(
 function onOpusDecoded(ad: AudioDataLike): void {
   const abuf = audioDataToBuffer(ad);
   if (abuf) {
-    setCodecLabel('Opus (WebCodecs)');
+    setCodecLabel('Opus');
     playBuffer(abuf);
   }
   ad.close();

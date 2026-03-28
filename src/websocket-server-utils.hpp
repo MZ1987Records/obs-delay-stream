@@ -145,4 +145,18 @@ inline const char* guess_content_type(const std::string& path) {
     return "application/octet-stream";
 }
 
+inline bool is_valid_opus_sample_rate(int sample_rate) {
+    switch (sample_rate) {
+    case 0: // auto (same as input sample rate)
+    case 8000:
+    case 12000:
+    case 16000:
+    case 24000:
+    case 48000:
+        return true;
+    default:
+        return false;
+    }
+}
+
 } // namespace websocket_server_detail

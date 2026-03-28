@@ -23,6 +23,7 @@
  *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N,"memo":"..."}  ← 接続直後に送信
  *   OBS → Browser: {"type":"memo","ch":N,"memo":"..."}  ← メモ変更通知
  *   Browser → OBS: {"type":"audio_codec","mode":"pcm"}  ← Opus不可時のPCM要求
+ *   Browser → OBS: {"type":"audio_codec","mode":"opus","bitrate_kbps":96,"sample_rate":48000}
  *
  * v2.0 changes:
  *   - send_audio() を非ブロッキング化 (ASIO::post 経由で送信)
@@ -418,6 +419,23 @@ public:
         opus_reset_pending_.store(true, std::memory_order_release);
     }
 
+    void set_opus_bitrate_kbps(int bitrate_kbps) {
+        if (bitrate_kbps < 6) bitrate_kbps = 6;
+        if (bitrate_kbps > 510) bitrate_kbps = 510;
+        int prev = opus_bitrate_kbps_.exchange(bitrate_kbps, std::memory_order_relaxed);
+        if (prev != bitrate_kbps) {
+            opus_reset_pending_.store(true, std::memory_order_release);
+        }
+    }
+
+    void set_opus_target_sample_rate(int sample_rate) {
+        if (!is_valid_opus_sample_rate(sample_rate)) sample_rate = 0;
+        int prev = opus_target_sample_rate_.exchange(sample_rate, std::memory_order_relaxed);
+        if (prev != sample_rate) {
+            opus_reset_pending_.store(true, std::memory_order_release);
+        }
+    }
+
     void set_http_root_dir(std::string dir) {
         std::lock_guard<std::mutex> lk(mtx_);
         http_root_dir_ = std::move(dir);
@@ -455,6 +473,9 @@ private:
     }
     static const char* guess_content_type(const std::string& path) {
         return websocket_server_detail::guess_content_type(path);
+    }
+    static bool is_valid_opus_sample_rate(int sample_rate) {
+        return websocket_server_detail::is_valid_opus_sample_rate(sample_rate);
     }
 
     // ----- ch_map_検索 -----
@@ -502,11 +523,25 @@ private:
         if ((size_t)(ch + 1) > opus_.size()) opus_.resize(ch + 1);
         OpusEnc& enc = opus_[ch];
         if (enc.disabled) return false;
+        int bitrate = opus_bitrate_kbps_.load(std::memory_order_relaxed);
+        int target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
+        if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 0;
+        int output_sample_rate = target_sample_rate > 0
+            ? target_sample_rate
+            : (int)sample_rate;
         if (enc.ctx &&
-            enc.sample_rate == (int)sample_rate &&
-            enc.channels == (int)channels) return true;
-        return enc.init((int)sample_rate, (int)channels,
-                        opus_bitrate_kbps_.load(std::memory_order_relaxed));
+            enc.input_sample_rate == (int)sample_rate &&
+            enc.output_sample_rate == output_sample_rate &&
+            enc.channels == (int)channels &&
+            enc.bitrate_kbps == bitrate &&
+            enc.complexity == 10) {
+            return true;
+        }
+        return enc.init(
+            (int)sample_rate,
+            (int)channels,
+            bitrate,
+            target_sample_rate);
     }
 
     void reset_opus_state() {
@@ -520,17 +555,13 @@ private:
     {
         if (!ensure_opus_encoder(ch, sample_rate, channels)) return false;
         OpusEnc& enc = opus_[ch];
-        if (!enc.ctx || enc.disabled) return false;
+        if (!enc.ctx || enc.disabled || !enc.fifo) return false;
+        if (!enc.feed_fifo(data, frames)) {
+            enc.disabled = true;
+            return false;
+        }
 
-        const size_t samples = frames * channels;
-        enc.in_buf.insert(enc.in_buf.end(), data, data + samples);
-
-        size_t total_frames = (enc.in_buf.size() / channels);
-        if (total_frames <= enc.in_offset_frames) return true;
-        size_t avail_frames = total_frames - enc.in_offset_frames;
-
-        while (avail_frames >= (size_t)enc.frame_size) {
-            const float* in = enc.in_buf.data() + enc.in_offset_frames * channels;
+        while (av_audio_fifo_size(enc.fifo) >= enc.frame_size) {
             if (av_frame_make_writable(enc.frame) < 0) {
                 enc.disabled = true;
                 return false;
@@ -538,20 +569,10 @@ private:
             enc.frame->nb_samples = enc.frame_size;
             enc.frame->pts = enc.pts;
             enc.pts += enc.frame_size;
-
-            if (enc.ctx->sample_fmt == AV_SAMPLE_FMT_FLT) {
-                std::memcpy(enc.frame->data[0], in,
-                            (size_t)enc.frame_size * channels * sizeof(float));
-            } else {
-                const uint8_t* in_data[1] = {
-                    reinterpret_cast<const uint8_t*>(in)
-                };
-                int conv = swr_convert(enc.swr, enc.frame->data, enc.frame_size,
-                                       in_data, enc.frame_size);
-                if (conv < 0) {
-                    enc.disabled = true;
-                    return false;
-                }
+            int read = av_audio_fifo_read(enc.fifo, (void**)enc.frame->data, enc.frame_size);
+            if (read != enc.frame_size) {
+                enc.disabled = true;
+                return false;
             }
 
             int ret = avcodec_send_frame(enc.ctx, enc.frame);
@@ -573,28 +594,12 @@ private:
                 auto pkt = std::make_shared<std::string>(16 + enc.pkt->size, '\0');
                 uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
                 hdr[0] = MAGIC_OPUS;
-                hdr[1] = sample_rate;
+                hdr[1] = (uint32_t)enc.output_sample_rate;
                 hdr[2] = channels;
                 hdr[3] = pkt_frames;
                 std::memcpy(&(*pkt)[16], enc.pkt->data, enc.pkt->size);
                 out.push_back(std::move(pkt));
                 av_packet_unref(enc.pkt);
-            }
-
-            enc.in_offset_frames += enc.frame_size;
-            avail_frames -= enc.frame_size;
-        }
-
-        // バッファ消費分を詰める
-        if (enc.in_offset_frames > 0) {
-            size_t consumed_samples = enc.in_offset_frames * channels;
-            if (consumed_samples >= enc.in_buf.size()) {
-                enc.in_buf.clear();
-                enc.in_offset_frames = 0;
-            } else if (enc.in_offset_frames >= (size_t)enc.frame_size * 4) {
-                enc.in_buf.erase(enc.in_buf.begin(),
-                                 enc.in_buf.begin() + consumed_samples);
-                enc.in_offset_frames = 0;
             }
         }
         return true;
@@ -752,10 +757,31 @@ private:
             else if (p.find("\"mode\":\"opus\"") != std::string::npos) mode = 0;
             if (mode < 0) return;
 
+            auto parse_json_int = [&p](const char* key, int& out) -> bool {
+                std::string token = std::string("\"") + key + "\":";
+                auto pos = p.find(token);
+                if (pos == std::string::npos) return false;
+                pos += token.size();
+                while (pos < p.size() && std::isspace((unsigned char)p[pos])) ++pos;
+                const char* begin = p.c_str() + pos;
+                char* end = nullptr;
+                long v = std::strtol(begin, &end, 10);
+                if (begin == end) return false;
+                out = (int)v;
+                return true;
+            };
+
+            int req_bitrate = 0;
+            int req_sample_rate = 0;
+            bool has_bitrate = parse_json_int("bitrate_kbps", req_bitrate);
+            bool has_sample_rate = parse_json_int("sample_rate", req_sample_rate);
+
             std::lock_guard<std::mutex> lk(mtx_);
             auto it = conn_map_.find(h);
             if (it == conn_map_.end()) return;
             it->second.force_pcm = (mode == 1);
+            if (has_bitrate) set_opus_bitrate_kbps(req_bitrate);
+            if (has_sample_rate) set_opus_target_sample_rate(req_sample_rate);
             return;
         }
     }
@@ -1019,6 +1045,7 @@ private:
     std::atomic<int>   audio_codec_{0}; // 0: Opus, 1: PCM16
     std::atomic<bool>  opus_reset_pending_{false};
     std::atomic<int>   opus_bitrate_kbps_{96};
+    std::atomic<int>   opus_target_sample_rate_{0}; // 0: source sample rate
     std::vector<OpusEnc> opus_;
     int active_ch_max_ = MAX_SUB_CH;
 
