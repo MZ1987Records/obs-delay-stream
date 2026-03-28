@@ -56,6 +56,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
 static std::atomic<bool> g_delay_stream_filter_exists{false};
 static constexpr float   SUB_ADJUST_MIN_MS = -500.0f;
 static constexpr float   SUB_ADJUST_MAX_MS = 500.0f;
+static std::atomic<uint64_t> g_props_refresh_seq{0};
 
 // 前後の空白を削除した文字列を返す。
 static std::string trim_copy(std::string s) {
@@ -147,6 +148,15 @@ static Fn find_obs_symbol(const char* symbol_name) {
         }
     }
     return nullptr;
+}
+
+// OBS本体の source removed 判定API（存在する場合のみ）を呼ぶ。
+static bool is_obs_source_removed(obs_source_t* source) {
+    using source_removed_fn = bool (*)(obs_source_t*);
+    static source_removed_fn fn =
+        find_obs_symbol<source_removed_fn>("obs_source_removed");
+    if (!source || !fn) return false;
+    return fn(source);
 }
 
 // ローカルネットワークで利用しやすいIPv4アドレスを優先して取得する。
@@ -419,8 +429,11 @@ struct DelayStreamData {
     obs_source_t* context      = nullptr;
     bool is_duplicate_instance = false;
     bool owns_singleton_slot   = false;
+    std::atomic<bool> destroying{false};
     std::atomic<bool> enabled{true};
     std::atomic<bool> ws_send_enabled{true};
+    std::shared_ptr<std::atomic<bool>> life_token =
+        std::make_shared<std::atomic<bool>>(true);
     mutable std::mutex stream_id_mtx;  // protects stream_id, host_ip
     std::string   stream_id;
     std::string   host_ip;
@@ -450,6 +463,7 @@ struct DelayStreamData {
     std::atomic<bool> in_get_props{false}; // true while ds_get_properties is running
     std::atomic<bool> sid_autofill_guard{false};
     std::atomic<bool> detail_mode{false};
+    std::atomic<bool> rtmp_url_auto{true};
     bool prev_stream_id_has_user_value = false;
     std::vector<float> work_buf;
 
@@ -548,9 +562,12 @@ static void maybe_fill_cloudflared_path_from_auto(DelayStreamData* d) {
 
 struct PropsRefreshCtx {
     obs_source_t* source = nullptr;
+    uint64_t      seq = 0;
+    const char*   reason = nullptr;
 };
 static std::mutex              g_props_refresh_pending_mtx;
 static std::set<obs_source_t*> g_props_refresh_pending_sources;
+static std::set<obs_source_t*> g_props_refresh_blocked_sources;
 
 // UIスレッド側でプロパティ再構築を実行する。
 static void do_request_properties_refresh_ui(void* p) {
@@ -559,10 +576,25 @@ static void do_request_properties_refresh_ui(void* p) {
         delete ctx;
         return;
     }
-    obs_source_update_properties(ctx->source);
+    bool should_update = true;
     {
         std::lock_guard<std::mutex> lk(g_props_refresh_pending_mtx);
         g_props_refresh_pending_sources.erase(ctx->source);
+        if (g_props_refresh_blocked_sources.find(ctx->source) !=
+            g_props_refresh_blocked_sources.end()) {
+            should_update = false;
+        }
+    }
+    if (should_update && is_obs_source_removed(ctx->source)) {
+        should_update = false;
+    }
+    if (should_update) {
+        blog(LOG_INFO, "[obs-delay-stream] props_refresh exec seq=%llu reason=%s",
+             (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
+        obs_source_update_properties(ctx->source);
+    } else {
+        blog(LOG_INFO, "[obs-delay-stream] props_refresh skip seq=%llu reason=%s",
+             (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
     }
     obs_source_release(ctx->source);
     delete ctx;
@@ -574,11 +606,16 @@ static void bounce_request_properties_refresh(void* p) {
 }
 
 // プロパティUIの再描画を依頼する。
-static void request_properties_refresh(DelayStreamData* d) {
+static void request_properties_refresh(DelayStreamData* d, const char* reason = nullptr) {
     if (!d || !d->context || !d->create_done.load()) return;
+    if (d->destroying.load(std::memory_order_acquire)) return;
+    if (is_obs_source_removed(d->context)) return;
     if (d->in_get_props.load()) return; // prevent re-entry
 
+    uint64_t seq = g_props_refresh_seq.fetch_add(1, std::memory_order_relaxed) + 1;
     auto* ctx = new PropsRefreshCtx();
+    ctx->seq = seq;
+    ctx->reason = reason ? reason : "unspecified";
     ctx->source = obs_source_get_ref(d->context);
     if (!ctx->source) {
         delete ctx;
@@ -586,8 +623,18 @@ static void request_properties_refresh(DelayStreamData* d) {
     }
     {
         std::lock_guard<std::mutex> lk(g_props_refresh_pending_mtx);
+        if (g_props_refresh_blocked_sources.find(ctx->source) !=
+            g_props_refresh_blocked_sources.end()) {
+            blog(LOG_INFO, "[obs-delay-stream] props_refresh drop(blocked) seq=%llu reason=%s",
+                 (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
+            obs_source_release(ctx->source);
+            delete ctx;
+            return;
+        }
         if (g_props_refresh_pending_sources.find(ctx->source) !=
             g_props_refresh_pending_sources.end()) {
+            blog(LOG_INFO, "[obs-delay-stream] props_refresh drop(pending) seq=%llu reason=%s",
+                 (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
             obs_source_release(ctx->source);
             delete ctx;
             return;
@@ -597,8 +644,12 @@ static void request_properties_refresh(DelayStreamData* d) {
 
     if (obs_in_task_thread(OBS_TASK_UI)) {
         // 直接呼ぶと ControlChanged 中に再入しうるため、別タスク経由で遅延実行する。
+        blog(LOG_INFO, "[obs-delay-stream] props_refresh queue(seq=%llu reason=%s via=graphics->ui)",
+             (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
         obs_queue_task(OBS_TASK_GRAPHICS, bounce_request_properties_refresh, ctx, false);
     } else {
+        blog(LOG_INFO, "[obs-delay-stream] props_refresh queue(seq=%llu reason=%s via=ui)",
+             (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
         obs_queue_task(OBS_TASK_UI, do_request_properties_refresh_ui, ctx, false);
     }
 }
@@ -712,7 +763,13 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     d->is_duplicate_instance = already_exists;
     d->owns_singleton_slot   = !already_exists;
     d->context  = source;
+    {
+        std::lock_guard<std::mutex> lk(g_props_refresh_pending_mtx);
+        g_props_refresh_blocked_sources.erase(source);
+        g_props_refresh_pending_sources.erase(source);
+    }
     maybe_autofill_rtmp_url(settings, false);
+    d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
     if (d->is_duplicate_instance) {
         blog(LOG_WARNING, "[obs-delay-stream] duplicate filter instance created as warning-only");
         d->create_done.store(true);
@@ -732,41 +789,52 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         d->btn_ctx[i]         = { d, i };
     }
-    d->flow.on_update      = [d]() { request_properties_refresh(d); };
-    d->flow.on_ch_measured = [d](int, LatencyResult) { request_properties_refresh(d); };
+    d->flow.on_update      = [d]() { request_properties_refresh(d, "flow.on_update"); };
+    d->flow.on_ch_measured = [d](int, LatencyResult) {
+        request_properties_refresh(d, "flow.on_ch_measured");
+    };
     d->flow.on_apply_master = [d](double ms) {
-        struct Ctx { DelayStreamData* d; double ms; };
-        auto* c = new Ctx{d, ms};
+        struct Ctx {
+            std::weak_ptr<std::atomic<bool>> life_token;
+            DelayStreamData* d;
+            double ms;
+        };
+        auto* c = new Ctx{d->life_token, d, ms};
         obs_queue_task(OBS_TASK_UI, [](void* p){
             auto* c = static_cast<Ctx*>(p);
+            auto life = c->life_token.lock();
+            if (!life || !life->load(std::memory_order_acquire)) {
+                delete c;
+                return;
+            }
             write_master_delay(c->d, c->ms);
-            request_properties_refresh(c->d);
+            request_properties_refresh(c->d, "flow.on_apply_master");
             delete c;
         }, c, false);
     };
     d->rtmp.prober.on_result = [d](RtmpProbeResult r) {
         { std::lock_guard<std::mutex> lk(d->rtmp.mtx);
           d->rtmp.result = r; d->rtmp.applied = false; }
-        request_properties_refresh(d);
+        request_properties_refresh(d, "rtmp.prober.on_result");
     };
     // Tunnel callbacks - delay 100ms to ensure properties view is ready
     d->tunnel.on_url_ready = [d](const std::string&) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        request_properties_refresh(d);
+        request_properties_refresh(d, "tunnel.on_url_ready");
     };
     d->tunnel.on_error = [d](const std::string&) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        request_properties_refresh(d);
+        request_properties_refresh(d, "tunnel.on_error");
     };
     d->tunnel.on_stopped = [d]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        request_properties_refresh(d);
+        request_properties_refresh(d, "tunnel.on_stopped");
     };
     d->tunnel.on_download_state = [d](bool) {
-        request_properties_refresh(d);
+        request_properties_refresh(d, "tunnel.on_download_state");
     };
     d->router.on_conn_change = [d](const std::string& sid, int, size_t) {
-        if (sid == d->get_stream_id()) request_properties_refresh(d);
+        if (sid == d->get_stream_id()) request_properties_refresh(d, "router.on_conn_change");
     };
     d->router.on_any_latency_result = [d](const std::string& sid, int ch, LatencyResult r) {
         if (sid != d->get_stream_id()) return;
@@ -781,16 +849,26 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
             ms.last_error = r.valid ? "" : T_("MeasureFailed");
         }
         if (should_apply) {
-            struct Ctx { DelayStreamData* d; int ch; double ms; };
-            auto* c = new Ctx{d, ch, r.avg_one_way};
+            struct Ctx {
+                std::weak_ptr<std::atomic<bool>> life_token;
+                DelayStreamData* d;
+                int ch;
+                double ms;
+            };
+            auto* c = new Ctx{d->life_token, d, ch, r.avg_one_way};
             obs_queue_task(OBS_TASK_UI, [](void* p){
                 auto* c = static_cast<Ctx*>(p);
+                auto life = c->life_token.lock();
+                if (!life || !life->load(std::memory_order_acquire)) {
+                    delete c;
+                    return;
+                }
                 apply_sub_delay(c->d, c->ch, c->ms);
-                request_properties_refresh(c->d);
+                request_properties_refresh(c->d, "router.on_any_latency_result.apply");
                 delete c;
             }, c, false);
         } else {
-            request_properties_refresh(d);
+            request_properties_refresh(d, "router.on_any_latency_result.invalid");
         }
     };
 
@@ -804,6 +882,16 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
 static void ds_destroy(void* data) {
     auto* d = static_cast<DelayStreamData*>(data);
     if (!d) return;
+    d->destroying.store(true, std::memory_order_release);
+    if (d->life_token) {
+        d->life_token->store(false, std::memory_order_release);
+        d->life_token.reset();
+    }
+    if (d->context) {
+        std::lock_guard<std::mutex> lk(g_props_refresh_pending_mtx);
+        g_props_refresh_blocked_sources.insert(d->context);
+        g_props_refresh_pending_sources.erase(d->context);
+    }
     bool release_singleton_slot = d->owns_singleton_slot;
     // 1. 各コンポーネントの停止（内部スレッドの join を含む）
     if (!d->is_duplicate_instance) {
@@ -881,11 +969,21 @@ static void ds_update(void* data, obs_data_t* settings) {
     bool paused = obs_data_get_bool(settings, "ws_send_paused");
     d->ws_send_enabled.store(!paused);
     {
-        int v = (int)obs_data_get_int(settings, "sub_ch_count");
-        if (v <= 0) v = 1;
+        int current = d->sub_ch_count;
+        bool has_sub_ch_count = obs_data_has_user_value(settings, "sub_ch_count");
+        int raw_v = has_sub_ch_count ? (int)obs_data_get_int(settings, "sub_ch_count") : current;
+        int v = raw_v;
+        if (v <= 0) v = (current > 0) ? current : 1;
         int clamped = clamp_sub_ch_count(v);
-        if (clamped != v) obs_data_set_int(settings, "sub_ch_count", clamped);
-        bool changed = (clamped != d->sub_ch_count);
+        if (!has_sub_ch_count || clamped != v) {
+            obs_data_set_int(settings, "sub_ch_count", clamped);
+        }
+        bool changed = (clamped != current);
+        if (changed || !has_sub_ch_count || raw_v != clamped) {
+            blog(LOG_INFO,
+                 "[obs-delay-stream] ds_update sub_ch_count current=%d has_user=%d raw=%d normalized=%d clamped=%d",
+                 current, has_sub_ch_count ? 1 : 0, raw_v, v, clamped);
+        }
         d->sub_ch_count = clamped;
         d->router.set_active_channels(clamped);
         d->flow.set_active_channels(clamped);
@@ -942,9 +1040,10 @@ static void ds_update(void* data, obs_data_t* settings) {
         d->router.set_sub_memo(i, memo ? memo : "");
         apply_sub_delay_to_buffer(d, i);
     }
+    d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
     if (detail_changed) {
         // UI構造が変わるため、設定反映後にプロパティを再構築する。
-        request_properties_refresh(d);
+        request_properties_refresh(d, "ds_update.detail_changed");
     }
     d->prev_stream_id_has_user_value = obs_data_has_user_value(settings, "stream_id");
 }
@@ -1012,7 +1111,7 @@ static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
         ms.result = LatencyResult{};
         ms.last_error.clear();
     }
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_sub_measure");
     return false;
 }
 // 追加遅延スライダー変更を即時反映する。
@@ -1034,13 +1133,17 @@ static bool cb_sub_adjust_changed(void* priv, obs_properties_t*, obs_property_t*
         obs_data_set_double(settings, key, adjust);
     }
 
+    float prev_adjust = d->sub[i].adjust_ms;
+    bool changed = std::fabs(prev_adjust - adjust) > 0.0001f;
     d->sub[i].adjust_ms = adjust;
     apply_sub_delay_to_buffer(d, i);
     d->router.notify_apply_delay(
         i,
         calc_effective_sub_delay_value_ms(
             d, d->sub[i].delay_ms, d->sub[i].adjust_ms));
-    request_properties_refresh(d);
+    if (changed) {
+        request_properties_refresh(d, "cb_sub_adjust_changed");
+    }
     return false;
 }
 // 指定チャンネルの遅延を設定値と実バッファへ反映する。
@@ -1111,11 +1214,12 @@ static bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
 
     obs_data_set_int(s, "sub_ch_count", next);
     obs_data_release(s);
+    blog(LOG_INFO, "[obs-delay-stream] cb_sub_add sub_ch_count %d -> %d", cur, next);
     d->sub_ch_count = next;
     d->router.set_active_channels(next);
     d->flow.set_active_channels(next);
     d->flow.reset();
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_sub_add");
     return false;
 }
 // 指定チャンネルを削除し、後続チャンネルを前詰めする。
@@ -1160,6 +1264,8 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     }
     obs_data_set_int(s, "sub_ch_count", next);
     obs_data_release(s);
+    blog(LOG_INFO, "[obs-delay-stream] cb_sub_remove sub_ch_count %d -> %d (remove ch=%d)",
+         cur, next, ch + 1);
 
     // shift runtime state down
     for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
@@ -1177,7 +1283,7 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     d->router.set_active_channels(next);
     d->flow.set_active_channels(next);
     d->flow.reset();
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_sub_remove");
     return false;
 }
 // RTMP遅延測定を開始する。
@@ -1197,18 +1303,24 @@ static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void* priv) {
     { std::lock_guard<std::mutex> lk(d->rtmp.mtx); r = d->rtmp.result; }
     if (!r.valid) return false;
     write_master_delay(d, r.avg_one_way);
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_rtmp_apply");
     return false;
 }
 // RTMP URL自動取得ON/OFF切り替え時の処理。
-static bool cb_rtmp_url_auto_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
+static bool cb_rtmp_url_auto_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d || !settings) return false;
-    if (obs_data_get_bool(settings, "rtmp_url_auto")) {
+    bool auto_new = obs_data_get_bool(settings, "rtmp_url_auto");
+    d->rtmp_url_auto.store(auto_new, std::memory_order_relaxed);
+    if (auto_new) {
         maybe_autofill_rtmp_url(settings, true);
     }
-    request_properties_refresh(d);
-    return false;
+    if (props) {
+        if (auto* url_p = obs_properties_get(props, "rtmp_url")) {
+            obs_property_set_enabled(url_p, !auto_new);
+        }
+    }
+    return true;
 }
 // WebSocketサーバーを起動する。
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void* priv) {
@@ -1221,7 +1333,7 @@ static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void* priv) {
     } else {
         blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", ws_port);
     }
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_ws_server_start");
     return false;
 }
 
@@ -1232,7 +1344,7 @@ static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void* priv) {
     d->router.stop();
     d->router_running.store(false);
     blog(LOG_INFO, "[obs-delay-stream] WebSocket server stopped");
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_ws_server_stop");
     return false;
 }
 
@@ -1244,14 +1356,14 @@ static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void* priv) {
     obs_data_release(s);
     int ws_port = d->ws_port.load(std::memory_order_relaxed);
     d->tunnel.start(exe ? exe : "", ws_port);
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_tunnel_start");
     return false;
 }
 // トンネルを停止する。
 static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     d->tunnel.stop();
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_tunnel_stop");
     return false;
 }
 // Sync Flow Step1（チャンネル測定）を開始する。
@@ -1284,7 +1396,7 @@ static bool cb_flow_apply_step3(obs_properties_t*, obs_property_t*, void* priv) 
 static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     d->flow.reset();
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_flow_reset");
     return false;
 }
 // 遅延有効/無効を切り替え、各バッファへ反映する。
@@ -1297,7 +1409,7 @@ static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, o
     d->master_buf.set_delay_ms(en ? (uint32_t)d->master_delay_ms : 0);
     for (int i = 0; i < MAX_SUB_CH; ++i)
         apply_sub_delay_to_buffer(d, i);
-    request_properties_refresh(d);
+    request_properties_refresh(d, "cb_enabled_changed");
     return false;
 }
 // Stream IDの有無に応じて起動ボタン状態を更新する。
