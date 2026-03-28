@@ -12,7 +12,7 @@
  * 配信IDが異なる接続は別セッションとして完全に分離される。
  *
  * 【音声バイナリフォーマット】
- *   PCM16: [4B magic=0x41554449][4B SR][4B CH][4B frames][int16*frames*CH]
+ *   PCM  : [4B magic=0x41554449][4B SR][4B CH][4B frames][int16*frames*CH]
  *   OPUS : [4B magic=0x4F505553][4B SR][4B CH][4B frames][Opus packet bytes]
  *
  * 【制御メッセージ (テキストJSON)】
@@ -231,6 +231,7 @@ public:
         if (opus_reset_pending_.exchange(false, std::memory_order_acq_rel)) {
             reset_opus_state();
         }
+
         // 送信先ハンドルのスナップショットを取得（短時間ロック）
         std::vector<ConnHandle> targets_opus;
         std::vector<ConnHandle> targets_pcm;
@@ -254,7 +255,7 @@ public:
         if (!srv) return;
         if (targets_opus.empty() && targets_pcm.empty()) return;
 
-        // --- Opus 優先、失敗時 PCM16（Opus対象のみ） ---
+        // --- Opus 優先、失敗時 PCM（Opus対象のみ） ---
         if (!targets_opus.empty() && default_codec == 0) {
             std::vector<std::shared_ptr<std::string>> pkts;
             if (encode_opus_packets(ch, data, frames, sample_rate, channels, pkts)) {
@@ -280,18 +281,23 @@ public:
 
         if (targets_pcm.empty()) return;
 
-        // パケットを構築（PCM16）
-        size_t samples = frames * channels;
+        const float* tx_data = data;
+        uint32_t tx_channels = channels;
+        std::vector<float> preprocessed;
+        preprocess_audio(data, frames, channels, tx_data, tx_channels, preprocessed);
+
+        // パケットを構築（PCM）
+        size_t samples = frames * tx_channels;
         size_t pcm_bytes = samples * sizeof(int16_t);
         auto pkt = std::make_shared<std::string>(16 + pcm_bytes, '\0');
         uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
         hdr[0] = MAGIC_AUDI;
         hdr[1] = sample_rate;
-        hdr[2] = channels;
+        hdr[2] = tx_channels;
         hdr[3] = static_cast<uint32_t>(frames);
         int16_t* dst = reinterpret_cast<int16_t*>(&(*pkt)[16]);
         for (size_t i = 0; i < samples; ++i) {
-            float v = data[i];
+            float v = tx_data[i];
             if (!std::isfinite(v)) v = 0.0f;
             if (v > 1.0f) v = 1.0f;
             if (v < -1.0f) v = -1.0f;
@@ -412,7 +418,7 @@ public:
     bool     is_running() const { return running_; }
 
     // ----- 音声コーデック設定 -----
-    // 0: Opus, 1: PCM16
+    // 0: Opus, 1: PCM
     void set_audio_codec(int mode) {
         if (mode != 0 && mode != 1) mode = 0;
         audio_codec_.store(mode, std::memory_order_relaxed);
@@ -432,6 +438,18 @@ public:
         if (!is_valid_opus_sample_rate(sample_rate)) sample_rate = 0;
         int prev = opus_target_sample_rate_.exchange(sample_rate, std::memory_order_relaxed);
         if (prev != sample_rate) {
+            opus_reset_pending_.store(true, std::memory_order_release);
+        }
+    }
+
+    void set_audio_quantization_bits(int bits) {
+        if (bits != 8 && bits != 16) bits = 16;
+        audio_quantization_bits_.store(bits, std::memory_order_relaxed);
+    }
+
+    void set_audio_mono(bool mono) {
+        bool prev = audio_mono_.exchange(mono, std::memory_order_relaxed);
+        if (prev != mono) {
             opus_reset_pending_.store(true, std::memory_order_release);
         }
     }
@@ -478,6 +496,16 @@ private:
         return websocket_server_detail::is_valid_opus_sample_rate(sample_rate);
     }
 
+    static float quantize_sample(float v, int bits) {
+        if (!std::isfinite(v)) v = 0.0f;
+        if (v > 1.0f) v = 1.0f;
+        if (v < -1.0f) v = -1.0f;
+        if (bits >= 16) return v;
+        int scale = (1 << (bits - 1)) - 1;
+        if (scale <= 0) return v;
+        return std::round(v * (float)scale) / (float)scale;
+    }
+
     // ----- ch_map_検索 -----
     ChannelState* find_ch(const std::string& sid, int ch) {
         auto it = ch_map_.find(make_key(sid, ch));
@@ -516,6 +544,44 @@ private:
         for (auto& t : done) {
             if (t && t->th.joinable()) t->th.join();
         }
+    }
+
+    void preprocess_audio(const float* in_data, size_t frames, uint32_t in_channels,
+                          const float*& out_data, uint32_t& out_channels,
+                          std::vector<float>& work)
+    {
+        out_data = in_data;
+        out_channels = in_channels;
+        work.clear();
+        if (!in_data || frames == 0 || in_channels == 0) return;
+
+        const bool use_mono = audio_mono_.load(std::memory_order_relaxed) && in_channels > 1;
+        const int quant_bits = audio_quantization_bits_.load(std::memory_order_relaxed);
+        const bool use_quant = (quant_bits == 8);
+
+        if (!use_mono && !use_quant) return;
+
+        if (use_mono) {
+            out_channels = 1;
+            work.resize(frames);
+            for (size_t f = 0; f < frames; ++f) {
+                float sum = 0.0f;
+                for (uint32_t c = 0; c < in_channels; ++c) {
+                    sum += in_data[f * in_channels + c];
+                }
+                float v = sum / (float)in_channels;
+                work[f] = use_quant ? quantize_sample(v, quant_bits) : quantize_sample(v, 16);
+            }
+            out_data = work.data();
+            return;
+        }
+
+        const size_t samples = frames * in_channels;
+        work.resize(samples);
+        for (size_t i = 0; i < samples; ++i) {
+            work[i] = quantize_sample(in_data[i], quant_bits);
+        }
+        out_data = work.data();
     }
 
     bool ensure_opus_encoder(int ch, uint32_t sample_rate, uint32_t channels) {
@@ -1042,10 +1108,12 @@ private:
     std::string        stream_id_;
     std::string        http_index_html_;
     std::string        http_root_dir_;
-    std::atomic<int>   audio_codec_{0}; // 0: Opus, 1: PCM16
+    std::atomic<int>   audio_codec_{0}; // 0: Opus, 1: PCM
     std::atomic<bool>  opus_reset_pending_{false};
     std::atomic<int>   opus_bitrate_kbps_{96};
     std::atomic<int>   opus_target_sample_rate_{0}; // 0: source sample rate
+    std::atomic<int>   audio_quantization_bits_{8};
+    std::atomic<bool>  audio_mono_{true};
     std::vector<OpusEnc> opus_;
     int active_ch_max_ = MAX_SUB_CH;
 

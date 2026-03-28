@@ -271,6 +271,16 @@ static int normalize_opus_sample_rate(int v) {
     }
 }
 
+static int normalize_quantization_bits(int v) {
+    switch (v) {
+    case 8:
+    case 16:
+        return v;
+    default:
+        return 16;
+    }
+}
+
 // ファイル全体を文字列として読み込む。
 static std::string read_file_to_string(const char* path) {
     if (!path || !*path) return "";
@@ -746,6 +756,7 @@ static bool cb_flow_start_step3(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_apply_step3(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void*);
 static bool cb_enabled_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
+static bool cb_audio_codec_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_stream_id_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_host_ip_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_detail_mode_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
@@ -1042,6 +1053,15 @@ static void ds_update(void* data, obs_data_t* settings) {
         }
         d->router.set_opus_target_sample_rate(sample_rate);
     }
+    {
+        int quant_bits = normalize_quantization_bits(
+            (int)obs_data_get_int(settings, "quantization_bits"));
+        if (quant_bits != (int)obs_data_get_int(settings, "quantization_bits")) {
+            obs_data_set_int(settings, "quantization_bits", quant_bits);
+        }
+        d->router.set_audio_quantization_bits(quant_bits);
+    }
+    d->router.set_audio_mono(obs_data_get_bool(settings, "audio_mono"));
     const char* raw = obs_data_get_string(settings, "stream_id");
     std::string sid = raw ? sanitize_stream_id(raw) : "";
     if (sid.empty()) {
@@ -1478,6 +1498,37 @@ static bool cb_stream_id_changed(void* priv, obs_properties_t* props, obs_proper
     }
     return true;
 }
+
+static void apply_codec_option_visibility(obs_properties_t* props, obs_data_t* settings) {
+    if (!props || !settings) return;
+    int codec = (int)obs_data_get_int(settings, "audio_codec");
+    bool detail = obs_data_get_bool(settings, "detail_mode");
+    bool is_opus = (codec == 0);
+    bool show_opus_options = is_opus && detail;
+    bool show_pcm_options = !is_opus;
+    if (auto* p = obs_properties_get(props, "opus_bitrate_kbps")) {
+        obs_property_set_visible(p, show_opus_options);
+    }
+    if (auto* p = obs_properties_get(props, "opus_sample_rate")) {
+        obs_property_set_visible(p, show_opus_options);
+    }
+    if (auto* p = obs_properties_get(props, "pcm_input_sample_rate_info")) {
+        obs_property_set_visible(p, show_pcm_options);
+    }
+    if (auto* p = obs_properties_get(props, "quantization_bits")) {
+        obs_property_set_visible(p, show_pcm_options);
+    }
+    if (auto* p = obs_properties_get(props, "audio_mono")) {
+        obs_property_set_visible(p, show_pcm_options);
+    }
+}
+
+static bool cb_audio_codec_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
+    (void)priv;
+    apply_codec_option_visibility(props, settings);
+    return true;
+}
+
 // host_ip_manual変更時の将来拡張用フック。
 static bool cb_host_ip_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t*) {
     (void)priv; return false;
@@ -1489,9 +1540,6 @@ static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamDat
         obs_property_set_visible(p, detail);
     }
     if (auto* p = obs_properties_get(props, "ws_port")) {
-        obs_property_set_visible(p, detail);
-    }
-    if (auto* p = obs_properties_get(props, "opus_sample_rate")) {
         obs_property_set_visible(p, detail);
     }
     int sub_count = d->sub_ch_count;
@@ -1731,6 +1779,7 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     obs_property_t* codec_p = obs_properties_add_list(
         grp, "audio_codec", T_("AudioCodec"),
         OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+    obs_property_set_modified_callback2(codec_p, cb_audio_codec_changed, d);
     obs_property_list_add_int(codec_p, "Opus", 0);
     obs_property_list_add_int(codec_p, T_("CodecPcm"), 1);
 
@@ -1745,11 +1794,34 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     obs_property_list_add_int(opus_sample_rate_p, "16000", 16000);
     obs_property_list_add_int(opus_sample_rate_p, "24000", 24000);
     obs_property_list_add_int(opus_sample_rate_p, "48000", 48000);
+    uint32_t input_sr = d->sample_rate > 0 ? d->sample_rate : 48000;
+    char pcm_sr_info[128];
+    snprintf(pcm_sr_info, sizeof(pcm_sr_info), T_("PcmInputSampleRateFmt"), input_sr);
+    obs_property_t* pcm_sr_info_p = obs_properties_add_text(
+        grp, "pcm_input_sample_rate_info", pcm_sr_info, OBS_TEXT_INFO);
+    obs_property_text_set_info_word_wrap(pcm_sr_info_p, false);
+    obs_property_t* quant_bits_p = obs_properties_add_list(
+        grp, "quantization_bits", T_("QuantizationBits"),
+        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+    obs_property_list_add_int(quant_bits_p, "8", 8);
+    obs_property_list_add_int(quant_bits_p, "16", 16);
+    obs_property_t* mono_mix_p =
+        obs_properties_add_bool(grp, "audio_mono", T_("AudioMono"));
 
     if (ws_running) {
         obs_property_set_enabled(codec_p, false);
         obs_property_set_enabled(opus_bitrate_p, false);
         obs_property_set_enabled(opus_sample_rate_p, false);
+        obs_property_set_enabled(quant_bits_p, false);
+        obs_property_set_enabled(mono_mix_p, false);
+    }
+
+    if (d->context) {
+        obs_data_t* s = obs_source_get_settings(d->context);
+        if (s) {
+            apply_codec_option_visibility(grp, s);
+            obs_data_release(s);
+        }
     }
 
     if (ws_running) {
@@ -2133,6 +2205,8 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_int   (settings, "audio_codec",           0);
     obs_data_set_default_int   (settings, "opus_bitrate_kbps",     96);
     obs_data_set_default_int   (settings, "opus_sample_rate",      0);
+    obs_data_set_default_int   (settings, "quantization_bits",     8);
+    obs_data_set_default_bool  (settings, "audio_mono",            true);
     obs_data_set_default_int   (settings, "ws_port",               WS_PORT);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");

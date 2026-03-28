@@ -114,7 +114,7 @@ export function playBuffer(abuf: AudioBuffer | null): void {
 }
 
 // ============================================================
-// PCM16 デコード
+// PCM デコード
 // ============================================================
 
 export function updateAudioInfo(
@@ -133,7 +133,7 @@ export function handlePcm16(
 ): void {
   if (!state.actx) return;
   updateAudioInfo(sampleRate, channels);
-  setCodecLabel('PCM16');
+  setCodecLabel('PCM');
 
   const pcm = new Int16Array(buf, 16);
   const abuf = state.actx.createBuffer(channels, frameCount, sampleRate);
