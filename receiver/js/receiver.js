@@ -1,7 +1,7 @@
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import 'bulma/css/bulma.min.css';
 import i18next from 'i18next';
-import './ui.css';
+import '../css/ui.css';
 
 const I18N_RESOURCES = {
   ja: {
