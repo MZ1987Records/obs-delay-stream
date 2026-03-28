@@ -1778,13 +1778,18 @@ static void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
 static void add_url_share_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
+    TunnelState ts = d->tunnel.state();
     bool via_tunnel = !d->tunnel.url().empty();
     const char* suffix = via_tunnel
         ? T_("UrlShareTunnelSuffix")
         : T_("UrlShareDirectSuffix");
     char copy_label[192];
     snprintf(copy_label, sizeof(copy_label), "%s%s", T_("UrlShareCopyAll"), suffix);
-    obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d);
+    obs_property_t* copy_p =
+        obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d);
+    if (ts == TunnelState::Starting) {
+        obs_property_set_enabled(copy_p, false);
+    }
     obs_properties_add_group(props, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);
 }
 
