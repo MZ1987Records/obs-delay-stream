@@ -316,8 +316,25 @@ jobs:
           name: obs-delay-stream
           path: obs-delay-stream-${{ github.ref_name }}.zip
 
+      - name: Extract changelog section
+        id: changelog
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $src = "$env:GITHUB_WORKSPACE/CHANGELOG.md"
+          $dst = "$env:GITHUB_WORKSPACE/RELEASE_NOTES.md"
+          if (-Not (Test-Path $src -PathType Leaf)) { throw "CHANGELOG.md not found: $src" }
+          $content = Get-Content $src -Raw
+          $escapedTag = [regex]::Escape($tag)
+          $pattern = "(?ms)^##\s+$escapedTag\s+—.*?(?=^##\s+|\z)"
+          $match = [regex]::Match($content, $pattern)
+          if (-Not $match.Success) { throw "Changelog section not found for tag: $tag" }
+          $match.Value.Trim() | Set-Content $dst -Encoding UTF8
+          Add-Content $env:GITHUB_OUTPUT "path=$dst"
+
       - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          body_path: ${{ steps.changelog.outputs.path }}
           files: obs-delay-stream-${{ github.ref_name }}.zip
