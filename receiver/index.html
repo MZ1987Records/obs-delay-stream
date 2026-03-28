@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="third_party/bulma.min.css">
   <link rel="stylesheet" href="third_party/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="ui.css">
+  <script src="third_party/i18next/i18next.min.js"></script>
 </head>
 
 <body>
@@ -37,7 +38,7 @@
             <span class="icon">
               <i class="fas fa-exclamation-triangle" aria-hidden="true"></i>
             </span>
-            <span>このページはChrome以外のブラウザでは正常に動作しない場合があります。Chromeの利用を推奨します。</span>
+            <span data-i18n="ui.browserWarning">このページはChrome以外のブラウザでは正常に動作しない場合があります。Chromeの利用を推奨します。</span>
           </span>
         </div>
       </div>
@@ -50,7 +51,7 @@
             <span class="icon">
               <i id="statusIcon" class="fas fa-info-circle"></i>
             </span>
-            <span id="statusText">待機中 — 接続ボタンを押してください</span>
+            <span id="statusText" data-i18n="status.waiting">待機中 — 接続ボタンを押してください</span>
             </span>
           </div>
         </div>
@@ -60,22 +61,22 @@
         <div class="column is-flex">
           <article class="message is-flex is-flex-direction-column is-flex-grow-1">
             <div class="message-header">
-              <p>接続設定</p>
+              <p data-i18n="ui.connectionSettings">接続設定</p>
             </div>
             <div class="message-body is-flex-grow-1">
               <div class="block">
                 <div class="columns is-mobile is-variable is-2">
                   <div class="column is-8">
                     <div class="field">
-                      <label class="label" for="sidInput">配信ID <span class="label-hint">(半角英数字)</span></label>
+                      <label class="label" for="sidInput"><span data-i18n="ui.streamId">配信ID</span> <span class="label-hint" data-i18n="ui.streamIdHint">(半角英数字)</span></label>
                       <div class="control">
-                        <input class="input" type="text" id="sidInput" placeholder="myshow2024">
+                        <input class="input" type="text" id="sidInput" placeholder="myshow2024" data-i18n-placeholder="ui.streamIdPlaceholder">
                       </div>
                     </div>
                   </div>
                   <div class="column is-4">
                     <div class="field">
-                      <label class="label" for="chInput">CH番号 <span class="label-hint" id="chHint"></span></label>
+                      <label class="label" for="chInput"><span data-i18n="ui.chNumber">CH番号</span> <span class="label-hint" id="chHint"></span></label>
                       <div class="control">
                         <input class="input has-text-centered" type="number" id="chInput" min="1" value="1">
                       </div>
@@ -91,7 +92,7 @@
                       <span class="icon">
                         <i class="fas fa-play"></i>
                       </span>
-                      <span>接続</span>
+                      <span data-i18n="button.connect">接続</span>
                     </button>
                   </div>
                   <div class="column btnColumn">
@@ -99,7 +100,7 @@
                       <span class="icon">
                         <i class="fas fa-stop"></i>
                       </span>
-                      <span>切断</span>
+                      <span data-i18n="button.disconnect">切断</span>
                     </button>
                   </div>
                 </div>
@@ -111,21 +112,21 @@
         <div class="column is-flex">
           <article class="message is-flex is-flex-direction-column is-flex-grow-1">
             <div class="message-header">
-              <p>再同期</p>
+              <p data-i18n="ui.resync">再同期</p>
             </div>
             <div class="message-body is-flex-grow-1">
               <div class="block">
                 <div class="field">
-                  <label class="label" for="syncIntervalSelect">自動再同期間隔</label>
+                  <label class="label" for="syncIntervalSelect" data-i18n="ui.autoResyncInterval">自動再同期間隔</label>
                   <div class="control">
                     <div class="select is-fullwidth">
                       <select id="syncIntervalSelect" onchange="onSyncIntervalChange(this.value)">
-                        <option value="0" selected>オフ</option>
-                        <option value="5">5秒</option>
-                        <option value="10">10秒</option>
-                        <option value="20">20秒</option>
-                        <option value="30">30秒</option>
-                        <option value="60">60秒</option>
+                        <option value="0" selected data-i18n="ui.off">オフ</option>
+                        <option value="5" data-i18n-seconds="5">5秒</option>
+                        <option value="10" data-i18n-seconds="10">10秒</option>
+                        <option value="20" data-i18n-seconds="20">20秒</option>
+                        <option value="30" data-i18n-seconds="30">30秒</option>
+                        <option value="60" data-i18n-seconds="60">60秒</option>
                       </select>
                     </div>
                   </div>
@@ -137,7 +138,7 @@
                     <span class="icon">
                       <i class="fas fa-sync-alt"></i>
                     </span>
-                    <span id="syncBtnLabel">再同期</span>
+                    <span id="syncBtnLabel" data-i18n="button.resync">再同期</span>
                   </button>
                 </div>
               </div>
@@ -148,13 +149,13 @@
 
       <article class="message mb-4">
         <div class="message-header">
-          <p>音量コントロール</p>
+          <p data-i18n="ui.volumeControl">音量コントロール</p>
         </div>
         <div class="message-body">
           <div class="block">
             <div class="columns is-mobile is-vcentered is-variable is-2">
               <div class="column is-narrow">
-                <button class="button is-primary" id="muteBtn" onclick="toggleMute()" title="ミュート" aria-label="ミュート">
+                <button class="button is-primary" id="muteBtn" onclick="toggleMute()" title="ミュート" aria-label="ミュート" data-i18n-title="audio.mute" data-i18n-aria-label="audio.mute">
                   <span class="icon">
                     <i id="muteIcon" class="fas fa-volume-up"></i>
                   </span>
@@ -164,7 +165,7 @@
                 <div class="is-flex is-justify-content-space-between has-text-grey mb-1">
                   <span>-∞</span><span>-40dB</span><span>-20dB</span><span>-6dB</span><span>0dB</span>
                 </div>
-                <input type="range" id="volSlider" min="0" max="100" value="84" aria-label="音量"
+                <input type="range" id="volSlider" min="0" max="100" value="84" aria-label="音量" data-i18n-aria-label="audio.volume"
                   oninput="onVolumeChange(this.value)">
               </div>
               <div class="column is-narrow">
@@ -179,21 +180,21 @@
           </div>
 
           <div class="columns is-mobile is-multiline is-variable is-1 has-text-grey">
-            <div class="column is-one-quarter-tablet is-half-mobile">SR: <span id="infoSR">—</span></div>
-            <div class="column is-one-quarter-tablet is-half-mobile">CH: <span id="infoCH">—</span></div>
-            <div class="column is-one-quarter-tablet is-half-mobile">Buffer: <span id="infoBuf">—</span></div>
-            <div class="column is-one-quarter-tablet is-half-mobile">Codec: <span id="infoCodec">—</span></div>
+            <div class="column is-one-quarter-tablet is-half-mobile"><span data-i18n="ui.sampleRate">SR</span>: <span id="infoSR">—</span></div>
+            <div class="column is-one-quarter-tablet is-half-mobile"><span data-i18n="ui.channel">CH</span>: <span id="infoCH">—</span></div>
+            <div class="column is-one-quarter-tablet is-half-mobile"><span data-i18n="ui.buffer">Buffer</span>: <span id="infoBuf">—</span></div>
+            <div class="column is-one-quarter-tablet is-half-mobile"><span data-i18n="ui.codec">Codec</span>: <span id="infoCodec">—</span></div>
           </div>
         </div>
       </article>
 
       <article class="message mb-4" id="latencyCard">
         <div class="message-header">
-          <p>遅延計測 <span class="label-hint">(RTT)</span></p>
+          <p><span data-i18n="ui.latencyMeasure">遅延計測</span> <span class="label-hint">(RTT)</span></p>
         </div>
         <div class="message-body">
           <div id="latencyContent">
-            <p class="has-text-grey has-text-centered">
+            <p class="has-text-grey has-text-centered" data-i18n="latency.initialHint">
               接続後、OBS側で遅延計測が開始されると、ここに結果が表示されます。
             </p>
           </div>
@@ -203,9 +204,9 @@
       <div class="notification is-info">
         <div class="content">
           <ul>
-            <li>Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。</li>
-            <li>LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。</li>
-            <li>セキュリティソフトに接続をブロックされる場合は、例外に *.trycloudflare.com を追加してください。</li>
+            <li data-i18n="help.chrome">Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。</li>
+            <li data-i18n="help.lan">LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。</li>
+            <li data-i18n="help.security">セキュリティソフトに接続をブロックされる場合は、例外に *.trycloudflare.com を追加してください。</li>
           </ul>
         </div>
       </div>
@@ -213,6 +214,213 @@
   </section>
 
   <script>
+    const I18N_RESOURCES = {
+      ja: {
+        translation: {
+          ui: {
+            browserWarning: 'このページはChrome以外のブラウザでは正常に動作しない場合があります。Chromeの利用を推奨します。',
+            connectionSettings: '接続設定',
+            streamId: '配信ID',
+            streamIdHint: '(半角英数字)',
+            streamIdPlaceholder: 'myshow2024',
+            chNumber: 'CH番号',
+            resync: '再同期',
+            autoResyncInterval: '自動再同期間隔',
+            off: 'オフ',
+            volumeControl: '音量コントロール',
+            sampleRate: 'SR',
+            channel: 'CH',
+            buffer: 'Buffer',
+            codec: 'Codec',
+            latencyMeasure: '遅延計測'
+          },
+          button: {
+            connect: '接続',
+            disconnect: '切断',
+            resync: '再同期',
+            resyncCountdown: '再同期（あと{{sec}}秒）'
+          },
+          audio: {
+            mute: 'ミュート',
+            muted: 'ミュート',
+            volume: '音量'
+          },
+          help: {
+            chrome: 'Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。',
+            lan: 'LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。',
+            security: 'セキュリティソフトに接続をブロックされる場合は、例外に *.trycloudflare.com を追加してください。'
+          },
+          status: {
+            waiting: '待機中 — 接続ボタンを押してください',
+            enterStreamId: '配信IDを入力してください',
+            invalidStreamId: '配信IDは半角英数字のみです',
+            connecting: '接続中...',
+            connectFailed: '接続に失敗しました — URLを確認してください',
+            connectTimeout: '接続タイムアウト — 接続先を確認してください',
+            receivingWithUrl: '受信中 — {{url}}',
+            receiving: '受信中',
+            connectionError: '接続エラー — サーバーに接続できません',
+            streamIdMismatch: '配信IDが一致しません',
+            chOutOfRange: 'CH番号が範囲外です ({{range}})',
+            disconnected: '切断されました',
+            disconnectedByUser: '切断しました',
+            resynced: '再同期しました',
+            measuring: '遅延計測中... ({{current}}/{{total}})'
+          },
+          latency: {
+            initialHint: '接続後、OBS側で遅延計測が開始されると、ここに結果が表示されます。',
+            measuring: '計測中 ({{current}} / {{total}} ping)',
+            estimatedOneWay: '推定片道遅延 (RTT÷2)',
+            averageRoundTrip: '平均往復遅延 ({{label}})',
+            minRtt: '最小RTT',
+            maxRtt: '最大RTT',
+            waitingApply: 'OBSが遅延設定を反映するまでお待ちください。',
+            applied: 'OBSがサブch遅延を <strong>{{ms}} ms</strong> に自動設定しました'
+          },
+          quality: {
+            good: '良好',
+            normal: '普通',
+            high: '高遅延'
+          },
+          format: {
+            chRange: '{{min}}〜{{max}}',
+            seconds: '{{value}}秒'
+          },
+          url: {
+            streamIdMissing: '(配信ID未入力)'
+          },
+          codec: {
+            opusUnavailable: 'Opusデコーダを利用できません（PCMに切替）',
+            opusDecodeFailed: 'Opusデコードに失敗しました（PCMに切替）'
+          }
+        }
+      },
+      en: {
+        translation: {
+          ui: {
+            browserWarning: 'This page may not work correctly in browsers other than Chrome. Chrome is recommended.',
+            connectionSettings: 'Connection Settings',
+            streamId: 'Stream ID',
+            streamIdHint: '(alphanumeric)',
+            streamIdPlaceholder: 'myshow2024',
+            chNumber: 'Channel',
+            resync: 'Resync',
+            autoResyncInterval: 'Auto-resync Interval',
+            off: 'Off',
+            volumeControl: 'Volume Control',
+            sampleRate: 'SR',
+            channel: 'CH',
+            buffer: 'Buffer',
+            codec: 'Codec',
+            latencyMeasure: 'Latency Measurement'
+          },
+          button: {
+            connect: 'Connect',
+            disconnect: 'Disconnect',
+            resync: 'Resync',
+            resyncCountdown: 'Resync ({{sec}}s)'
+          },
+          audio: {
+            mute: 'Mute',
+            muted: 'Muted',
+            volume: 'Volume'
+          },
+          help: {
+            chrome: 'Chrome is recommended. If prompted for audio playback permission on first connect, allow it.',
+            lan: 'For LAN (direct IP) use, open TCP 19000 in the OBS host PC firewall.',
+            security: 'If security software blocks connections, add *.trycloudflare.com to exceptions.'
+          },
+          status: {
+            waiting: 'Idle - press Connect',
+            enterStreamId: 'Enter Stream ID',
+            invalidStreamId: 'Stream ID must be alphanumeric',
+            connecting: 'Connecting...',
+            connectFailed: 'Connection failed - check URL',
+            connectTimeout: 'Connection timeout - check destination',
+            receivingWithUrl: 'Receiving - {{url}}',
+            receiving: 'Receiving',
+            connectionError: 'Connection error - cannot reach server',
+            streamIdMismatch: 'Stream ID mismatch',
+            chOutOfRange: 'Channel out of range ({{range}})',
+            disconnected: 'Disconnected',
+            disconnectedByUser: 'Disconnected',
+            resynced: 'Resynced',
+            measuring: 'Measuring latency... ({{current}}/{{total}})'
+          },
+          latency: {
+            initialHint: 'After connecting, results will appear here when OBS starts latency measurement.',
+            measuring: 'Measuring ({{current}} / {{total}} ping)',
+            estimatedOneWay: 'Estimated one-way latency (RTT/2)',
+            averageRoundTrip: 'Average round-trip latency ({{label}})',
+            minRtt: 'Min RTT',
+            maxRtt: 'Max RTT',
+            waitingApply: 'Please wait while OBS applies delay settings.',
+            applied: 'OBS auto-set sub-channel delay to <strong>{{ms}} ms</strong>'
+          },
+          quality: {
+            good: 'Good',
+            normal: 'Normal',
+            high: 'High latency'
+          },
+          format: {
+            chRange: '{{min}}-{{max}}',
+            seconds: '{{value}} sec'
+          },
+          url: {
+            streamIdMissing: '(Stream ID not set)'
+          },
+          codec: {
+            opusUnavailable: 'Opus decoder unavailable (switched to PCM)',
+            opusDecodeFailed: 'Opus decode failed (switched to PCM)'
+          }
+        }
+      }
+    };
+
+    function detectLanguage() {
+      const queryLang = new URLSearchParams(location.search).get('lang');
+      if (queryLang && I18N_RESOURCES[queryLang]) {
+        localStorage.setItem('receiverLang', queryLang);
+        return queryLang;
+      }
+      const stored = localStorage.getItem('receiverLang');
+      if (stored && I18N_RESOURCES[stored]) return stored;
+      const nav = (navigator.languages && navigator.languages[0]) || navigator.language || 'ja';
+      return nav.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+    }
+
+    const activeLang = detectLanguage();
+    i18next.init({
+      lng: activeLang,
+      fallbackLng: 'ja',
+      resources: I18N_RESOURCES,
+      interpolation: { escapeValue: false }
+    });
+    document.documentElement.lang = activeLang;
+
+    function t(key, opts) {
+      return i18next.t(key, opts || {});
+    }
+
+    function applyStaticI18n() {
+      document.querySelectorAll('[data-i18n]').forEach((el) => {
+        el.textContent = t(el.dataset.i18n);
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+        el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
+      });
+      document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+        el.setAttribute('title', t(el.dataset.i18nTitle));
+      });
+      document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+        el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
+      });
+      document.querySelectorAll('[data-i18n-seconds]').forEach((el) => {
+        el.textContent = t('format.seconds', { value: el.dataset.i18nSeconds });
+      });
+    }
+    applyStaticI18n();
+
     // ============================================================
     // URL プレビュー
     // ============================================================
@@ -227,9 +435,9 @@
         || hasScheme || location.protocol === 'https:';
       const cleanIp = ip.replace(/^(wss?|https?):\/\//, '').replace(/\/.*$/, '');
       if (isTunnel) {
-        return sid ? `wss://${cleanIp}/${sid}/${ch}` : `wss://${cleanIp}/(配信ID未入力)/${ch}`;
+        return sid ? `wss://${cleanIp}/${sid}/${ch}` : `wss://${cleanIp}/${t('url.streamIdMissing')}/${ch}`;
       } else {
-        return sid ? `ws://${cleanIp}:19000/${sid}/${ch}` : `ws://${cleanIp}:19000/(配信ID未入力)/${ch}`;
+        return sid ? `ws://${cleanIp}:19000/${sid}/${ch}` : `ws://${cleanIp}:19000/${t('url.streamIdMissing')}/${ch}`;
       }
     }
 
@@ -237,14 +445,14 @@
     const MIN_CH = 1;
     let MAX_CH = 20;
     const PING_SAMPLES = 10;
-    let CH_RANGE_TEXT = `${MIN_CH}〜${MAX_CH}`;
+    let CH_RANGE_TEXT = t('format.chRange', { min: MIN_CH, max: MAX_CH });
 
     const sidInput = document.getElementById('sidInput');
     const chInput = document.getElementById('chInput');
     const chHint = document.getElementById('chHint');
     function applyChRange(max) {
       MAX_CH = max;
-      CH_RANGE_TEXT = `${MIN_CH}〜${MAX_CH}`;
+      CH_RANGE_TEXT = t('format.chRange', { min: MIN_CH, max: MAX_CH });
       if (chHint) chHint.textContent = `(${CH_RANGE_TEXT})`;
       if (chInput) {
         chInput.min = String(MIN_CH);
@@ -446,7 +654,7 @@
       if (opusErrored) return;
       opusErrored = true;
       requestPcmFallback(reason);
-      reportOpusError(msg || 'Opusデコードに失敗しました（PCMに切替）');
+      reportOpusError(msg || t('codec.opusDecodeFailed'));
       opusQueue = [];
     }
 
@@ -531,7 +739,7 @@
       slider.disabled = muted;
       slider.classList.toggle('is-primary', !muted);
       const dbEl = document.getElementById('dbDisplay');
-      dbEl.textContent = muted ? 'ミュート' : formatDb(gain);
+      dbEl.textContent = muted ? t('audio.muted') : formatDb(gain);
       const dbClasses = ['tag', 'is-medium', 'has-background-dark', 'has-text-white', 'is-family-monospace'];
       if (muted) {
         dbClasses.push('has-text-grey');
@@ -555,7 +763,7 @@
       const val = parseInt(document.getElementById('volSlider').value, 10);
       const gain = sliderToGain(val);
       const dbEl = document.getElementById('dbDisplay');
-      dbEl.textContent = muted ? 'ミュート' : formatDb(gain);
+      dbEl.textContent = muted ? t('audio.muted') : formatDb(gain);
       const dbClasses = ['tag', 'is-medium', 'has-background-dark', 'has-text-white', 'is-family-monospace'];
       if (muted) {
         dbClasses.push('has-text-grey');
@@ -637,15 +845,15 @@
       const sid = document.getElementById('sidInput').value.trim();
       const ch = parseInt(document.getElementById('chInput').value, 10);
 
-      if (!sid) { setStatus('配信IDを入力してください', 'err'); return; }
-      if (!/^[a-z0-9]+$/i.test(sid)) { setStatus('配信IDは半角英数字のみです', 'err'); return; }
+      if (!sid) { setStatus(t('status.enterStreamId'), 'err'); return; }
+      if (!/^[a-z0-9]+$/i.test(sid)) { setStatus(t('status.invalidStreamId'), 'err'); return; }
       // if (!Number.isInteger(ch) || ch < MIN_CH || ch > MAX_CH) {
       //   setStatus(`CH番号は${CH_RANGE_TEXT}で入力してください`, 'err');
       //   return;
       // }
 
       const url = buildUrl(hostDomain, sid, ch);
-      setStatus('接続中...', '');
+      setStatus(t('status.connecting'), '');
       connecting = true;
       lastWsError = false;
       setInputsEnabled(false);
@@ -654,7 +862,7 @@
         ws = new WebSocket(url);
       } catch (e) {
         connecting = false;
-        setStatus('接続に失敗しました — URLを確認してください', 'err');
+        setStatus(t('status.connectFailed'), 'err');
         document.getElementById('connectBtn').disabled = false;
         setInputsEnabled(true);
         return;
@@ -667,7 +875,7 @@
         if (ws !== wsLocal) return;
         if (wsLocal.readyState !== WebSocket.OPEN) {
           lastWsError = true;
-          setStatus('接続タイムアウト — 接続先を確認してください', 'err');
+          setStatus(t('status.connectTimeout'), 'err');
           try { wsLocal.close(); } catch { }
         }
       }, CONNECT_TIMEOUT_MS);
@@ -676,7 +884,7 @@
         if (ws !== wsLocal) return;
         clearConnectTimer();
         connecting = false;
-        setStatus(`受信中 — ${url}`, 'ok');
+        setStatus(t('status.receivingWithUrl', { url }), 'ok');
         document.getElementById('connectBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
         document.getElementById('syncBtn').disabled = false;
@@ -687,7 +895,7 @@
       wsLocal.onerror = () => {
         if (ws !== wsLocal) return;
         lastWsError = true;
-        setStatus('接続エラー — サーバーに接続できません', 'err');
+        setStatus(t('status.connectionError'), 'err');
       };
       wsLocal.onclose = (ev) => {
         if (ws !== wsLocal) return;
@@ -695,12 +903,12 @@
         connecting = false;
         if (ev && ev.code === 1008 && ev.reason === 'stream_id_mismatch') {
           lastWsError = true;
-          setStatus('配信IDが一致しません', 'err');
+          setStatus(t('status.streamIdMismatch'), 'err');
         } else if (ev && ev.code === 1008 && ev.reason === 'ch_out_of_range') {
           lastWsError = true;
-          setStatus(`CH番号が範囲外です (${CH_RANGE_TEXT})`, 'err');
+          setStatus(t('status.chOutOfRange', { range: CH_RANGE_TEXT }), 'err');
         } else if (!lastWsError) {
-          setStatus('切断されました', '');
+          setStatus(t('status.disconnected'), '');
         }
         lastWsError = false;
         setDisconnectedUi();
@@ -722,7 +930,7 @@
       const wsLocal = ws;
       ws = null;
       setDisconnectedUi();
-      setStatus('切断しました', '');
+      setStatus(t('status.disconnectedByUser'), '');
       if (wsLocal) {
         try { wsLocal.close(); } catch { }
       }
@@ -824,7 +1032,7 @@
         return;
       }
 
-      disableOpus('opus_unavailable', 'Opusデコーダを利用できません（PCMに切替）');
+      disableOpus('opus_unavailable', t('codec.opusUnavailable'));
     }
 
     function ensureWebCodecsDecoder(sampleRate, channels) {
@@ -921,7 +1129,7 @@
         opusWasmInitPromise = null;
         markWasmFailed(e && e.message ? e.message : 'init_failed');
         if (opusWebCodecsState === 'failed') {
-          disableOpus('opus_unavailable', 'Opusデコーダを利用できません（PCMに切替）');
+          disableOpus('opus_unavailable', t('codec.opusUnavailable'));
         }
         return false;
       });
@@ -1032,7 +1240,7 @@
         if (streak >= 3) {
           markWasmFailed('decode_error');
           if (opusWebCodecsState === 'failed') {
-            disableOpus('opus_unavailable', 'Opusデコードに失敗しました（PCMに切替）');
+            disableOpus('opus_unavailable', t('codec.opusDecodeFailed'));
           } else {
             opusMode = 'auto';
           }
@@ -1129,11 +1337,11 @@
       if (!actx) return;
       // バッファをリセットして次のパケットから即座に再開
       nextTime = actx.currentTime + AHEAD;
-      setStatus('再同期しました', 'ok');
+      setStatus(t('status.resynced'), 'ok');
       // 0.5秒後に通常表示に戻す
       setTimeout(() => {
         if (ws && ws.readyState === WebSocket.OPEN)
-          setStatus('受信中', 'ok');
+          setStatus(t('status.receiving'), 'ok');
       }, 500);
     }
 
@@ -1184,9 +1392,9 @@
     function updateCountdown() {
       const labelEl = document.getElementById('syncBtnLabel');
       if (syncTickTimer && currentSyncInterval > 0) {
-        labelEl.textContent = `再同期（あと${syncCountdown}秒）`;
+        labelEl.textContent = t('button.resyncCountdown', { sec: syncCountdown });
       } else {
-        labelEl.textContent = '再同期';
+        labelEl.textContent = t('button.resync');
       }
     }
 
@@ -1194,44 +1402,44 @@
     // 計測UI
     // ============================================================
     function showMeasuring(n) {
-      setStatus(`遅延計測中... (${n}/${PING_SAMPLES})`, 'mea');
+      setStatus(t('status.measuring', { current: n, total: PING_SAMPLES }), 'mea');
       document.getElementById('latencyContent').innerHTML = `
     <div class="measuring-box">
-      計測中 (${n} / ${PING_SAMPLES} ping)<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+      ${t('latency.measuring', { current: n, total: PING_SAMPLES })}<span class="dots"><span>.</span><span>.</span><span>.</span></span>
       <progress class="progress is-small is-warning" style="margin-top:6px" value="${n}" max="${PING_SAMPLES}">${n}</progress>
     </div>`;
     }
 
     function showLatencyResult(r) {
-      setStatus('受信中', 'ok');
+      setStatus(t('status.receiving'), 'ok');
       const colCls = r.avg_rtt < 50 ? 'has-text-success' : r.avg_rtt < 150 ? 'has-text-warning' : 'has-text-danger';
-      const lbl = r.avg_rtt < 50 ? '良好' : r.avg_rtt < 150 ? '普通' : '高遅延';
+      const lbl = r.avg_rtt < 50 ? t('quality.good') : r.avg_rtt < 150 ? t('quality.normal') : t('quality.high');
       document.getElementById('latencyContent').innerHTML = `
     <div class="latency-grid">
       <div class="metric has-text-centered">
         <span class="val ${colCls}">${r.one_way.toFixed(1)}</span>
         <span class="unit has-text-grey">ms</span>
-        <div class="lbl has-text-grey">推定片道遅延 (RTT÷2)</div>
+        <div class="lbl has-text-grey">${t('latency.estimatedOneWay')}</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val ${colCls}">${r.avg_rtt.toFixed(1)}</span>
         <span class="unit has-text-grey">ms RTT</span>
-        <div class="lbl has-text-grey">平均往復遅延 (${lbl})</div>
+        <div class="lbl has-text-grey">${t('latency.averageRoundTrip', { label: lbl })}</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val" style="color:#888">${r.min.toFixed(1)}</span>
         <span class="unit has-text-grey">ms</span>
-        <div class="lbl has-text-grey">最小RTT</div>
+        <div class="lbl has-text-grey">${t('latency.minRtt')}</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val" style="color:#888">${r.max.toFixed(1)}</span>
         <span class="unit has-text-grey">ms</span>
-        <div class="lbl has-text-grey">最大RTT</div>
+        <div class="lbl has-text-grey">${t('latency.maxRtt')}</div>
       </div>
     </div>
     <div class="notification is-info py-3 px-4 mt-3" id="waitingApply">
       <i class="fas fa-info-circle mr-1"></i>
-      OBSが遅延設定を反映するまでお待ちください。
+      ${t('latency.waitingApply')}
     </div>`;
       document.getElementById('latencyCard').classList.add('has-background-info-light');
     }
@@ -1242,7 +1450,7 @@
       document.getElementById('latencyContent').innerHTML +=
         `<div class="notification is-success py-3 px-4 mt-3">
       <i class="fas fa-check-circle mr-1"></i>
-      OBSがサブch遅延を <strong>${parseFloat(ms).toFixed(1)} ms</strong> に自動設定しました
+      ${t('latency.applied', { ms: parseFloat(ms).toFixed(1) })}
     </div>`;
     }
 

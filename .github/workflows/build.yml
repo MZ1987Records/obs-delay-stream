@@ -269,6 +269,28 @@ jobs:
           $prefix = "$dist/For Program Files (legacy)"
           cmake --install build --config RelWithDebInfo --prefix $prefix
 
+      - name: Verify receiver assets in dist
+        shell: pwsh
+        run: |
+          $receiverRoots = @(
+            "$env:GITHUB_WORKSPACE/dist/For ProgramData/plugins/obs-delay-stream/data/receiver",
+            "$env:GITHUB_WORKSPACE/dist/For Program Files (legacy)/data/obs-plugins/obs-delay-stream/receiver"
+          )
+          $requiredFiles = @(
+            "index.html",
+            "ui.css",
+            "third_party/i18next/i18next.min.js",
+            "third_party/i18next/LICENSE"
+          )
+          foreach ($root in $receiverRoots) {
+            foreach ($rel in $requiredFiles) {
+              $path = Join-Path $root $rel
+              if (-Not (Test-Path $path -PathType Leaf)) {
+                throw "Missing receiver asset: $path"
+              }
+            }
+          }
+
       - name: Pack artifact
         shell: pwsh
         run: |

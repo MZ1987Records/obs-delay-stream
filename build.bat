@@ -261,12 +261,27 @@ if errorlevel 1 (
     goto :error
 )
 
-if exist "%PLUGIN_DIR%\receiver\third_party" (
-    xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
-    if errorlevel 1 (
-        echo [ERROR] Failed to copy receiver third_party files.
-        goto :error
-    )
+if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\i18next.min.js" (
+    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\i18next.min.js
+    goto :error
+)
+if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\LICENSE" (
+    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\LICENSE
+    goto :error
+)
+
+xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver third_party files.
+    goto :error
+)
+if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
+    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\i18next.min.js
+    goto :error
+)
+if not exist "%RECEIVER_DEST%\third_party\i18next\LICENSE" (
+    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\LICENSE
+    goto :error
 )
 
 echo.
@@ -317,12 +332,27 @@ if errorlevel 1 (
     goto :error
 )
 
-if exist "%PLUGIN_DIR%\receiver\third_party" (
-    xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
-    if errorlevel 1 (
-        echo [ERROR] Failed to copy receiver third_party files.
-        goto :error
-    )
+if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\i18next.min.js" (
+    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\i18next.min.js
+    goto :error
+)
+if not exist "%PLUGIN_DIR%\receiver\third_party\i18next\LICENSE" (
+    echo [ERROR] Missing receiver asset: receiver\third_party\i18next\LICENSE
+    goto :error
+)
+
+xcopy /E /I /Y "%PLUGIN_DIR%\receiver\third_party" "%RECEIVER_DEST%\third_party\" >nul
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver third_party files.
+    goto :error
+)
+if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
+    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\i18next.min.js
+    goto :error
+)
+if not exist "%RECEIVER_DEST%\third_party\i18next\LICENSE" (
+    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\LICENSE
+    goto :error
 )
 
 echo.
