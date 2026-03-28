@@ -28,9 +28,6 @@
 
 #include "constants.hpp"
 
-static constexpr int FLOW_PINGS    = 10;
-static constexpr int FLOW_PING_INT = 150; // ms
-
 // ============================================================
 // フローの状態
 // ============================================================
@@ -135,7 +132,7 @@ public:
                 [this, i](const std::string&, int, LatencyResult r) {
                     on_ch_result(i, r);
                 });
-            router.start_measurement(i, FLOW_PINGS, FLOW_PING_INT);
+            router.start_measurement(i, PING_COUNT, PING_INTV_MS);
         }
         if (on_update) on_update();
         return true;
@@ -171,7 +168,7 @@ public:
                 [this, i](const std::string&, int, LatencyResult r) {
                     on_ch_result(i, r);
                 });
-            router.start_measurement(i, FLOW_PINGS, FLOW_PING_INT);
+            router.start_measurement(i, PING_COUNT, PING_INTV_MS);
         }
         if (on_update) on_update();
         return true;
@@ -204,7 +201,7 @@ public:
             // コールバックはロック外で呼び出し（デッドロック防止）
             if (on_update) on_update();
         };
-        prober_.start(rtmp_url, 10, 300);
+        prober_.start(rtmp_url, RTMP_PROBE_CNT, RTMP_PROBE_INTV);
         return true;
     }
 

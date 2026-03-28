@@ -354,7 +354,7 @@ private:
         std::lock_guard<std::mutex> lk(proc_mtx_);
         if (proc_handle_ != INVALID_HANDLE_VALUE) {
             TerminateProcess(proc_handle_, 0);
-            WaitForSingleObject(proc_handle_, 2000);
+            WaitForSingleObject(proc_handle_, TUNNEL_KILL_TIMEOUT_MS);
             CloseHandle(proc_handle_);
             CloseHandle(thread_handle_);
             proc_handle_   = INVALID_HANDLE_VALUE;
@@ -409,10 +409,10 @@ private:
         // ファイルからURLを読み取る
         std::string tunnel_url;
         std::string accum;
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(CLOUDFLARED_URL_TIMEOUT_S);
 
         while (!stop_requested_ && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(CLOUDFLARED_POLL_INTV_MS));
             // ファイルから読み取り
             HANDLE hRead = CreateFileA(
                 log_file_path_.c_str(),
@@ -526,7 +526,7 @@ private:
                     break;
             }
             if (exit_code != STILL_ACTIVE) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(CLOUDFLARED_POLL_INTV_MS));
         }
         return true;
     }

@@ -802,15 +802,8 @@ private:
 
         // 計測済みの遅延情報があれば再接続クライアントへ即送信
         if (cached_result.valid) {
-            char buf[256];
-            snprintf(buf, sizeof(buf),
-                "{\"type\":\"latency_result\","
-                "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
-                "\"min\":%.1f,\"max\":%.1f,\"samples\":%d}",
-                cached_result.avg_rtt_ms, cached_result.avg_one_way,
-                cached_result.min_rtt_ms, cached_result.max_rtt_ms,
-                cached_result.samples);
-            try { srv->send(h, std::string(buf), websocketpp::frame::opcode::text); }
+            try { srv->send(h, format_latency_result_json(cached_result),
+                               websocketpp::frame::opcode::text); }
             catch (...) {}
         }
         if (cached_delay >= 0.0 && cached_delay_reason == "auto_measure") {
@@ -1071,7 +1064,7 @@ private:
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         // 中断可能な待機（pong受信を待つ）
-        for (int t = 0; t < 600 && running_; ++t)
+        for (int t = 0; t < PONG_WAIT_MS && running_; ++t)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         finalize_result(sid, ch);
     }
@@ -1110,16 +1103,9 @@ private:
             // ブラウザへ結果通知
             auto srv = server_ptr_;
             if (srv) {
-                char buf[256];
-                snprintf(buf, sizeof(buf),
-                    "{\"type\":\"latency_result\","
-                    "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
-                    "\"min\":%.1f,\"max\":%.1f,\"samples\":%d}",
-                    r.avg_rtt_ms, r.avg_one_way,
-                    r.min_rtt_ms, r.max_rtt_ms, r.samples);
+                std::string json = format_latency_result_json(r);
                 for (auto& hdl : cs->conns) {
-                    try { srv->send(hdl, std::string(buf),
-                                       websocketpp::frame::opcode::text); }
+                    try { srv->send(hdl, json, websocketpp::frame::opcode::text); }
                     catch (...) {}
                 }
             }
@@ -1134,6 +1120,17 @@ private:
         // コールバックはロック外で呼び出し
         if (cb) cb(sid, ch, r);
         if (cb_any) cb_any(sid, ch, r);
+    }
+
+    static std::string format_latency_result_json(const LatencyResult& r) {
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "{\"type\":\"latency_result\","
+            "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
+            "\"min\":%.1f,\"max\":%.1f,\"samples\":%d}",
+            r.avg_rtt_ms, r.avg_one_way,
+            r.min_rtt_ms, r.max_rtt_ms, r.samples);
+        return buf;
     }
 
     void broadcast_text(const std::string& sid, int ch, const std::string& msg) {
@@ -1166,7 +1163,7 @@ private:
     std::atomic<int>   opus_target_sample_rate_{0}; // 0: source sample rate
     std::atomic<int>   audio_quantization_bits_{8};
     std::atomic<bool>  audio_mono_{true};
-    std::atomic<int>   pcm_downsample_ratio_{1}; // 1: そのまま, 2: 1/2, 4: 1/4
+    std::atomic<int>   pcm_downsample_ratio_{4}; // 1: そのまま, 2: 1/2, 4: 1/4
     std::vector<OpusEnc> opus_;
     int active_ch_max_ = MAX_SUB_CH;
 

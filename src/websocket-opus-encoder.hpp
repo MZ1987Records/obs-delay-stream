@@ -79,14 +79,13 @@ struct OpusEnc {
             : input_sr;
         if (bitrate < 6) bitrate = 6;
         if (bitrate > 510) bitrate = 510;
-        const int opus_complexity = 10;
 
         ctx->sample_rate = output_sr;
         av_channel_layout_default(&ctx->ch_layout, ch);
         ctx->bit_rate = static_cast<int64_t>(bitrate) * 1000;
         ctx->time_base = AVRational{1, output_sr};
         ctx->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
-        (void)av_opt_set_int(ctx, "compression_level", opus_complexity, 0);
+        (void)av_opt_set_int(ctx, "compression_level", complexity, 0);
 
         const enum AVSampleFormat* sample_fmts = nullptr;
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 13, 100)
@@ -180,7 +179,7 @@ struct OpusEnc {
         output_sample_rate = output_sr;
         channels = ch;
         bitrate_kbps = bitrate;
-        complexity = opus_complexity;
+        // complexity は宣言時に 10 で初期化済み
         pts = 0;
         return true;
     }

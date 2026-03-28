@@ -39,6 +39,8 @@
 #include <algorithm>
 #include <numeric>
 
+#include "constants.hpp"
+
 using ProbeClk = std::chrono::steady_clock;
 using ProbeMs  = std::chrono::duration<double, std::milli>;
 
@@ -184,8 +186,8 @@ private:
         sg.s = socket(ai.p->ai_family, ai.p->ai_socktype, ai.p->ai_protocol);
         if (sg.s == INVALID_SOCKET) return -1.0;
 
-        // タイムアウト設定 (2秒)
-        DWORD timeout_ms = 2000;
+        // タイムアウト設定
+        DWORD timeout_ms = SOCKET_TIMEOUT_MS;
         setsockopt(sg.s, SOL_SOCKET, SO_RCVTIMEO,
                    reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
         setsockopt(sg.s, SOL_SOCKET, SO_SNDTIMEO,
