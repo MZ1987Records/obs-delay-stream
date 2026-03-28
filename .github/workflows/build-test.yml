@@ -1,0 +1,195 @@
+name: build-test
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*.*.*"
+  pull_request:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      OBS_STUDIO_REF: master
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect Windows SDK
+        id: sdk
+        shell: pwsh
+        run: |
+          $sdkRoot = "C:\\Program Files (x86)\\Windows Kits\\10\\Lib"
+          $dirs = Get-ChildItem $sdkRoot -Directory | Select-Object -ExpandProperty Name
+          if (-Not $dirs) { throw "Windows SDK not found: $sdkRoot" }
+          $ver = $dirs | ForEach-Object { [version]$_ } | Sort-Object -Descending | Select-Object -First 1
+          $verStr = $ver.ToString()
+          Add-Content $env:GITHUB_ENV "WINSDK_VERSION=$verStr"
+          Add-Content $env:GITHUB_OUTPUT "version=$verStr"
+
+      - name: Resolve OBS ref
+        id: obs
+        shell: pwsh
+        run: |
+          $sha = (git ls-remote https://github.com/obsproject/obs-studio.git "refs/heads/$env:OBS_STUDIO_REF" | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+          if (-Not $sha) { throw "Failed to resolve OBS ref: $env:OBS_STUDIO_REF" }
+          Add-Content $env:GITHUB_ENV "OBS_STUDIO_SHA=$sha"
+          Add-Content $env:GITHUB_OUTPUT "sha=$sha"
+          Write-Host "OBS ref $env:OBS_STUDIO_REF => $sha"
+
+      - name: Prepare third_party
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force third_party | Out-Null
+
+      - name: Clone OBS Studio
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "third_party/obs-studio")) {
+            git clone --filter=blob:none https://github.com/obsproject/obs-studio.git third_party/obs-studio
+          }
+          Set-Location third_party/obs-studio
+          git fetch --tags origin
+          git checkout --force $env:OBS_STUDIO_SHA
+          git submodule update --init --recursive --depth 1
+
+      - name: Restore OBS build cache
+        id: obs-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/obs-studio/build_x64
+            third_party/obs-studio/.deps
+          key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
+          restore-keys: |
+            ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-
+            ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-
+            ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-
+            ${{ runner.os }}-obs-build-
+
+      - name: Patch OBS SDK version
+        shell: pwsh
+        run: |
+          Set-Location third_party/obs-studio
+          $presetPath = "CMakePresets.json"
+          if (-Not (Test-Path $presetPath)) { throw "CMakePresets.json not found." }
+          $raw = Get-Content $presetPath -Raw
+          $patched = $raw.Replace("10.0.22621.0", $env:WINSDK_VERSION)
+          if ($raw -eq $patched) { Write-Host "No preset SDK version to replace." }
+          $patched | Set-Content $presetPath -Encoding UTF8
+
+      - name: Check OBS build outputs
+        id: obs-build-check
+        shell: pwsh
+        run: |
+          $libobs = "third_party/obs-studio/build_x64/libobs/RelWithDebInfo/obs.lib"
+          $exactCacheHit = '${{ steps.obs-cache.outputs.cache-hit }}' -eq 'true'
+          if ($exactCacheHit -and (Test-Path $libobs)) {
+            Write-Host "OBS build cache exact hit: $libobs"
+            Add-Content $env:GITHUB_OUTPUT "skip=true"
+          } else {
+            if (Test-Path $libobs) {
+              Write-Host "OBS cache restored by fallback key. Running incremental OBS build."
+            } else {
+              Write-Host "OBS build cache miss: $libobs"
+            }
+            Add-Content $env:GITHUB_OUTPUT "skip=false"
+          }
+
+      - name: Build OBS Studio
+        if: steps.obs-build-check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          Set-Location third_party/obs-studio
+          cmake --list-presets
+          cmake --preset windows-x64
+          cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
+
+      - name: Save OBS build cache
+        if: success() && steps.obs-build-check.outputs.skip != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            third_party/obs-studio/build_x64
+            third_party/obs-studio/.deps
+          key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
+
+      - name: Clone websocketpp
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "third_party/websocketpp")) {
+            git clone https://github.com/zaphoyd/websocketpp.git third_party/websocketpp
+          }
+
+      - name: Clone asio
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "third_party/asio")) {
+            git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git third_party/asio
+          }
+
+      - name: Configure plugin (ProgramData layout)
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=OFF
+
+      - name: Build plugin
+        shell: pwsh
+        run: |
+          cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Install to dist (ProgramData layout)
+        shell: pwsh
+        run: |
+          $dist = "$env:GITHUB_WORKSPACE/dist"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          $prefix = "$dist/For ProgramData"
+          cmake --install build --config RelWithDebInfo --prefix $prefix
+
+      - name: Configure legacy layout
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=ON
+
+      - name: Install to dist (Program Files legacy layout)
+        shell: pwsh
+        run: |
+          $dist = "$env:GITHUB_WORKSPACE/dist"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          $prefix = "$dist/For Program Files (legacy)"
+          cmake --install build --config RelWithDebInfo --prefix $prefix
+
+      - name: Verify receiver assets in dist
+        shell: pwsh
+        run: |
+          $receiverRoots = @(
+            "$env:GITHUB_WORKSPACE/dist/For ProgramData/plugins/obs-delay-stream/data/receiver",
+            "$env:GITHUB_WORKSPACE/dist/For Program Files (legacy)/data/obs-plugins/obs-delay-stream/receiver"
+          )
+          $requiredFiles = @(
+            "index.html",
+            "receiver.js",
+            "ui.css",
+            "third_party/i18next/i18next.min.js",
+            "third_party/i18next/LICENSE"
+          )
+          foreach ($root in $receiverRoots) {
+            foreach ($rel in $requiredFiles) {
+              $path = Join-Path $root $rel
+              if (-Not (Test-Path $path -PathType Leaf)) {
+                throw "Missing receiver asset: $path"
+              }
+            }
+          }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-delay-stream-${{ github.sha }}
+          path: dist/
