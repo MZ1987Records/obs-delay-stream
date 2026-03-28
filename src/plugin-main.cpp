@@ -139,14 +139,14 @@ static std::string make_alpha_counter_label(int index) {
     return out;
 }
 
-// Sub-CH追加時の既定名（例: 演者A, 演者B ...）を生成する。
+// チャンネル追加時の既定名（例: 演者A, 演者B ...）を生成する。
 static std::string make_default_sub_memo(int counter) {
     const char* prefix = T_("SubDefaultMemoPrefix");
     if (!prefix || !*prefix) prefix = "Performer";
     return std::string(prefix) + make_alpha_counter_label(counter);
 }
 
-// Sub-CH数を有効範囲(1..MAX_SUB_CH)に丸める。
+// チャンネル数を有効範囲(1..MAX_SUB_CH)に丸める。
 static int clamp_sub_ch_count(int v) {
     if (v < 1) return 1;
     if (v > MAX_SUB_CH) return MAX_SUB_CH;
@@ -232,8 +232,8 @@ struct DelayStreamData {
     std::string   auto_ip;
     std::atomic<int> ws_port{WS_PORT};
     float         master_delay_ms = 0.0f;
-    float         sub_offset_ms   = 0.0f; // global offset added to all sub-ch after Sync Flow
-    int           sub_ch_count    = 1; // active sub-channel count (1..MAX_SUB_CH)
+    float         sub_offset_ms   = 0.0f; // global offset added to all channel after Sync Flow
+    int           sub_ch_count    = 1; // active channel count (1..MAX_SUB_CH)
     DelayBuffer   master_buf;
     RtmpMeasureState rtmp;
     StreamRouter  router;
@@ -276,7 +276,7 @@ struct DelayStreamData {
     }
 };
 
-// Sub-CHの最終遅延値（base + adjust + global offset）を算出する。
+// チャンネルの最終遅延値（base + adjust + global offset）を算出する。
 static float calc_effective_sub_delay_value_ms(const DelayStreamData* d,
                                                float base_delay_ms,
                                                float adjust_ms) {
@@ -286,7 +286,7 @@ static float calc_effective_sub_delay_value_ms(const DelayStreamData* d,
     return effective;
 }
 
-// Sub-CHの最終遅延値（base + adjust + global offset）を算出して、無効時は0にする。
+// チャンネルの最終遅延値（base + adjust + global offset）を算出して、無効時は0にする。
 static uint32_t calc_effective_sub_delay_ms(const DelayStreamData* d,
                                             float base_delay_ms,
                                             float adjust_ms) {
@@ -295,7 +295,7 @@ static uint32_t calc_effective_sub_delay_ms(const DelayStreamData* d,
         calc_effective_sub_delay_value_ms(d, base_delay_ms, adjust_ms));
 }
 
-// 指定Sub-CHのバッファ遅延を現在設定へ反映する。
+// 指定チャンネルのバッファ遅延を現在設定へ反映する。
 static void apply_sub_delay_to_buffer(DelayStreamData* d, int ch) {
     if (!d || ch < 0 || ch >= MAX_SUB_CH) return;
     d->sub[ch].buf.set_delay_ms(
@@ -739,7 +739,7 @@ static void ds_update(void* data, obs_data_t* settings) {
     d->prev_stream_id_has_user_value = obs_data_has_user_value(settings, "stream_id");
 }
 
-// マスター遅延適用とSub-CH配信用の音声分岐を行う。
+// マスター遅延適用とチャンネル配信用の音声分岐を行う。
 static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
     auto* d = static_cast<DelayStreamData*>(data);
     if (d->is_duplicate_instance) return audio;
@@ -788,7 +788,7 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
 }
 
 // Button callbacks
-// 選択されたSub-CHの往復遅延測定を開始する。
+// 選択されたチャンネルの往復遅延測定を開始する。
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     auto* d = ctx->d; int i = ctx->ch;
@@ -833,7 +833,7 @@ static bool cb_sub_adjust_changed(void* priv, obs_properties_t*, obs_property_t*
     request_properties_refresh(d);
     return false;
 }
-// 指定Sub-CHの遅延を設定値と実バッファへ反映する。
+// 指定チャンネルの遅延を設定値と実バッファへ反映する。
 static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
     if (!d || i < 0 || i >= MAX_SUB_CH) return;
     obs_data_t* s = obs_source_get_settings(d->context);
@@ -847,7 +847,7 @@ static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
         calc_effective_sub_delay_value_ms(
             d, d->sub[i].delay_ms, d->sub[i].adjust_ms));
 }
-// 全Sub-CHのURLと名前の一覧をMarkdown箇条書き形式でクリップボードへコピーする。
+// 全チャンネルのURLと名前の一覧をMarkdown箇条書き形式でクリップボードへコピーする。
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
@@ -873,7 +873,7 @@ static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     if (!out.empty()) copy_to_clipboard(out);
     return false;
 }
-// Sub-CHを1つ追加する。
+// チャンネルを1つ追加する。
 static bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
@@ -908,7 +908,7 @@ static bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
-// 指定Sub-CHを削除し、後続チャンネルを前詰めする。
+// 指定チャンネルを削除し、後続チャンネルを前詰めする。
 static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     if (!ctx || !ctx->d) return false;
@@ -1034,7 +1034,7 @@ static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d);
     return false;
 }
-// Sync Flow Step1（Sub-CH測定）を開始する。
+// Sync Flow Step1（チャンネル測定）を開始する。
 static bool cb_flow_start(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     std::string sid = d->get_stream_id();
@@ -1487,7 +1487,7 @@ static void add_master_group(obs_properties_t* props, DelayStreamData* d) {
     obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
 }
 
-// Sub-CH共通オフセット設定グループを追加する。
+// チャンネル共通オフセット設定グループを追加する。
 static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
@@ -1505,7 +1505,7 @@ static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
         T_("GroupSubOffset"), OBS_GROUP_NORMAL, grp);
 }
 
-// Sub-CHの測定状態に応じてボタン/結果表示を切り替える。
+// チャンネルの測定状態に応じてボタン/結果表示を切り替える。
 static void add_sub_channel_measure_controls(obs_properties_t* ch_grp,
                                              DelayStreamData* d,
                                              int i,
@@ -1547,7 +1547,7 @@ static void add_sub_channel_measure_controls(obs_properties_t* ch_grp,
     obs_property_set_enabled(mp, false);
 }
 
-// Sub-CH 1件分のUIを構築する（詳細モード）。
+// チャンネル 1件分のUIを構築する（詳細モード）。
 static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* d, int i, int sub_count) {
     if (!grp || !d) return;
     d->btn_ctx[i] = { d, i };
@@ -1606,7 +1606,7 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
 }
 
-// Sub-CH 1件分のUIを構築する（簡易モード）。
+// チャンネル 1件分のUIを構築する（簡易モード）。
 static void add_sub_channel_item_simple(obs_properties_t* grp, DelayStreamData* d, int i, int sub_count) {
     if (!grp || !d) return;
     d->btn_ctx[i] = { d, i };
@@ -1632,7 +1632,7 @@ static void add_sub_channel_item_simple(obs_properties_t* grp, DelayStreamData* 
     }
 }
 
-// Sub-CH 一覧グループを構築する（詳細/簡易モードで項目を切り替える）。
+// チャンネル 一覧グループを構築する（詳細/簡易モードで項目を切り替える）。
 static void add_sub_channels_group(obs_properties_t* props, DelayStreamData* d, bool detail_mode) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
