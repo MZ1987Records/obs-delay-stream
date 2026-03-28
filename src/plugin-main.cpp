@@ -12,7 +12,9 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <iphlpapi.h>
+#include <psapi.h>
 #pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "ws2_32.lib")
 #include <stdint.h>
 #include <cstdint>
@@ -54,6 +56,98 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
 static std::atomic<bool> g_delay_stream_filter_exists{false};
 static constexpr float   SUB_ADJUST_MIN_MS = -500.0f;
 static constexpr float   SUB_ADJUST_MAX_MS = 500.0f;
+
+// 前後の空白を削除した文字列を返す。
+static std::string trim_copy(std::string s) {
+    const char* ws = " \t\r\n";
+    const size_t begin = s.find_first_not_of(ws);
+    if (begin == std::string::npos) return "";
+    const size_t end = s.find_last_not_of(ws);
+    return s.substr(begin, end - begin + 1);
+}
+
+// RTMP/RTMPSスキームのURLならそのまま返す。対象外は空文字。
+static std::string normalize_rtmp_url_candidate(const char* raw) {
+    if (!raw || !*raw) return "";
+    std::string url = trim_copy(raw);
+    if (url.empty()) return "";
+    if (_strnicmp(url.c_str(), "rtmp://", 7) == 0) return url;
+    if (_strnicmp(url.c_str(), "rtmps://", 8) == 0) return url;
+    if (url.find("://") != std::string::npos) return "";
+    if (_stricmp(url.c_str(), "auto") == 0) return "";
+    if (_stricmp(url.c_str(), "default") == 0) return "";
+    if (url.find_first_of(" \t\r\n") != std::string::npos) return "";
+    return "rtmp://" + url;
+}
+
+// RTMPサーバーURLとストリームキーを結合する（例: rtmp://host/live + key）。
+static std::string join_rtmp_url_and_stream_key(const std::string& base_url,
+                                                const std::string& raw_key) {
+    std::string base = trim_copy(base_url);
+    std::string key  = trim_copy(raw_key);
+    if (base.empty() || key.empty()) return base;
+
+    // "rtmp://.../key" が渡された場合はそのまま採用する。
+    if (_strnicmp(key.c_str(), "rtmp://", 7) == 0 ||
+        _strnicmp(key.c_str(), "rtmps://", 8) == 0) {
+        return normalize_rtmp_url_candidate(key.c_str());
+    }
+
+    while (!key.empty() && key.front() == '/') key.erase(key.begin());
+    if (key.empty()) return base;
+
+    // 既に末尾が同じキーなら重複連結しない。
+    if (base.size() >= key.size() &&
+        base.compare(base.size() - key.size(), key.size(), key) == 0) {
+        if (base.size() == key.size() || base[base.size() - key.size() - 1] == '/') {
+            return base;
+        }
+    }
+
+    if (!base.empty() && base.back() != '/') base.push_back('/');
+    return base + key;
+}
+
+// 既にロード済みのOBS関連モジュールからシンボルを取得する。
+template <typename Fn>
+static Fn find_obs_symbol(const char* symbol_name) {
+    if (!symbol_name || !*symbol_name) return nullptr;
+    const char* modules[] = {
+        "obs-frontend-api.dll",
+        "obs-frontend-api64.dll",
+        "obs-frontend-api",
+        "obs64.exe",
+        "obs64",
+        "obs.dll",
+        "libobs.dll",
+        "libobs",
+        nullptr
+    };
+    for (int i = 0; modules[i]; ++i) {
+        HMODULE mod = GetModuleHandleA(modules[i]);
+        if (!mod) continue;
+        FARPROC p = GetProcAddress(mod, symbol_name);
+        if (p) return reinterpret_cast<Fn>(p);
+    }
+    for (int i = 0; modules[i]; ++i) {
+        HMODULE mod = LoadLibraryA(modules[i]);
+        if (!mod) continue;
+        FARPROC p = GetProcAddress(mod, symbol_name);
+        if (p) return reinterpret_cast<Fn>(p);
+    }
+
+    // モジュール名差異に備えて、ロード済み全モジュールを総当たりする。
+    HMODULE mods[1024];
+    DWORD needed = 0;
+    if (EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &needed)) {
+        const DWORD count = needed / sizeof(HMODULE);
+        for (DWORD i = 0; i < count; ++i) {
+            FARPROC p = GetProcAddress(mods[i], symbol_name);
+            if (p) return reinterpret_cast<Fn>(p);
+        }
+    }
+    return nullptr;
+}
 
 // ローカルネットワークで利用しやすいIPv4アドレスを優先して取得する。
 static std::string get_local_ip() {
@@ -195,9 +289,108 @@ static std::string get_receiver_root_dir() {
     return path.substr(0, pos);
 }
 
-// OBS本体からRTMP URLを取得する拡張ポイント（現状は未使用）。
+// OBS本体の配信サービス設定からRTMP URLを取得する。
 static std::string get_obs_stream_url() {
-    return ""; // Set RTMP URL manually in the plugin panel
+    using get_streaming_service_fn = obs_service_t* (*)();
+    using service_get_settings_fn = obs_data_t* (*)(obs_service_t*);
+    using service_get_ref_fn = obs_service_t* (*)(obs_service_t*);
+    using service_addref_fn = void (*)(obs_service_t*);
+    using service_get_url_fn = const char* (*)(obs_service_t*);
+    using service_release_fn = void (*)(obs_service_t*);
+
+    auto get_streaming_service =
+        find_obs_symbol<get_streaming_service_fn>("obs_frontend_get_streaming_service");
+    auto service_get_settings =
+        find_obs_symbol<service_get_settings_fn>("obs_service_get_settings");
+    auto service_get_ref =
+        find_obs_symbol<service_get_ref_fn>("obs_service_get_ref");
+    auto service_addref =
+        find_obs_symbol<service_addref_fn>("obs_service_addref");
+    auto service_get_url =
+        find_obs_symbol<service_get_url_fn>("obs_service_get_url");
+    auto service_release =
+        find_obs_symbol<service_release_fn>("obs_service_release");
+    if (!get_streaming_service || !service_get_settings) return "";
+
+    // OBS 32系では frontend_get_streaming_service は借用参照を返すため、
+    // 直接 release しない。必要ならここで明示的に参照を取得して使う。
+    obs_service_t* borrowed = get_streaming_service();
+    if (!borrowed) return "";
+
+    obs_service_t* owned = nullptr;
+    if (service_get_ref) {
+        owned = service_get_ref(borrowed);
+    } else if (service_addref && service_release) {
+        service_addref(borrowed);
+        owned = borrowed;
+    }
+    obs_service_t* service = owned ? owned : borrowed;
+
+    std::string url;
+    std::string stream_key;
+    if (service_get_url) {
+        url = normalize_rtmp_url_candidate(service_get_url(service));
+    }
+
+    obs_data_t* settings = service_get_settings(service);
+    if (settings) {
+        if (url.empty()) {
+            const char* keys[] = {
+                "server",
+                "url",
+                "ingest_url",
+                "server_url",
+                "rtmp_url",
+                nullptr
+            };
+            for (int i = 0; keys[i]; ++i) {
+                url = normalize_rtmp_url_candidate(obs_data_get_string(settings, keys[i]));
+                if (!url.empty()) break;
+            }
+        }
+
+        const char* key_keys[] = {
+            "key",
+            "stream_key",
+            "streamkey",
+            "play_path",
+            "path",
+            nullptr
+        };
+        for (int i = 0; key_keys[i]; ++i) {
+            stream_key = trim_copy(obs_data_get_string(settings, key_keys[i]));
+            if (!stream_key.empty()) break;
+        }
+        obs_data_release(settings);
+    }
+
+    if (!url.empty() && !stream_key.empty()) {
+        url = join_rtmp_url_and_stream_key(url, stream_key);
+    }
+
+    if (owned && service_release) {
+        service_release(owned);
+    }
+    return url;
+}
+
+// 手入力RTMP URLが空なら、OBS配信設定のURLで補完する。
+static void maybe_autofill_rtmp_url_manual(obs_data_t* settings) {
+    if (!settings) return;
+    std::string manual = trim_copy(obs_data_get_string(settings, "rtmp_url_manual"));
+    if (!manual.empty()) return;
+    std::string auto_url = get_obs_stream_url();
+    if (auto_url.empty()) return;
+    obs_data_set_string(settings, "rtmp_url_manual", auto_url.c_str());
+}
+
+// ソース設定を取得してRTMP URL自動補完を試みる。
+static void maybe_autofill_rtmp_url_manual_from_source(obs_source_t* source) {
+    if (!source) return;
+    obs_data_t* s = obs_source_get_settings(source);
+    if (!s) return;
+    maybe_autofill_rtmp_url_manual(s);
+    obs_data_release(s);
 }
 
 struct MeasureState {
@@ -345,6 +538,8 @@ static void maybe_fill_cloudflared_path_from_auto(DelayStreamData* d) {
 struct PropsRefreshCtx {
     obs_source_t* source = nullptr;
 };
+static std::mutex              g_props_refresh_pending_mtx;
+static std::set<obs_source_t*> g_props_refresh_pending_sources;
 
 // UIスレッド側でプロパティ再構築を実行する。
 static void do_request_properties_refresh_ui(void* p) {
@@ -354,6 +549,10 @@ static void do_request_properties_refresh_ui(void* p) {
         return;
     }
     obs_source_update_properties(ctx->source);
+    {
+        std::lock_guard<std::mutex> lk(g_props_refresh_pending_mtx);
+        g_props_refresh_pending_sources.erase(ctx->source);
+    }
     obs_source_release(ctx->source);
     delete ctx;
 }
@@ -373,6 +572,16 @@ static void request_properties_refresh(DelayStreamData* d) {
     if (!ctx->source) {
         delete ctx;
         return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_props_refresh_pending_mtx);
+        if (g_props_refresh_pending_sources.find(ctx->source) !=
+            g_props_refresh_pending_sources.end()) {
+            obs_source_release(ctx->source);
+            delete ctx;
+            return;
+        }
+        g_props_refresh_pending_sources.insert(ctx->source);
     }
 
     if (obs_in_task_thread(OBS_TASK_UI)) {
@@ -491,6 +700,7 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     d->is_duplicate_instance = already_exists;
     d->owns_singleton_slot   = !already_exists;
     d->context  = source;
+    maybe_autofill_rtmp_url_manual(settings);
     if (d->is_duplicate_instance) {
         blog(LOG_WARNING, "[obs-delay-stream] duplicate filter instance created as warning-only");
         d->create_done.store(true);
@@ -698,6 +908,7 @@ static void ds_update(void* data, obs_data_t* settings) {
     }
     d->set_stream_id(sid);
     d->router.set_stream_id(sid);
+    maybe_autofill_rtmp_url_manual(settings);
     {
         int ws_port = (int)obs_data_get_int(settings, "ws_port");
         if (ws_port < 1 || ws_port > 65535) {
@@ -1670,6 +1881,9 @@ static obs_properties_t* ds_get_properties(void* data) {
     if (d->in_get_props.exchange(true)) {
         return props;
     }
+
+    // 起動直後に未取得だったケースを考慮し、プロパティ表示時にも再試行する。
+    maybe_autofill_rtmp_url_manual_from_source(d->context);
 
     maybe_fill_cloudflared_path_from_auto(d);
 
