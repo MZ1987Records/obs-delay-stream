@@ -113,6 +113,7 @@ build\RelWithDebInfo\obs-delay-stream.dll
 data\locale\*.ini
   -> C:\ProgramData\obs-studio\plugins\obs-delay-stream\data\locale\
 build\receiver\index.html
+receiver\receiver.js
 receiver\ui.css
 receiver\*.svg
 receiver\third_party\**
@@ -139,7 +140,7 @@ receiver\third_party\**
 
 ### receiver ページの見た目が崩れる / 404
 
-- `receiver` 配下（`ui.css`, `*.svg`, `third_party`）がインストール先にコピーされているか確認
+- `receiver` 配下（`receiver.js`, `ui.css`, `*.svg`, `third_party`）がインストール先にコピーされているか確認
 - `index.html` は `build\receiver\index.html` を使う
 
 ## 現在の主要ファイル構成
@@ -154,6 +155,7 @@ obs-delay-stream/
     ja-JP.ini
   receiver/
     index.html                     受信ページテンプレート（@PROJECT_VERSION@ を展開）
+    receiver.js                    受信ページロジック
     ui.css
     *.svg
     third_party/

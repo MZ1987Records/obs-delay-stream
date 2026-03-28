@@ -249,6 +249,12 @@ if errorlevel 1 (
     goto :error
 )
 
+copy /Y "%PLUGIN_DIR%\receiver\receiver.js" "%RECEIVER_DEST%\"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver receiver.js.
+    goto :error
+)
+
 copy /Y "%PLUGIN_DIR%\receiver\ui.css" "%RECEIVER_DEST%\"
 if errorlevel 1 (
     echo [ERROR] Failed to copy receiver ui.css.
@@ -317,6 +323,12 @@ if not exist "%RECEIVER_DEST%" mkdir "%RECEIVER_DEST%"
 copy /Y "%PLUGIN_DIR%\receiver\index.html" "%RECEIVER_DEST%\"
 if errorlevel 1 (
     echo [ERROR] Failed to copy receiver index.html.
+    goto :error
+)
+
+copy /Y "%PLUGIN_DIR%\receiver\receiver.js" "%RECEIVER_DEST%\"
+if errorlevel 1 (
+    echo [ERROR] Failed to copy receiver receiver.js.
     goto :error
 )
 

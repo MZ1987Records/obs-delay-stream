@@ -131,6 +131,7 @@ install(TARGETS obs-delay-stream LIBRARY DESTINATION "${OBS_PLUGIN_BIN_DIR}")
 install(DIRECTORY data/locale/ DESTINATION "${OBS_PLUGIN_DATA_DIR}/locale")
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html"
+  receiver/receiver.js
   receiver/ui.css
   ${RECEIVER_SVG_FILES}
   DESTINATION "${OBS_PLUGIN_DATA_DIR}/receiver"
@@ -149,6 +150,7 @@ add_custom_command(TARGET obs-delay-stream POST_BUILD
     "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver"
   COMMAND ${CMAKE_COMMAND} -E copy
     "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html"
+    "${CMAKE_CURRENT_SOURCE_DIR}/receiver/receiver.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/receiver/ui.css"
     ${RECEIVER_SVG_FILES}
     "$<TARGET_FILE_DIR:obs-delay-stream>/data/obs-plugins/obs-delay-stream/receiver/"
