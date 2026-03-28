@@ -1,5 +1,29 @@
 # Changelog
 
+## v4.1.0 — 2026-03-28
+
+### 新機能
+
+- **音声コーデックUI** — モード別パラメータ表示とPCMパラメータ設定に対応
+
+### 改善
+
+- **receiver TypeScript化** — receiver の JS を TypeScript に移行し、Vite ビルド環境を整備
+- **receiver モジュール分割** — モノリシックな receiver.ts を責務別モジュールに分割し保守性を向上
+- **receiver アセット整理** — `js/` を `src/` にリネームし、アセット参照パスを整理
+- **receiver UI 安全化** — innerHTML 除去・イベントバス導入で UI を安全に疎結合化
+- **WebSocket 接続案内** — 注意文にポート開放案内を追加し表記を統一
+
+### 修正
+
+- **自動計測後の遅延表示** — auto-measure 後の apply delay 通知を修正
+- **トンネル起動中の URL 操作** — トンネル開始中は URL コピーを無効化
+- **receiver LAN 案内テキスト** — 不要な LAN ファイアウォール案内を削除
+
+### ビルド・配布
+
+- **websocket-server.hpp 分割** — 責務別ヘッダへリファクタリング
+
 ## v4.0.0 — 2026-03-28
 
 ### 新機能
