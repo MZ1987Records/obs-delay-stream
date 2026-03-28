@@ -375,23 +375,23 @@ static std::string get_obs_stream_url() {
 }
 
 // RTMP URL自動取得ONのとき、OBS配信設定のURLで補完する。
-static void maybe_autofill_rtmp_url_manual(obs_data_t* settings, bool force_refresh) {
+static void maybe_autofill_rtmp_url(obs_data_t* settings, bool force_refresh) {
     if (!settings) return;
     if (!obs_data_get_bool(settings, "rtmp_url_auto")) return;
-    std::string manual = trim_copy(obs_data_get_string(settings, "rtmp_url_manual"));
-    if (!force_refresh && !manual.empty()) return;
+    std::string configured = trim_copy(obs_data_get_string(settings, "rtmp_url"));
+    if (!force_refresh && !configured.empty()) return;
     std::string auto_url = get_obs_stream_url();
     if (auto_url.empty()) return;
-    if (manual == auto_url) return;
-    obs_data_set_string(settings, "rtmp_url_manual", auto_url.c_str());
+    if (configured == auto_url) return;
+    obs_data_set_string(settings, "rtmp_url", auto_url.c_str());
 }
 
 // ソース設定を取得してRTMP URL自動補完を試みる。
-static void maybe_autofill_rtmp_url_manual_from_source(obs_source_t* source, bool force_refresh) {
+static void maybe_autofill_rtmp_url_from_source(obs_source_t* source, bool force_refresh) {
     if (!source) return;
     obs_data_t* s = obs_source_get_settings(source);
     if (!s) return;
-    maybe_autofill_rtmp_url_manual(s, force_refresh);
+    maybe_autofill_rtmp_url(s, force_refresh);
     obs_data_release(s);
 }
 
@@ -517,8 +517,8 @@ static std::string resolve_rtmp_url(DelayStreamData* d) {
         url = get_obs_stream_url();
     }
     if (url.empty()) {
-        const char* manual = obs_data_get_string(s, "rtmp_url_manual");
-        if (manual && *manual) url = manual;
+        const char* configured = obs_data_get_string(s, "rtmp_url");
+        if (configured && *configured) url = configured;
     }
     obs_data_release(s);
     return url;
@@ -529,7 +529,11 @@ static void maybe_fill_cloudflared_path_from_auto(DelayStreamData* d) {
     if (!d || !d->context) return;
     obs_data_t* s = obs_source_get_settings(d->context);
     const char* cur = obs_data_get_string(s, "cloudflared_exe_path");
-    bool is_auto = (!cur || !*cur || _stricmp(cur, "auto") == 0);
+    if (cur && _stricmp(cur, "auto") == 0) {
+        obs_data_set_string(s, "cloudflared_exe_path", "");
+        cur = "";
+    }
+    bool is_auto = (!cur || !*cur);
     if (is_auto) {
         std::string auto_path;
         if (TunnelManager::get_auto_cloudflared_path_if_exists(auto_path)) {
@@ -708,7 +712,7 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     d->is_duplicate_instance = already_exists;
     d->owns_singleton_slot   = !already_exists;
     d->context  = source;
-    maybe_autofill_rtmp_url_manual(settings, false);
+    maybe_autofill_rtmp_url(settings, false);
     if (d->is_duplicate_instance) {
         blog(LOG_WARNING, "[obs-delay-stream] duplicate filter instance created as warning-only");
         d->create_done.store(true);
@@ -873,21 +877,8 @@ static void ds_update(void* data, obs_data_t* settings) {
     bool detail_old = d->detail_mode.exchange(detail_new, std::memory_order_relaxed);
     bool detail_changed = (detail_old != detail_new);
     bool delay_disable = obs_data_get_bool(settings, "delay_disable");
-    if (!obs_data_has_user_value(settings, "delay_disable")) {
-        bool legacy_enabled = obs_data_get_bool(settings, "enabled");
-        delay_disable = !legacy_enabled;
-        obs_data_set_bool(settings, "delay_disable", delay_disable);
-    }
     d->enabled.store(!delay_disable);
     bool paused = obs_data_get_bool(settings, "ws_send_paused");
-    if (!obs_data_has_user_value(settings, "ws_send_paused")) {
-        bool ws_send = obs_data_get_bool(settings, "ws_send_enabled");
-        if (!obs_data_has_user_value(settings, "ws_send_enabled")) {
-            ws_send = obs_data_get_bool(settings, "ws_enabled");
-        }
-        paused = !ws_send;
-        obs_data_set_bool(settings, "ws_send_paused", paused);
-    }
     d->ws_send_enabled.store(!paused);
     {
         int v = (int)obs_data_get_int(settings, "sub_ch_count");
@@ -916,7 +907,7 @@ static void ds_update(void* data, obs_data_t* settings) {
     }
     d->set_stream_id(sid);
     d->router.set_stream_id(sid);
-    maybe_autofill_rtmp_url_manual(settings, false);
+    maybe_autofill_rtmp_url(settings, false);
     {
         int ws_port = (int)obs_data_get_int(settings, "ws_port");
         if (ws_port < 1 || ws_port > 65535) {
@@ -1214,7 +1205,7 @@ static bool cb_rtmp_url_auto_changed(void* priv, obs_properties_t*, obs_property
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d || !settings) return false;
     if (obs_data_get_bool(settings, "rtmp_url_auto")) {
-        maybe_autofill_rtmp_url_manual(settings, true);
+        maybe_autofill_rtmp_url(settings, true);
     }
     request_properties_refresh(d);
     return false;
@@ -1588,7 +1579,7 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
         obs_property_set_enabled(start_p, has_sid);
         obs_property_t* note_p =
             obs_properties_add_text(grp, "ws_server_start_note_sid",
-                T_("WsServerStartNoteSid"), OBS_TEXT_INFO);
+                T_("WsServerStartNoteStreamId"), OBS_TEXT_INFO);
         obs_property_set_visible(note_p, !has_sid);
     }
 
@@ -1658,10 +1649,10 @@ static void add_url_share_group(obs_properties_t* props, DelayStreamData* d) {
     obs_properties_t* grp = obs_properties_create();
     bool via_tunnel = !d->tunnel.url().empty();
     const char* suffix = via_tunnel
-        ? T_("SubCopyAllTunnelSuffix")
-        : T_("SubCopyAllDirectSuffix");
+        ? T_("UrlShareTunnelSuffix")
+        : T_("UrlShareDirectSuffix");
     char copy_label[192];
-    snprintf(copy_label, sizeof(copy_label), "%s%s", T_("SubCopyAll"), suffix);
+    snprintf(copy_label, sizeof(copy_label), "%s%s", T_("UrlShareCopyAll"), suffix);
     obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d);
     obs_properties_add_group(props, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);
 }
@@ -1702,7 +1693,7 @@ static void add_master_group(obs_properties_t* props, DelayStreamData* d) {
     obs_property_t* auto_p = obs_properties_add_bool(grp, "rtmp_url_auto", T_("RtmpUrlAuto"));
     obs_property_set_modified_callback2(auto_p, cb_rtmp_url_auto_changed, d);
     obs_property_t* url_p =
-        obs_properties_add_text(grp, "rtmp_url_manual", T_("RtmpUrlManual"), OBS_TEXT_DEFAULT);
+        obs_properties_add_text(grp, "rtmp_url", T_("RtmpUrl"), OBS_TEXT_DEFAULT);
     obs_property_set_enabled(url_p, !auto_mode);
     obs_property_t* rtmp_p = obs_properties_add_button2(
         grp, "rtmp_measure_btn",
@@ -1735,15 +1726,15 @@ static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
     {
         char offset_info[256];
         snprintf(offset_info, sizeof(offset_info),
-            T_("SubOffsetInfoFmt"), d->sub_offset_ms);
+            T_("GlobalOffsetInfoFmt"), d->sub_offset_ms);
         obs_properties_add_text(grp, "sub_offset_info", offset_info, OBS_TEXT_INFO);
     }
     obs_property_t* op = obs_properties_add_float_slider(
         grp, "sub_offset_ms",
-        T_("SubOffsetLabel"), -2000.0, 5000.0, 10.0);
+        T_("GlobalOffsetLabel"), -2000.0, 5000.0, 10.0);
     obs_property_float_set_suffix(op, " ms");
     obs_properties_add_group(props, "grp_offset",
-        T_("GroupSubOffset"), OBS_GROUP_NORMAL, grp);
+        T_("GroupGlobalOffset"), OBS_GROUP_NORMAL, grp);
 }
 
 // チャンネルの測定状態に応じてボタン/結果表示を切り替える。
@@ -1913,7 +1904,7 @@ static obs_properties_t* ds_get_properties(void* data) {
     }
 
     // 自動取得ON時は、プロパティ表示のたびに最新の配信設定URLへ更新する。
-    maybe_autofill_rtmp_url_manual_from_source(d->context, true);
+    maybe_autofill_rtmp_url_from_source(d->context, true);
 
     maybe_fill_cloudflared_path_from_auto(d);
 
@@ -1944,12 +1935,9 @@ static obs_properties_t* ds_get_properties(void* data) {
 
 // 各設定項目のデフォルト値を定義する。
 static void ds_get_defaults(obs_data_t* settings) {
-    obs_data_set_default_bool  (settings, "enabled",               true);
     obs_data_set_default_bool  (settings, "delay_disable",         false);
     obs_data_set_default_bool  (settings, "detail_mode",           false);
     obs_data_set_default_bool  (settings, "ws_send_paused",        false);
-    obs_data_set_default_bool  (settings, "ws_send_enabled",       true);
-    obs_data_set_default_bool  (settings, "ws_enabled",            true);
     obs_data_set_default_int   (settings, "sub_ch_count",          1);
     // Ch.1 既定名を A にするため、次の自動払い出しは B から開始する。
     obs_data_set_default_int   (settings, "sub_memo_auto_counter", 1);
@@ -1960,8 +1948,8 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_double(settings, "master_delay_ms",       0.0);
     obs_data_set_default_double(settings, "sub_offset_ms",         0.0);
     obs_data_set_default_bool  (settings, "rtmp_url_auto",         true);
-    obs_data_set_default_string(settings, "rtmp_url_manual",       "");
-    obs_data_set_default_string(settings, "cloudflared_exe_path",  "auto");
+    obs_data_set_default_string(settings, "rtmp_url",              "");
+    obs_data_set_default_string(settings, "cloudflared_exe_path",  "");
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
         obs_data_set_default_double(settings, key, 0.0);
