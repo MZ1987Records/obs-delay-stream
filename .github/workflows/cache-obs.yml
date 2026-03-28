@@ -1,0 +1,111 @@
+name: cache-obs
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"  # 毎週日曜 02:00 UTC
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  cache-obs:
+    runs-on: windows-latest
+    env:
+      OBS_STUDIO_REF: master
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect Windows SDK
+        id: sdk
+        shell: pwsh
+        run: |
+          $sdkRoot = "C:\\Program Files (x86)\\Windows Kits\\10\\Lib"
+          $dirs = Get-ChildItem $sdkRoot -Directory | Select-Object -ExpandProperty Name
+          if (-Not $dirs) { throw "Windows SDK not found: $sdkRoot" }
+          $ver = $dirs | ForEach-Object { [version]$_ } | Sort-Object -Descending | Select-Object -First 1
+          $verStr = $ver.ToString()
+          Add-Content $env:GITHUB_ENV "WINSDK_VERSION=$verStr"
+          Add-Content $env:GITHUB_OUTPUT "version=$verStr"
+
+      - name: Resolve OBS ref
+        id: obs
+        shell: pwsh
+        run: |
+          $sha = (git ls-remote https://github.com/obsproject/obs-studio.git "refs/heads/$env:OBS_STUDIO_REF" | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+          if (-Not $sha) { throw "Failed to resolve OBS ref: $env:OBS_STUDIO_REF" }
+          Add-Content $env:GITHUB_ENV "OBS_STUDIO_SHA=$sha"
+          Add-Content $env:GITHUB_OUTPUT "sha=$sha"
+          Write-Host "OBS ref $env:OBS_STUDIO_REF => $sha"
+
+      - name: Restore OBS build cache
+        id: obs-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/obs-studio/build_x64
+          key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
+          restore-keys: |
+            ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-
+            ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-
+            ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-
+            ${{ runner.os }}-obs-build-
+
+      - name: Prepare third_party
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force third_party | Out-Null
+
+      - name: Clone OBS Studio
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "third_party/obs-studio")) {
+            git clone --filter=blob:none https://github.com/obsproject/obs-studio.git third_party/obs-studio
+          }
+          Set-Location third_party/obs-studio
+          git fetch --tags origin
+          git checkout --force $env:OBS_STUDIO_SHA
+          git submodule update --init --recursive --depth 1
+
+      - name: Patch OBS SDK version
+        shell: pwsh
+        run: |
+          Set-Location third_party/obs-studio
+          $presetPath = "CMakePresets.json"
+          if (-Not (Test-Path $presetPath)) { throw "CMakePresets.json not found." }
+          $raw = Get-Content $presetPath -Raw
+          $patched = $raw.Replace("10.0.22621.0", $env:WINSDK_VERSION)
+          if ($raw -eq $patched) { Write-Host "No preset SDK version to replace." }
+          $patched | Set-Content $presetPath -Encoding UTF8
+
+      - name: Check OBS build outputs
+        id: obs-build-check
+        shell: pwsh
+        run: |
+          $libobs = "third_party/obs-studio/build_x64/libobs/RelWithDebInfo/obs.lib"
+          $exactCacheHit = '${{ steps.obs-cache.outputs.cache-hit }}' -eq 'true'
+          if ($exactCacheHit -and (Test-Path $libobs)) {
+            Write-Host "OBS build cache exact hit: skipping build"
+            Add-Content $env:GITHUB_OUTPUT "skip=true"
+          } else {
+            if (Test-Path $libobs) {
+              Write-Host "OBS cache restored by fallback key. Running incremental OBS build."
+            } else {
+              Write-Host "OBS build cache miss: running full build"
+            }
+            Add-Content $env:GITHUB_OUTPUT "skip=false"
+          }
+
+      - name: Build OBS Studio
+        if: steps.obs-build-check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          Set-Location third_party/obs-studio
+          cmake --preset windows-x64
+          cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
+
+      - name: Save OBS build cache
+        if: success() && steps.obs-build-check.outputs.skip != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/obs-studio/build_x64
+          key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
