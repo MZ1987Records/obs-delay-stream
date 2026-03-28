@@ -19,7 +19,7 @@
  *   OBS → Browser: {"type":"ping","seq":N,"t":T}
  *   Browser → OBS: {"type":"pong","seq":N}
  *   OBS → Browser: {"type":"latency_result","avg_rtt":X,"one_way":Y,"min":A,"max":B,"samples":N}
- *   OBS → Browser: {"type":"apply_delay","ms":X}
+ *   OBS → Browser: {"type":"apply_delay","ms":X,"reason":"auto_measure|manual_adjust"}
  *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N,"memo":"..."}  ← 接続直後に送信
  *   OBS → Browser: {"type":"memo","ch":N,"memo":"..."}  ← メモ変更通知
  *   Browser → OBS: {"type":"audio_codec","mode":"pcm"}  ← Opus不可時のPCM要求
@@ -136,6 +136,8 @@ struct ChannelState {
 
     // 最後に適用された遅延 (ms)。負値=未設定
     double                           last_applied_delay{-1.0};
+    // 適用理由 ("auto_measure" / "manual_adjust")
+    std::string                      last_applied_reason;
 
     // コールバック (計測完了時)
     std::function<void(const std::string& stream_id, int ch, LatencyResult)> on_result;
@@ -218,7 +220,11 @@ public:
             std::lock_guard<std::mutex> lk(mtx_);
             for (auto& [key, cs] : ch_map_) {
                 if (cs.last_result.valid || cs.last_applied_delay >= 0.0)
-                    ch_cache_[key] = { cs.last_result, cs.last_applied_delay };
+                    ch_cache_[key] = {
+                        cs.last_result,
+                        cs.last_applied_delay,
+                        cs.last_applied_reason
+                    };
             }
             conn_map_.clear();
             ch_map_.clear();
@@ -435,14 +441,18 @@ public:
     }
 
     // 遅延反映通知
-    void notify_apply_delay(int ch, double ms) {
+    void notify_apply_delay(int ch, double ms, const char* reason = "auto_measure") {
+        const char* use_reason = (reason && *reason) ? reason : "auto_measure";
         {
             std::lock_guard<std::mutex> lk(mtx_);
             auto& cs = ch_map_[make_key(stream_id_, ch)];
             cs.last_applied_delay = ms;
+            cs.last_applied_reason = use_reason;
         }
-        char buf[64];
-        snprintf(buf, sizeof(buf), "{\"type\":\"apply_delay\",\"ms\":%.1f}", ms);
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
+                 ms, use_reason);
         broadcast_text(stream_id_, ch, buf);
     }
 
@@ -929,6 +939,7 @@ private:
         size_t count = 0;
         LatencyResult cached_result;
         double cached_delay = -1.0;
+        std::string cached_delay_reason;
         std::string memo;
         {
             std::lock_guard<std::mutex> lk(mtx_);
@@ -941,6 +952,7 @@ private:
                 if (it != ch_cache_.end()) {
                     cs.last_result        = it->second.last_result;
                     cs.last_applied_delay = it->second.last_applied_delay;
+                    cs.last_applied_reason = it->second.last_applied_reason;
                 }
             }
             cs.conns.insert(h);
@@ -948,6 +960,7 @@ private:
             cb = on_conn_change;
             cached_result = cs.last_result;
             cached_delay  = cs.last_applied_delay;
+            cached_delay_reason = cs.last_applied_reason;
             if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
         }
         if (cb) cb(sid, ch, count);
@@ -973,10 +986,11 @@ private:
             try { srv->send(h, std::string(buf), websocketpp::frame::opcode::text); }
             catch (...) {}
         }
-        if (cached_delay >= 0.0) {
-            char buf[64];
+        if (cached_delay >= 0.0 && cached_delay_reason == "auto_measure") {
+            char buf[160];
             snprintf(buf, sizeof(buf),
-                "{\"type\":\"apply_delay\",\"ms\":%.1f}", cached_delay);
+                "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
+                cached_delay, cached_delay_reason.c_str());
             try { srv->send(h, std::string(buf), websocketpp::frame::opcode::text); }
             catch (...) {}
         }
@@ -1314,6 +1328,7 @@ private:
     struct ChannelCache {
         LatencyResult last_result;
         double        last_applied_delay{-1.0};
+        std::string   last_applied_reason;
     };
     std::map<std::string, ChannelCache> ch_cache_;
 

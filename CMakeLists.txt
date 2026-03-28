@@ -43,6 +43,8 @@ find_package(libobs REQUIRED HINTS "${OBS_DIR}/build_x64/libobs" "${OBS_DIR}/bui
 add_library(obs-delay-stream MODULE src/plugin-main.cpp)
 
 # ---- Embed receiver/index.html into the plugin ----
+# Keep runtime placeholders as literals. They are replaced in plugin-main.cpp.
+set(BUILD_TIMESTAMP "@BUILD_TIMESTAMP@")
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/receiver/index.html"
                "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html" @ONLY)
 set(RECEIVER_HTML_IN  "${CMAKE_CURRENT_BINARY_DIR}/receiver/index.html")

@@ -266,7 +266,20 @@ static std::string read_file_to_string(const char* path) {
                        std::istreambuf_iterator<char>());
 }
 
-// receiver/index.html をモジュール配下→相対パス→埋め込みの順で読み込む。
+static constexpr const char* kReceiverBuildTimestamp = __DATE__ " " __TIME__;
+
+// 文字列中のトークンをすべて置換する。
+static void replace_all(std::string& s, const std::string& from, const std::string& to) {
+    if (from.empty()) return;
+    size_t pos = 0;
+    while ((pos = s.find(from, pos)) != std::string::npos) {
+        s.replace(pos, from.length(), to);
+        pos += to.length();
+    }
+}
+
+// receiver/index.html をモジュール配下→相対パス→埋め込みの順で読み込み、
+// デバッグ用トークンを埋め込む。
 static std::string load_receiver_index_html() {
     std::string html;
     char* mod_path = obs_module_file("receiver/index.html");
@@ -280,6 +293,8 @@ static std::string load_receiver_index_html() {
     if (html.empty()) {
         html = std::string(kReceiverIndexHtml);
     }
+    replace_all(html, "@PROJECT_VERSION@", PLUGIN_VERSION);
+    replace_all(html, "@BUILD_TIMESTAMP@", kReceiverBuildTimestamp);
     return html;
 }
 
@@ -779,6 +794,9 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
         auto html = load_receiver_index_html();
         if (html.empty()) {
             blog(LOG_WARNING, "[obs-delay-stream] receiver/index.html not found; HTTP top page disabled");
+        } else {
+            blog(LOG_INFO, "[obs-delay-stream] receiver html loaded: build=%s",
+                 kReceiverBuildTimestamp);
         }
         d->router.set_http_index_html(std::move(html));
         auto root = get_receiver_root_dir();
@@ -1140,7 +1158,8 @@ static bool cb_sub_adjust_changed(void* priv, obs_properties_t*, obs_property_t*
     d->router.notify_apply_delay(
         i,
         calc_effective_sub_delay_value_ms(
-            d, d->sub[i].delay_ms, d->sub[i].adjust_ms));
+            d, d->sub[i].delay_ms, d->sub[i].adjust_ms),
+        "manual_adjust");
     if (changed) {
         request_properties_refresh(d, "cb_sub_adjust_changed");
     }
@@ -1158,7 +1177,8 @@ static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
     d->router.notify_apply_delay(
         i,
         calc_effective_sub_delay_value_ms(
-            d, d->sub[i].delay_ms, d->sub[i].adjust_ms));
+            d, d->sub[i].delay_ms, d->sub[i].adjust_ms),
+        "auto_measure");
 }
 // 全チャンネルのURLと名前の一覧をMarkdown箇条書き形式でクリップボードへコピーする。
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {

@@ -62,22 +62,22 @@
         <div class="column is-flex">
           <article class="message is-flex is-flex-direction-column is-flex-grow-1">
             <div class="message-header">
-              <p><span data-i18n="ui.connectionSettings">接続設定</span> <span class="label-hint" data-i18n="ui.connectionSettingsNote">（通常は変更不要）</span></p>
+              <p class="no-wrap"><span data-i18n="ui.connectionSettings">接続設定</span> <span class="label-hint" data-i18n="ui.connectionSettingsNote">（通常は変更不要）</span></p>
             </div>
             <div class="message-body is-flex-grow-1">
               <div class="block">
                 <div class="columns is-mobile is-variable is-2">
-                  <div class="column is-8">
+                  <div class="column is-7">
                     <div class="field">
-                      <label class="label" for="sidInput"><span data-i18n="ui.streamId">配信ID</span> <span class="label-hint" data-i18n="ui.streamIdHint">(半角英数字)</span></label>
+                      <label class="label no-wrap" for="sidInput"><span data-i18n="ui.streamId">配信ID</span> <span class="label-hint" data-i18n="ui.streamIdHint">(半角英数字)</span></label>
                       <div class="control">
                         <input class="input" type="text" id="sidInput" placeholder="myshow2024" data-i18n-placeholder="ui.streamIdPlaceholder">
                       </div>
                     </div>
                   </div>
-                  <div class="column is-4">
+                  <div class="column is-5">
                     <div class="field">
-                      <label class="label" for="chInput"><span data-i18n="ui.chNumber">CH番号</span> <span class="label-hint" id="chHint"></span></label>
+                      <label class="label no-wrap" for="chInput"><span data-i18n="ui.chNumber">CH番号</span> <span class="label-hint" id="chHint"></span></label>
                       <div class="control">
                         <input class="input has-text-centered" type="number" id="chInput" min="1" value="1">
                       </div>
@@ -405,12 +405,56 @@
       lng: activeLang,
       fallbackLng: 'ja',
       resources: I18N_RESOURCES,
-      interpolation: { escapeValue: false }
+      interpolation: { escapeValue: false },
+      returnNull: false,
+      returnEmptyString: false,
+      initImmediate: false
     });
+    try {
+      console.info('[obs-delay-stream] receiver build:', '@BUILD_TIMESTAMP@');
+    } catch { }
     document.documentElement.lang = activeLang;
 
+    function resolveLocalText(lang, key) {
+      const root = I18N_RESOURCES[lang] && I18N_RESOURCES[lang].translation;
+      if (!root) return undefined;
+      const parts = String(key || '').split('.');
+      let cur = root;
+      for (const p of parts) {
+        if (!cur || typeof cur !== 'object' || !(p in cur)) return undefined;
+        cur = cur[p];
+      }
+      return (typeof cur === 'string') ? cur : undefined;
+    }
+
+    function interpolateText(text, opts) {
+      const options = opts || {};
+      return String(text).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, k) => {
+        const v = options[k];
+        return (v === undefined || v === null) ? '' : String(v);
+      });
+    }
+
     function t(key, opts) {
-      return i18next.t(key, opts || {});
+      const options = opts || {};
+      const primary = i18next.t(key, options);
+      if (typeof primary === 'string' && primary !== '' && primary !== 'undefined') return primary;
+
+      const secondary = i18next.t(key, { ...options, lng: 'ja', defaultValue: key });
+      if (typeof secondary === 'string' && secondary !== '' && secondary !== 'undefined') return secondary;
+
+      const local = resolveLocalText(activeLang, key) ?? resolveLocalText('ja', key);
+      if (typeof local === 'string') return interpolateText(local, options);
+
+      return String(key);
+    }
+
+    function tr(key, opts, fallbackJa, fallbackEn) {
+      const v = t(key, opts);
+      if (typeof v === 'string' && v !== '' && v !== 'undefined') return v;
+      const fb = (activeLang === 'en') ? fallbackEn : fallbackJa;
+      if (typeof fb === 'string' && fb !== '') return interpolateText(fb, opts || {});
+      return String(key);
     }
 
     function buildLanguageHref(lang) {
@@ -1371,7 +1415,18 @@
           break;
 
         case 'apply_delay':
-          showApplied(msg.ms);
+          {
+            const reason = (typeof msg.reason === 'string') ? msg.reason : '';
+            if (reason === 'manual_adjust') break;
+            if (reason === 'auto_measure') {
+              showApplied(msg.ms);
+              break;
+            }
+            // 旧サーバ互換: reason未送信時は「計測→適用待ち」の文脈だけ表示
+            if (document.getElementById('waitingApply')) {
+              showApplied(msg.ms);
+            }
+          }
           break;
       }
     }
@@ -1450,9 +1505,14 @@
     function updateCountdown() {
       const labelEl = document.getElementById('syncBtnLabel');
       if (syncTickTimer && currentSyncInterval > 0) {
-        labelEl.textContent = t('button.resyncCountdown', { sec: syncCountdown });
+        labelEl.textContent = tr(
+          'button.resyncCountdown',
+          { sec: syncCountdown },
+          '再同期（あと{{sec}}秒）',
+          'Resync ({{sec}}s)'
+        );
       } else {
-        labelEl.textContent = t('button.resync');
+        labelEl.textContent = tr('button.resync', {}, '再同期', 'Resync');
       }
     }
 
@@ -1460,10 +1520,22 @@
     // 計測UI
     // ============================================================
     function showMeasuring(n) {
-      setStatus(t('status.measuring', { current: n, total: PING_SAMPLES }), 'mea');
+      const statusText = tr(
+        'status.measuring',
+        { current: n, total: PING_SAMPLES },
+        '遅延計測中... ({{current}}/{{total}})',
+        'Measuring latency... ({{current}}/{{total}})'
+      );
+      const measuringText = tr(
+        'latency.measuring',
+        { current: n, total: PING_SAMPLES },
+        '計測中 ({{current}} / {{total}} ping)',
+        'Measuring ({{current}} / {{total}} ping)'
+      );
+      setStatus(statusText, 'mea');
       document.getElementById('latencyContent').innerHTML = `
     <div class="measuring-box">
-      ${t('latency.measuring', { current: n, total: PING_SAMPLES })}<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+      ${measuringText}<span class="dots"><span>.</span><span>.</span><span>.</span></span>
       <progress class="progress is-small is-warning" style="margin-top:6px" value="${n}" max="${PING_SAMPLES}">${n}</progress>
     </div>`;
     }
@@ -1471,44 +1543,64 @@
     function showLatencyResult(r) {
       setStatus(t('status.receiving'), 'ok');
       const colCls = r.avg_rtt < 50 ? 'has-text-success' : r.avg_rtt < 150 ? 'has-text-warning' : 'has-text-danger';
-      const lbl = r.avg_rtt < 50 ? t('quality.good') : r.avg_rtt < 150 ? t('quality.normal') : t('quality.high');
+      const lbl = r.avg_rtt < 50
+        ? tr('quality.good', {}, '良好', 'Good')
+        : r.avg_rtt < 150
+          ? tr('quality.normal', {}, '普通', 'Normal')
+          : tr('quality.high', {}, '高遅延', 'High latency');
+      const estimatedOneWay = tr('latency.estimatedOneWay', {}, '推定片道遅延 (RTT÷2)', 'Estimated one-way latency (RTT/2)');
+      const avgRoundTrip = tr('latency.averageRoundTrip', { label: lbl }, '平均往復遅延 ({{label}})', 'Average round-trip latency ({{label}})');
+      const minRtt = tr('latency.minRtt', {}, '最小RTT', 'Min RTT');
+      const maxRtt = tr('latency.maxRtt', {}, '最大RTT', 'Max RTT');
+      const waitingApply = tr(
+        'latency.waitingApply',
+        {},
+        'OBSが遅延設定を反映するまでお待ちください。',
+        'Please wait while OBS applies delay settings.'
+      );
       document.getElementById('latencyContent').innerHTML = `
     <div class="latency-grid">
       <div class="metric has-text-centered">
         <span class="val ${colCls}">${r.one_way.toFixed(1)}</span>
         <span class="unit has-text-grey">ms</span>
-        <div class="lbl has-text-grey">${t('latency.estimatedOneWay')}</div>
+        <div class="lbl has-text-grey">${estimatedOneWay}</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val ${colCls}">${r.avg_rtt.toFixed(1)}</span>
         <span class="unit has-text-grey">ms RTT</span>
-        <div class="lbl has-text-grey">${t('latency.averageRoundTrip', { label: lbl })}</div>
+        <div class="lbl has-text-grey">${avgRoundTrip}</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val" style="color:#888">${r.min.toFixed(1)}</span>
         <span class="unit has-text-grey">ms</span>
-        <div class="lbl has-text-grey">${t('latency.minRtt')}</div>
+        <div class="lbl has-text-grey">${minRtt}</div>
       </div>
       <div class="metric has-text-centered">
         <span class="val" style="color:#888">${r.max.toFixed(1)}</span>
         <span class="unit has-text-grey">ms</span>
-        <div class="lbl has-text-grey">${t('latency.maxRtt')}</div>
+        <div class="lbl has-text-grey">${maxRtt}</div>
       </div>
     </div>
     <div class="notification is-info py-3 px-4 mt-3" id="waitingApply">
       <i class="fas fa-info-circle mr-1"></i>
-      ${t('latency.waitingApply')}
+      ${waitingApply}
     </div>`;
       document.getElementById('latencyCard').classList.add('has-background-info-light');
     }
 
     function showApplied(ms) {
-      const w = document.getElementById('waitingApply');
-      if (w) w.remove();
+      document.querySelectorAll('#waitingApply').forEach((el) => el.remove());
+      document.querySelectorAll('#appliedDelayNote').forEach((el) => el.remove());
+      const appliedText = tr(
+        'latency.applied',
+        { ms: parseFloat(ms).toFixed(1) },
+        'OBSがサブch遅延を <strong>{{ms}} ms</strong> に自動設定しました',
+        'OBS auto-set sub-channel delay to <strong>{{ms}} ms</strong>'
+      );
       document.getElementById('latencyContent').innerHTML +=
-        `<div class="notification is-success py-3 px-4 mt-3">
+        `<div class="notification is-success py-3 px-4 mt-3" id="appliedDelayNote">
       <i class="fas fa-check-circle mr-1"></i>
-      ${t('latency.applied', { ms: parseFloat(ms).toFixed(1) })}
+      ${appliedText}
     </div>`;
     }
 

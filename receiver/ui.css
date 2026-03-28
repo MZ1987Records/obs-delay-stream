@@ -113,6 +113,10 @@ body {
   font-size: .85em;
 }
 
+.no-wrap {
+  white-space: nowrap;
+}
+
 .message {
   background: transparent;
 }
