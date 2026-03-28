@@ -66,6 +66,7 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory "${RECEIVER_BUILD_DIR}"
   COMMAND ${CMAKE_COMMAND} -E echo "Building receiver assets -> ${RECEIVER_BUILD_DIR}"
   COMMAND ${CMAKE_COMMAND} -E echo "Using npm command: ${NPM_EXECUTABLE}"
+  COMMAND "${NPM_EXECUTABLE}" install
   COMMAND ${CMAKE_COMMAND} -E env
     "RECEIVER_BUILD_OUT_DIR=${RECEIVER_BUILD_DIR}"
     "RECEIVER_PROJECT_VERSION=${PROJECT_VERSION}"

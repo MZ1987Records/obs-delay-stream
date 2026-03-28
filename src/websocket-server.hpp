@@ -286,15 +286,28 @@ public:
         std::vector<float> preprocessed;
         preprocess_audio(data, frames, channels, tx_data, tx_channels, preprocessed);
 
+        // PCM ダウンサンプリング
+        std::vector<float> downsampled;
+        size_t tx_frames = frames;
+        uint32_t tx_sample_rate = sample_rate;
+        {
+            const int ds = pcm_downsample_ratio_.load(std::memory_order_relaxed);
+            if (ds >= 2 && tx_frames >= (size_t)ds) {
+                downsample_pcm(tx_data, tx_frames, tx_channels, ds, downsampled, tx_frames);
+                tx_data = downsampled.data();
+                tx_sample_rate = sample_rate / (uint32_t)ds;
+            }
+        }
+
         // パケットを構築（PCM）
-        size_t samples = frames * tx_channels;
+        size_t samples = tx_frames * tx_channels;
         size_t pcm_bytes = samples * sizeof(int16_t);
         auto pkt = std::make_shared<std::string>(16 + pcm_bytes, '\0');
         uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
         hdr[0] = MAGIC_AUDI;
-        hdr[1] = sample_rate;
+        hdr[1] = tx_sample_rate;
         hdr[2] = tx_channels;
-        hdr[3] = static_cast<uint32_t>(frames);
+        hdr[3] = static_cast<uint32_t>(tx_frames);
         int16_t* dst = reinterpret_cast<int16_t*>(&(*pkt)[16]);
         for (size_t i = 0; i < samples; ++i) {
             float v = tx_data[i];
@@ -454,6 +467,11 @@ public:
         }
     }
 
+    void set_pcm_downsample_ratio(int ratio) {
+        if (!is_valid_pcm_downsample_ratio(ratio)) ratio = 1;
+        pcm_downsample_ratio_.store(ratio, std::memory_order_relaxed);
+    }
+
     void set_http_root_dir(std::string dir) {
         std::lock_guard<std::mutex> lk(mtx_);
         http_root_dir_ = std::move(dir);
@@ -494,6 +512,28 @@ private:
     }
     static bool is_valid_opus_sample_rate(int sample_rate) {
         return websocket_server_detail::is_valid_opus_sample_rate(sample_rate);
+    }
+    static bool is_valid_pcm_downsample_ratio(int r) {
+        return websocket_server_detail::is_valid_pcm_downsample_ratio(r);
+    }
+
+    // ボックスフィルタ（平均）によるダウンサンプリング
+    // エイリアス周波数(入力Nyquist/factor の倍数)に対してフィルタのヌルが一致するため
+    // 整数比のダウンサンプリングに適している。
+    static void downsample_pcm(const float* in, size_t in_frames, uint32_t channels,
+                                int factor, std::vector<float>& out, size_t& out_frames)
+    {
+        out_frames = in_frames / (size_t)factor;
+        out.resize(out_frames * channels);
+        const float inv = 1.0f / (float)factor;
+        for (size_t f = 0; f < out_frames; ++f) {
+            for (uint32_t c = 0; c < channels; ++c) {
+                float sum = 0.0f;
+                for (int k = 0; k < factor; ++k)
+                    sum += in[(f * (size_t)factor + (size_t)k) * channels + c];
+                out[f * channels + c] = sum * inv;
+            }
+        }
     }
 
     static float quantize_sample(float v, int bits) {
@@ -1114,6 +1154,7 @@ private:
     std::atomic<int>   opus_target_sample_rate_{0}; // 0: source sample rate
     std::atomic<int>   audio_quantization_bits_{8};
     std::atomic<bool>  audio_mono_{true};
+    std::atomic<int>   pcm_downsample_ratio_{1}; // 1: そのまま, 2: 1/2, 4: 1/4
     std::vector<OpusEnc> opus_;
     int active_ch_max_ = MAX_SUB_CH;
 

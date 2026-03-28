@@ -159,4 +159,8 @@ inline bool is_valid_opus_sample_rate(int sample_rate) {
     }
 }
 
+inline bool is_valid_pcm_downsample_ratio(int r) {
+    return r == 1 || r == 2 || r == 4;
+}
+
 } // namespace websocket_server_detail

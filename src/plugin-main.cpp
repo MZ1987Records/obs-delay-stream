@@ -281,6 +281,13 @@ static int normalize_quantization_bits(int v) {
     }
 }
 
+static int normalize_pcm_downsample_ratio(int v) {
+    switch (v) {
+    case 1: case 2: case 4: return v;
+    default: return 1;
+    }
+}
+
 // ファイル全体を文字列として読み込む。
 static std::string read_file_to_string(const char* path) {
     if (!path || !*path) return "";
@@ -1062,6 +1069,13 @@ static void ds_update(void* data, obs_data_t* settings) {
         d->router.set_audio_quantization_bits(quant_bits);
     }
     d->router.set_audio_mono(obs_data_get_bool(settings, "audio_mono"));
+    {
+        int ratio = normalize_pcm_downsample_ratio(
+            (int)obs_data_get_int(settings, "pcm_downsample_ratio"));
+        if (ratio != (int)obs_data_get_int(settings, "pcm_downsample_ratio"))
+            obs_data_set_int(settings, "pcm_downsample_ratio", ratio);
+        d->router.set_pcm_downsample_ratio(ratio);
+    }
     const char* raw = obs_data_get_string(settings, "stream_id");
     std::string sid = raw ? sanitize_stream_id(raw) : "";
     if (sid.empty()) {
@@ -1521,6 +1535,9 @@ static void apply_codec_option_visibility(obs_properties_t* props, obs_data_t* s
     if (auto* p = obs_properties_get(props, "audio_mono")) {
         obs_property_set_visible(p, show_pcm_options);
     }
+    if (auto* p = obs_properties_get(props, "pcm_downsample_ratio")) {
+        obs_property_set_visible(p, show_pcm_options);
+    }
 }
 
 static bool cb_audio_codec_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
@@ -1807,6 +1824,12 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     obs_property_list_add_int(quant_bits_p, "16", 16);
     obs_property_t* mono_mix_p =
         obs_properties_add_bool(grp, "audio_mono", T_("AudioMono"));
+    obs_property_t* pcm_ds_ratio_p = obs_properties_add_list(
+        grp, "pcm_downsample_ratio", T_("PcmDownsampleRatio"),
+        OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+    obs_property_list_add_int(pcm_ds_ratio_p, T_("PcmDownsampleRatioNone"), 1);
+    obs_property_list_add_int(pcm_ds_ratio_p, "1/2", 2);
+    obs_property_list_add_int(pcm_ds_ratio_p, "1/4", 4);
 
     if (ws_running) {
         obs_property_set_enabled(codec_p, false);
@@ -1814,6 +1837,7 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
         obs_property_set_enabled(opus_sample_rate_p, false);
         obs_property_set_enabled(quant_bits_p, false);
         obs_property_set_enabled(mono_mix_p, false);
+        obs_property_set_enabled(pcm_ds_ratio_p, false);
     }
 
     if (d->context) {
@@ -2207,6 +2231,7 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_int   (settings, "opus_sample_rate",      0);
     obs_data_set_default_int   (settings, "quantization_bits",     8);
     obs_data_set_default_bool  (settings, "audio_mono",            true);
+    obs_data_set_default_int   (settings, "pcm_downsample_ratio",  1);
     obs_data_set_default_int   (settings, "ws_port",               WS_PORT);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");
