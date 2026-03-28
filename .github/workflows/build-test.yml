@@ -169,10 +169,8 @@ jobs:
           )
           $requiredFiles = @(
             "index.html",
-            "receiver.js",
-            "ui.css",
-            "third_party/i18next/i18next.min.js",
-            "third_party/i18next/LICENSE"
+            "opus-decoder/opus-decoder.min.js",
+            "opus-decoder/LICENSE"
           )
           foreach ($root in $receiverRoots) {
             foreach ($rel in $requiredFiles) {
@@ -181,6 +179,10 @@ jobs:
                 throw "Missing receiver asset: $path"
               }
             }
+            $jsFiles = Get-ChildItem (Join-Path $root "assets") -Filter "*.js" -ErrorAction SilentlyContinue
+            if (-Not $jsFiles) { throw "No JS bundle found under: $root/assets" }
+            $cssFiles = Get-ChildItem (Join-Path $root "assets") -Filter "*.css" -ErrorAction SilentlyContinue
+            if (-Not $cssFiles) { throw "No CSS bundle found under: $root/assets" }
           }
 
       - name: Upload build artifact
