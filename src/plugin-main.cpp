@@ -2231,7 +2231,7 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_int   (settings, "opus_sample_rate",      0);
     obs_data_set_default_int   (settings, "quantization_bits",     8);
     obs_data_set_default_bool  (settings, "audio_mono",            true);
-    obs_data_set_default_int   (settings, "pcm_downsample_ratio",  1);
+    obs_data_set_default_int   (settings, "pcm_downsample_ratio",  4);
     obs_data_set_default_int   (settings, "ws_port",               WS_PORT);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");

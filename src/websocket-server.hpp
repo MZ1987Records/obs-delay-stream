@@ -517,22 +517,34 @@ private:
         return websocket_server_detail::is_valid_pcm_downsample_ratio(r);
     }
 
-    // ボックスフィルタ（平均）によるダウンサンプリング
-    // エイリアス周波数(入力Nyquist/factor の倍数)に対してフィルタのヌルが一致するため
-    // 整数比のダウンサンプリングに適している。
+    // 三角形フィルタ [0.25, 0.5, 0.25] による 1/2 間引きを段階適用
+    // factor=2: 1 段、factor=4: 2 段カスケード（等価 7 タップ FIR）
+    // ボックスフィルタ比: 9kHz -10dB→-20dB、15kHz -11dB→-27dB
+    // 境界 (f=0) は先頭サンプルでクランプするが影響は 1 サンプルのみ
     static void downsample_pcm(const float* in, size_t in_frames, uint32_t channels,
                                 int factor, std::vector<float>& out, size_t& out_frames)
     {
-        out_frames = in_frames / (size_t)factor;
-        out.resize(out_frames * channels);
-        const float inv = 1.0f / (float)factor;
-        for (size_t f = 0; f < out_frames; ++f) {
-            for (uint32_t c = 0; c < channels; ++c) {
-                float sum = 0.0f;
-                for (int k = 0; k < factor; ++k)
-                    sum += in[(f * (size_t)factor + (size_t)k) * channels + c];
-                out[f * channels + c] = sum * inv;
+        auto decimate2 = [channels](const float* src, size_t n_in, std::vector<float>& dst) {
+            const size_t n_out = n_in / 2;
+            dst.resize(n_out * channels);
+            for (size_t f = 0; f < n_out; ++f) {
+                for (uint32_t c = 0; c < channels; ++c) {
+                    const float prev = src[(f > 0 ? f * 2 - 1 : 0) * channels + c];
+                    const float curr = src[ f * 2          * channels + c];
+                    const float next = src[(f * 2 + 1)     * channels + c];
+                    dst[f * channels + c] = 0.25f * prev + 0.5f * curr + 0.25f * next;
+                }
             }
+        };
+
+        if (factor == 4) {
+            std::vector<float> tmp;
+            decimate2(in, in_frames, tmp);
+            decimate2(tmp.data(), in_frames / 2, out);
+            out_frames = in_frames / 4;
+        } else { // factor == 2
+            decimate2(in, in_frames, out);
+            out_frames = in_frames / 2;
         }
     }
 
