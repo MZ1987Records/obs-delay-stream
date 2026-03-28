@@ -1,12 +1,7 @@
 name: build-test
 
 on:
-  push:
-    branches:
-      - "**"
-    tags-ignore:
-      - "v*.*.*"
-  pull_request:
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
