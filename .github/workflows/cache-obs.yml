@@ -42,7 +42,9 @@ jobs:
         id: obs-cache
         uses: actions/cache/restore@v4
         with:
-          path: third_party/obs-studio/build_x64
+          path: |
+            third_party/obs-studio/build_x64
+            third_party/obs-studio/.deps
           key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
           restore-keys: |
             ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-
@@ -107,5 +109,7 @@ jobs:
         if: success() && steps.obs-build-check.outputs.skip != 'true'
         uses: actions/cache/save@v4
         with:
-          path: third_party/obs-studio/build_x64
+          path: |
+            third_party/obs-studio/build_x64
+            third_party/obs-studio/.deps
           key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
