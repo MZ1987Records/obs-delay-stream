@@ -22,7 +22,7 @@ extern "C" {
 }
 #endif
 
-#include "websocket-server-utils.hpp"
+#include "stream-router-utils.hpp"
 
 namespace websocket_server_detail {
 

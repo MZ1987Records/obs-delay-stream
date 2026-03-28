@@ -40,7 +40,13 @@ find_package(Threads REQUIRED)
 find_package(libobs REQUIRED HINTS "${OBS_DIR}/build_x64/libobs" "${OBS_DIR}/build_x64" "${OBS_DIR}/cmake")
 
 # ---- Plugin target ----
-add_library(obs-delay-stream MODULE src/plugin-main.cpp)
+add_library(obs-delay-stream MODULE
+  src/plugin-main.cpp
+  src/stream-router.cpp
+  src/rtmp-prober.cpp
+  src/tunnel-manager.cpp
+  src/sync-flow.cpp
+)
 
 # ---- Build receiver assets with npm ----
 set(RECEIVER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/receiver")

@@ -43,7 +43,7 @@
 #include "constants.hpp"
 #include "delay-filter.hpp"
 #include "receiver_index_html.hpp"
-#include "websocket-server.hpp"
+#include "stream-router.hpp"
 #include "rtmp-prober.hpp"
 #include "sync-flow.hpp"
 #include "tunnel-manager.hpp"
@@ -709,6 +709,26 @@ static void write_master_delay(DelayStreamData* d, double ms) {
     obs_data_release(s);
 }
 
+// コールバックスレッドから OBS UI スレッドへ安全にディスパッチするヘルパー。
+// life_token が無効なら fn は呼ばれない（use-after-free 防止）。
+static void queue_ui_safe(DelayStreamData* d,
+                           std::function<void(DelayStreamData*)> fn)
+{
+    struct Ctx {
+        std::weak_ptr<std::atomic<bool>> life_token;
+        DelayStreamData* d;
+        std::function<void(DelayStreamData*)> fn;
+    };
+    auto* c = new Ctx{d->life_token, d, std::move(fn)};
+    obs_queue_task(OBS_TASK_UI, [](void* p) {
+        auto* c = static_cast<Ctx*>(p);
+        auto life = c->life_token.lock();
+        if (life && life->load(std::memory_order_acquire))
+            c->fn(c->d);
+        delete c;
+    }, c, false);
+}
+
 // 指定チャンネル用の受信用URLを生成する。
 static std::string make_sub_url(DelayStreamData* d, int ch1) {
     std::string sid = d->get_stream_id();
@@ -746,6 +766,8 @@ static void              ds_get_defaults(obs_data_t*);
 static void              ensure_init(DelayStreamData*, uint32_t, uint32_t);
 static void              build_flow_panel(obs_properties_t*, DelayStreamData*);
 static void              apply_sub_delay(DelayStreamData*, int, double);
+static void              setup_event_callbacks(DelayStreamData*);
+static void              clear_event_callbacks(DelayStreamData*);
 
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_adjust_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
@@ -800,6 +822,81 @@ void obs_module_unload(void) {}
 // OBS表示名を返す。
 static const char* ds_get_name(void*) { return "obs-delay-stream"; }
 
+// 各コンポーネントのイベントコールバックを登録する。
+// コールバックは対応するコンポーネントのワーカースレッドから呼ばれるため、
+// UI 操作が必要な処理は queue_ui_safe() 経由で UI スレッドへ移譲する。
+static void setup_event_callbacks(DelayStreamData* d) {
+    d->flow.on_update      = [d]() { request_properties_refresh(d, "flow.on_update"); };
+    d->flow.on_ch_measured = [d](int, LatencyResult) {
+        request_properties_refresh(d, "flow.on_ch_measured");
+    };
+    d->flow.on_apply_master = [d](double ms) {
+        queue_ui_safe(d, [ms](DelayStreamData* d) {
+            write_master_delay(d, ms);
+            request_properties_refresh(d, "flow.on_apply_master");
+        });
+    };
+    d->rtmp.prober.on_result = [d](RtmpProbeResult r) {
+        { std::lock_guard<std::mutex> lk(d->rtmp.mtx);
+          d->rtmp.result = r; d->rtmp.applied = false; }
+        request_properties_refresh(d, "rtmp.prober.on_result");
+    };
+    // Tunnel callbacks - delay 100ms to ensure properties view is ready
+    d->tunnel.on_url_ready = [d](const std::string&) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        request_properties_refresh(d, "tunnel.on_url_ready");
+    };
+    d->tunnel.on_error = [d](const std::string&) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        request_properties_refresh(d, "tunnel.on_error");
+    };
+    d->tunnel.on_stopped = [d]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        request_properties_refresh(d, "tunnel.on_stopped");
+    };
+    d->tunnel.on_download_state = [d](bool) {
+        request_properties_refresh(d, "tunnel.on_download_state");
+    };
+    d->router.on_conn_change = [d](const std::string& sid, int, size_t) {
+        if (sid == d->get_stream_id()) request_properties_refresh(d, "router.on_conn_change");
+    };
+    d->router.on_any_latency_result = [d](const std::string& sid, int ch, LatencyResult r) {
+        if (sid != d->get_stream_id()) return;
+        if (ch < 0 || ch >= MAX_SUB_CH) return;
+        auto& ms = d->sub[ch].measure;
+        bool should_apply = r.valid;
+        {
+            std::lock_guard<std::mutex> lk(ms.mtx);
+            ms.result    = r;
+            ms.measuring = false;
+            ms.applied   = should_apply;
+            ms.last_error = r.valid ? "" : T_("MeasureFailed");
+        }
+        if (should_apply) {
+            queue_ui_safe(d, [ch, ms_val = r.avg_one_way](DelayStreamData* d) {
+                apply_sub_delay(d, ch, ms_val);
+                request_properties_refresh(d, "router.on_any_latency_result.apply");
+            });
+        } else {
+            request_properties_refresh(d, "router.on_any_latency_result.invalid");
+        }
+    };
+}
+
+// 全コンポーネントのイベントコールバックを解除する。
+// コンポーネント停止後に呼ぶこと（競合なし）。
+static void clear_event_callbacks(DelayStreamData* d) {
+    d->flow.on_update        = nullptr;
+    d->flow.on_ch_measured   = nullptr;
+    d->flow.on_apply_master  = nullptr;
+    d->rtmp.prober.on_result = nullptr;
+    d->tunnel.on_url_ready   = nullptr;
+    d->tunnel.on_error       = nullptr;
+    d->tunnel.on_stopped     = nullptr;
+    d->tunnel.on_download_state = nullptr;
+    d->router.clear_callbacks();
+}
+
 // フィルタインスタンスを生成して各コンポーネントを初期化する。
 static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     bool already_exists =
@@ -839,88 +936,7 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         d->btn_ctx[i]         = { d, i };
     }
-    d->flow.on_update      = [d]() { request_properties_refresh(d, "flow.on_update"); };
-    d->flow.on_ch_measured = [d](int, LatencyResult) {
-        request_properties_refresh(d, "flow.on_ch_measured");
-    };
-    d->flow.on_apply_master = [d](double ms) {
-        struct Ctx {
-            std::weak_ptr<std::atomic<bool>> life_token;
-            DelayStreamData* d;
-            double ms;
-        };
-        auto* c = new Ctx{d->life_token, d, ms};
-        obs_queue_task(OBS_TASK_UI, [](void* p){
-            auto* c = static_cast<Ctx*>(p);
-            auto life = c->life_token.lock();
-            if (!life || !life->load(std::memory_order_acquire)) {
-                delete c;
-                return;
-            }
-            write_master_delay(c->d, c->ms);
-            request_properties_refresh(c->d, "flow.on_apply_master");
-            delete c;
-        }, c, false);
-    };
-    d->rtmp.prober.on_result = [d](RtmpProbeResult r) {
-        { std::lock_guard<std::mutex> lk(d->rtmp.mtx);
-          d->rtmp.result = r; d->rtmp.applied = false; }
-        request_properties_refresh(d, "rtmp.prober.on_result");
-    };
-    // Tunnel callbacks - delay 100ms to ensure properties view is ready
-    d->tunnel.on_url_ready = [d](const std::string&) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        request_properties_refresh(d, "tunnel.on_url_ready");
-    };
-    d->tunnel.on_error = [d](const std::string&) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        request_properties_refresh(d, "tunnel.on_error");
-    };
-    d->tunnel.on_stopped = [d]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        request_properties_refresh(d, "tunnel.on_stopped");
-    };
-    d->tunnel.on_download_state = [d](bool) {
-        request_properties_refresh(d, "tunnel.on_download_state");
-    };
-    d->router.on_conn_change = [d](const std::string& sid, int, size_t) {
-        if (sid == d->get_stream_id()) request_properties_refresh(d, "router.on_conn_change");
-    };
-    d->router.on_any_latency_result = [d](const std::string& sid, int ch, LatencyResult r) {
-        if (sid != d->get_stream_id()) return;
-        if (ch < 0 || ch >= MAX_SUB_CH) return;
-        auto& ms = d->sub[ch].measure;
-        bool should_apply = r.valid;
-        {
-            std::lock_guard<std::mutex> lk(ms.mtx);
-            ms.result = r;
-            ms.measuring = false;
-            ms.applied = should_apply;
-            ms.last_error = r.valid ? "" : T_("MeasureFailed");
-        }
-        if (should_apply) {
-            struct Ctx {
-                std::weak_ptr<std::atomic<bool>> life_token;
-                DelayStreamData* d;
-                int ch;
-                double ms;
-            };
-            auto* c = new Ctx{d->life_token, d, ch, r.avg_one_way};
-            obs_queue_task(OBS_TASK_UI, [](void* p){
-                auto* c = static_cast<Ctx*>(p);
-                auto life = c->life_token.lock();
-                if (!life || !life->load(std::memory_order_acquire)) {
-                    delete c;
-                    return;
-                }
-                apply_sub_delay(c->d, c->ch, c->ms);
-                request_properties_refresh(c->d, "router.on_any_latency_result.apply");
-                delete c;
-            }, c, false);
-        } else {
-            request_properties_refresh(d, "router.on_any_latency_result.invalid");
-        }
-    };
+    setup_event_callbacks(d);
 
     ds_update(d, settings);
     d->create_done.store(true);
@@ -951,15 +967,7 @@ static void ds_destroy(void* data) {
         d->router.stop();
 
         // 2. コールバックをnull化（停止後なので競合しない）
-        d->flow.on_update       = nullptr;
-        d->flow.on_ch_measured  = nullptr;
-        d->flow.on_apply_master = nullptr;
-        d->rtmp.prober.on_result = nullptr;
-        d->tunnel.on_url_ready  = nullptr;
-        d->tunnel.on_error      = nullptr;
-        d->tunnel.on_stopped    = nullptr;
-        d->tunnel.on_download_state = nullptr;
-        d->router.clear_callbacks();
+        clear_event_callbacks(d);
     }
 
     delete d;
