@@ -374,22 +374,24 @@ static std::string get_obs_stream_url() {
     return url;
 }
 
-// 手入力RTMP URLが空なら、OBS配信設定のURLで補完する。
-static void maybe_autofill_rtmp_url_manual(obs_data_t* settings) {
+// RTMP URL自動取得ONのとき、OBS配信設定のURLで補完する。
+static void maybe_autofill_rtmp_url_manual(obs_data_t* settings, bool force_refresh) {
     if (!settings) return;
+    if (!obs_data_get_bool(settings, "rtmp_url_auto")) return;
     std::string manual = trim_copy(obs_data_get_string(settings, "rtmp_url_manual"));
-    if (!manual.empty()) return;
+    if (!force_refresh && !manual.empty()) return;
     std::string auto_url = get_obs_stream_url();
     if (auto_url.empty()) return;
+    if (manual == auto_url) return;
     obs_data_set_string(settings, "rtmp_url_manual", auto_url.c_str());
 }
 
 // ソース設定を取得してRTMP URL自動補完を試みる。
-static void maybe_autofill_rtmp_url_manual_from_source(obs_source_t* source) {
+static void maybe_autofill_rtmp_url_manual_from_source(obs_source_t* source, bool force_refresh) {
     if (!source) return;
     obs_data_t* s = obs_source_get_settings(source);
     if (!s) return;
-    maybe_autofill_rtmp_url_manual(s);
+    maybe_autofill_rtmp_url_manual(s, force_refresh);
     obs_data_release(s);
 }
 
@@ -507,12 +509,17 @@ static void clear_measure_state(MeasureState& ms) {
 // OBS自動取得値が空の場合は、UI設定の手入力URLを使う。
 static std::string resolve_rtmp_url(DelayStreamData* d) {
     if (!d || !d->context) return "";
-    std::string url = get_obs_stream_url();
-    if (!url.empty()) return url;
+    std::string url;
     obs_data_t* s = obs_source_get_settings(d->context);
     if (!s) return "";
-    const char* manual = obs_data_get_string(s, "rtmp_url_manual");
-    if (manual && *manual) url = manual;
+    bool auto_mode = obs_data_get_bool(s, "rtmp_url_auto");
+    if (auto_mode) {
+        url = get_obs_stream_url();
+    }
+    if (url.empty()) {
+        const char* manual = obs_data_get_string(s, "rtmp_url_manual");
+        if (manual && *manual) url = manual;
+    }
     obs_data_release(s);
     return url;
 }
@@ -646,6 +653,7 @@ static bool cb_sub_add(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void*);
 static bool cb_rtmp_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void*);
+static bool cb_rtmp_url_auto_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_tunnel_start(obs_properties_t*, obs_property_t*, void*);
 static bool cb_tunnel_stop(obs_properties_t*, obs_property_t*, void*);
 static bool cb_flow_start(obs_properties_t*, obs_property_t*, void*);
@@ -700,7 +708,7 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     d->is_duplicate_instance = already_exists;
     d->owns_singleton_slot   = !already_exists;
     d->context  = source;
-    maybe_autofill_rtmp_url_manual(settings);
+    maybe_autofill_rtmp_url_manual(settings, false);
     if (d->is_duplicate_instance) {
         blog(LOG_WARNING, "[obs-delay-stream] duplicate filter instance created as warning-only");
         d->create_done.store(true);
@@ -908,7 +916,7 @@ static void ds_update(void* data, obs_data_t* settings) {
     }
     d->set_stream_id(sid);
     d->router.set_stream_id(sid);
-    maybe_autofill_rtmp_url_manual(settings);
+    maybe_autofill_rtmp_url_manual(settings, false);
     {
         int ws_port = (int)obs_data_get_int(settings, "ws_port");
         if (ws_port < 1 || ws_port > 65535) {
@@ -1198,6 +1206,16 @@ static bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void* priv) {
     { std::lock_guard<std::mutex> lk(d->rtmp.mtx); r = d->rtmp.result; }
     if (!r.valid) return false;
     write_master_delay(d, r.avg_one_way);
+    request_properties_refresh(d);
+    return false;
+}
+// RTMP URL自動取得ON/OFF切り替え時の処理。
+static bool cb_rtmp_url_auto_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
+    auto* d = static_cast<DelayStreamData*>(priv);
+    if (!d || !settings) return false;
+    if (obs_data_get_bool(settings, "rtmp_url_auto")) {
+        maybe_autofill_rtmp_url_manual(settings, true);
+    }
     request_properties_refresh(d);
     return false;
 }
@@ -1673,7 +1691,19 @@ static void add_master_group(obs_properties_t* props, DelayStreamData* d) {
     obs_property_t* mp = obs_properties_add_float_slider(
         grp, "master_delay_ms", T_("MasterDelay"), 0.0, MAX_DELAY_MS, 1.0);
     obs_property_float_set_suffix(mp, " ms");
-    obs_properties_add_text(grp, "rtmp_url_manual", T_("RtmpUrlManual"), OBS_TEXT_DEFAULT);
+    bool auto_mode = true;
+    {
+        obs_data_t* s = obs_source_get_settings(d->context);
+        if (s) {
+            auto_mode = obs_data_get_bool(s, "rtmp_url_auto");
+            obs_data_release(s);
+        }
+    }
+    obs_property_t* auto_p = obs_properties_add_bool(grp, "rtmp_url_auto", T_("RtmpUrlAuto"));
+    obs_property_set_modified_callback2(auto_p, cb_rtmp_url_auto_changed, d);
+    obs_property_t* url_p =
+        obs_properties_add_text(grp, "rtmp_url_manual", T_("RtmpUrlManual"), OBS_TEXT_DEFAULT);
+    obs_property_set_enabled(url_p, !auto_mode);
     obs_property_t* rtmp_p = obs_properties_add_button2(
         grp, "rtmp_measure_btn",
         d->rtmp.prober.is_running() ? T_("Measuring") : T_("RtmpMeasure"),
@@ -1882,8 +1912,8 @@ static obs_properties_t* ds_get_properties(void* data) {
         return props;
     }
 
-    // 起動直後に未取得だったケースを考慮し、プロパティ表示時にも再試行する。
-    maybe_autofill_rtmp_url_manual_from_source(d->context);
+    // 自動取得ON時は、プロパティ表示のたびに最新の配信設定URLへ更新する。
+    maybe_autofill_rtmp_url_manual_from_source(d->context, true);
 
     maybe_fill_cloudflared_path_from_auto(d);
 
@@ -1929,6 +1959,7 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_string(settings, "host_ip_manual",        "");
     obs_data_set_default_double(settings, "master_delay_ms",       0.0);
     obs_data_set_default_double(settings, "sub_offset_ms",         0.0);
+    obs_data_set_default_bool  (settings, "rtmp_url_auto",         true);
     obs_data_set_default_string(settings, "rtmp_url_manual",       "");
     obs_data_set_default_string(settings, "cloudflared_exe_path",  "auto");
     for (int i = 0; i < MAX_SUB_CH; ++i) {
