@@ -37,7 +37,6 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
       },
       help: {
         chrome: 'Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。',
-        lan: 'LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。',
         security: 'セキュリティソフトに接続をブロックされる場合は、例外に *.trycloudflare.com を追加してください。'
       },
       status: {
@@ -123,7 +122,6 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
       },
       help: {
         chrome: 'Chrome is recommended. If prompted for audio playback permission on first connect, allow it.',
-        lan: 'For LAN (direct IP) use, open TCP 19000 in the OBS host PC firewall.',
         security: 'If security software blocks connections, add *.trycloudflare.com to exceptions.'
       },
       status: {
