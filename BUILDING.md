@@ -153,8 +153,11 @@ obs-delay-stream/
     ja-JP.ini
   receiver/
     index.html                     受信ページテンプレート（@PROJECT_VERSION@ を展開）
-    receiver.js                    受信ページロジック
-    ui.css
+    js/
+      receiver.ts                  受信ページロジック
+      dom.ts                       DOM ユーティリティ
+      i18n.ts                      国際化
+    css/ui.css
     *.svg
     package.json                   npm ビルド定義
     vite.config.mjs                receiver 配布用 Vite 設定

@@ -1,327 +1,115 @@
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import 'bulma/css/bulma.min.css';
-import i18next from 'i18next';
 import '../css/ui.css';
-
-const I18N_RESOURCES = {
-  ja: {
-    translation: {
-      ui: {
-        browserWarning: 'このページはChrome以外のブラウザでは正常に動作しない場合があります。Chromeの利用を推奨します。',
-        connectionSettings: '接続設定',
-        connectionSettingsNote: '（通常は変更不要）',
-        streamId: '配信ID',
-        streamIdHint: '(半角英数字)',
-        streamIdPlaceholder: 'myshow2024',
-        chNumber: 'CH番号',
-        resync: '再同期',
-        autoResyncInterval: '自動再同期間隔',
-        off: 'オフ',
-        volumeControl: '音量コントロール',
-        sampleRate: 'SR',
-        channel: 'CH',
-        buffer: 'Buffer',
-        codec: 'Codec',
-        latencyMeasure: '遅延計測'
-      },
-      button: {
-        connect: '接続',
-        disconnect: '切断',
-        resync: '再同期',
-        resyncCountdown: '再同期（あと{{sec}}秒）'
-      },
-      audio: {
-        mute: 'ミュート',
-        muted: 'ミュート',
-        volume: '音量'
-      },
-      help: {
-        chrome: 'Chrome推奨。初回接続時に音声再生の許可を求められたら「許可」してください。',
-        lan: 'LAN内(IPアドレス直接)の場合: OBSのPCのファイアウォールでTCP 19000を開放してください。',
-        security: 'セキュリティソフトに接続をブロックされる場合は、例外に *.trycloudflare.com を追加してください。'
-      },
-      status: {
-        waiting: '待機中 — 接続ボタンを押してください',
-        enterStreamId: '配信IDを入力してください',
-        invalidStreamId: '配信IDは半角英数字のみです',
-        connecting: '接続中...',
-        connectFailed: '接続に失敗しました — URLを確認してください',
-        connectTimeout: '接続タイムアウト — 接続先を確認してください',
-        receivingWithUrl: '受信中 — {{url}}',
-        receiving: '受信中',
-        connectionError: '接続エラー — サーバーに接続できません',
-        streamIdMismatch: '配信IDが一致しません',
-        chOutOfRange: 'CH番号が範囲外です ({{range}})',
-        disconnected: '切断されました',
-        disconnectedByUser: '切断しました',
-        resynced: '再同期しました',
-        measuring: '遅延計測中... ({{current}}/{{total}})'
-      },
-      latency: {
-        initialHint: '接続後、OBS側で遅延計測が開始されると、ここに結果が表示されます。',
-        measuring: '計測中 ({{current}} / {{total}} ping)',
-        estimatedOneWay: '推定片道遅延 (RTT÷2)',
-        averageRoundTrip: '平均往復遅延 ({{label}})',
-        minRtt: '最小RTT',
-        maxRtt: '最大RTT',
-        waitingApply: 'OBSが遅延設定を反映するまでお待ちください。',
-        applied: 'OBSがサブch遅延を <strong>{{ms}} ms</strong> に自動設定しました'
-      },
-      quality: {
-        good: '良好',
-        normal: '普通',
-        high: '高遅延'
-      },
-      format: {
-        chRange: '{{min}}〜{{max}}',
-        seconds: '{{value}}秒'
-      },
-      url: {
-        streamIdMissing: '(配信ID未入力)'
-      },
-      codec: {
-        opusUnavailable: 'Opusデコーダを利用できません（PCMに切替）',
-        opusDecodeFailed: 'Opusデコードに失敗しました（PCMに切替）'
-      },
-      lang: {
-        switchToEn: 'Switch to English',
-        switchToJa: '日本語に切り替え'
-      }
-    }
-  },
-  en: {
-    translation: {
-      ui: {
-        browserWarning: 'This page may not work correctly in browsers other than Chrome. Chrome is recommended.',
-        connectionSettings: 'Connection Settings',
-        connectionSettingsNote: '(Usually no changes needed)',
-        streamId: 'Stream ID',
-        streamIdHint: '(alphanumeric)',
-        streamIdPlaceholder: 'myshow2024',
-        chNumber: 'Channel',
-        resync: 'Resync',
-        autoResyncInterval: 'Auto-resync Interval',
-        off: 'Off',
-        volumeControl: 'Volume Control',
-        sampleRate: 'SR',
-        channel: 'CH',
-        buffer: 'Buffer',
-        codec: 'Codec',
-        latencyMeasure: 'Latency Measurement'
-      },
-      button: {
-        connect: 'Connect',
-        disconnect: 'Disconnect',
-        resync: 'Resync',
-        resyncCountdown: 'Resync ({{sec}}s)'
-      },
-      audio: {
-        mute: 'Mute',
-        muted: 'Muted',
-        volume: 'Volume'
-      },
-      help: {
-        chrome: 'Chrome is recommended. If prompted for audio playback permission on first connect, allow it.',
-        lan: 'For LAN (direct IP) use, open TCP 19000 in the OBS host PC firewall.',
-        security: 'If security software blocks connections, add *.trycloudflare.com to exceptions.'
-      },
-      status: {
-        waiting: 'Idle - press Connect',
-        enterStreamId: 'Enter Stream ID',
-        invalidStreamId: 'Stream ID must be alphanumeric',
-        connecting: 'Connecting...',
-        connectFailed: 'Connection failed - check URL',
-        connectTimeout: 'Connection timeout - check destination',
-        receivingWithUrl: 'Receiving - {{url}}',
-        receiving: 'Receiving',
-        connectionError: 'Connection error - cannot reach server',
-        streamIdMismatch: 'Stream ID mismatch',
-        chOutOfRange: 'Channel out of range ({{range}})',
-        disconnected: 'Disconnected',
-        disconnectedByUser: 'Disconnected',
-        resynced: 'Resynced',
-        measuring: 'Measuring latency... ({{current}}/{{total}})'
-      },
-      latency: {
-        initialHint: 'After connecting, results will appear here when OBS starts latency measurement.',
-        measuring: 'Measuring ({{current}} / {{total}} ping)',
-        estimatedOneWay: 'Estimated one-way latency (RTT/2)',
-        averageRoundTrip: 'Average round-trip latency ({{label}})',
-        minRtt: 'Min RTT',
-        maxRtt: 'Max RTT',
-        waitingApply: 'Please wait while OBS applies delay settings.',
-        applied: 'OBS auto-set sub-channel delay to <strong>{{ms}} ms</strong>'
-      },
-      quality: {
-        good: 'Good',
-        normal: 'Normal',
-        high: 'High latency'
-      },
-      format: {
-        chRange: '{{min}}-{{max}}',
-        seconds: '{{value}} sec'
-      },
-      url: {
-        streamIdMissing: '(Stream ID not set)'
-      },
-      codec: {
-        opusUnavailable: 'Opus decoder unavailable (switched to PCM)',
-        opusDecodeFailed: 'Opus decode failed (switched to PCM)'
-      },
-      lang: {
-        switchToEn: 'Switch to English',
-        switchToJa: '日本語に切り替え'
-      }
-    }
-  }
-};
-
-function detectLanguage() {
-  const queryLang = new URLSearchParams(location.search).get('lang');
-  if (queryLang && I18N_RESOURCES[queryLang]) {
-    localStorage.setItem('receiverLang', queryLang);
-    return queryLang;
-  }
-  const stored = localStorage.getItem('receiverLang');
-  if (stored && I18N_RESOURCES[stored]) return stored;
-  const nav = (navigator.languages && navigator.languages[0]) || navigator.language || 'ja';
-  return nav.toLowerCase().startsWith('ja') ? 'ja' : 'en';
-}
-
-const activeLang = detectLanguage();
-i18next.init({
-  lng: activeLang,
-  fallbackLng: 'ja',
-  resources: I18N_RESOURCES,
-  interpolation: { escapeValue: false },
-  returnNull: false,
-  returnEmptyString: false,
-  initImmediate: false
-});
+import {
+  applyStaticI18n,
+  initI18n,
+  renderLanguageSwitcher,
+  t,
+  tr,
+} from './i18n';
+import {
+  getOptionalElement,
+  getRequiredButtonElement,
+  getRequiredElement,
+  getRequiredInputElement,
+  getRequiredSelectElement,
+} from './dom';
+initI18n();
 try {
   const buildTimestamp = (document.documentElement.dataset.buildTimestamp || '').trim();
   if (buildTimestamp && !/^@.+@$/.test(buildTimestamp)) {
     console.info('[obs-delay-stream] receiver build:', buildTimestamp);
   }
 } catch { }
-document.documentElement.lang = activeLang;
-
-function resolveLocalText(lang, key) {
-  const root = I18N_RESOURCES[lang] && I18N_RESOURCES[lang].translation;
-  if (!root) return undefined;
-  const parts = String(key || '').split('.');
-  let cur = root;
-  for (const p of parts) {
-    if (!cur || typeof cur !== 'object' || !(p in cur)) return undefined;
-    cur = cur[p];
-  }
-  return (typeof cur === 'string') ? cur : undefined;
-}
-
-function interpolateText(text, opts) {
-  const options = opts || {};
-  return String(text).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, k) => {
-    const v = options[k];
-    return (v === undefined || v === null) ? '' : String(v);
-  });
-}
-
-function t(key, opts) {
-  const options = opts || {};
-  const primary = i18next.t(key, options);
-  if (typeof primary === 'string' && primary !== '' && primary !== 'undefined') return primary;
-
-  const secondary = i18next.t(key, { ...options, lng: 'ja', defaultValue: key });
-  if (typeof secondary === 'string' && secondary !== '' && secondary !== 'undefined') return secondary;
-
-  const local = resolveLocalText(activeLang, key) ?? resolveLocalText('ja', key);
-  if (typeof local === 'string') return interpolateText(local, options);
-
-  return String(key);
-}
-
-function tr(key, opts, fallbackJa, fallbackEn) {
-  const v = t(key, opts);
-  if (typeof v === 'string' && v !== '' && v !== 'undefined') return v;
-  const fb = (activeLang === 'en') ? fallbackEn : fallbackJa;
-  if (typeof fb === 'string' && fb !== '') return interpolateText(fb, opts || {});
-  return String(key);
-}
-
-function buildLanguageHref(lang) {
-  const u = new URL(location.href);
-  u.searchParams.set('lang', lang);
-  return u.toString();
-}
-
-function makeLanguageNode(lang) {
-  const label = lang.toUpperCase();
-  if (lang === activeLang) {
-    const current = document.createElement('span');
-    current.className = 'ds-lang-current';
-    current.textContent = label;
-    current.setAttribute('aria-current', 'true');
-    return current;
-  }
-  const link = document.createElement('a');
-  link.className = 'ds-lang-link';
-  link.href = buildLanguageHref(lang);
-  link.textContent = label;
-  link.setAttribute('hreflang', lang);
-  link.setAttribute('lang', lang);
-  link.setAttribute('aria-label', lang === 'en' ? t('lang.switchToEn') : t('lang.switchToJa'));
-  return link;
-}
-
-function renderLanguageSwitcher() {
-  const root = document.getElementById('langSwitcher');
-  if (!root) return;
-  root.textContent = '';
-
-  const icon = document.createElement('span');
-  icon.className = 'icon is-small';
-  icon.innerHTML = '<i class="fas fa-globe" aria-hidden="true"></i>';
-  root.appendChild(icon);
-
-  const links = document.createElement('span');
-  links.className = 'ds-lang-links';
-  links.appendChild(makeLanguageNode('en'));
-  const sep = document.createElement('span');
-  sep.className = 'ds-lang-sep';
-  sep.textContent = '|';
-  links.appendChild(sep);
-  links.appendChild(makeLanguageNode('ja'));
-  root.appendChild(links);
-}
-
-function applyStaticI18n() {
-  document.querySelectorAll('[data-i18n]').forEach((el) => {
-    el.textContent = t(el.dataset.i18n);
-  });
-  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
-    el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
-  });
-  document.querySelectorAll('[data-i18n-title]').forEach((el) => {
-    el.setAttribute('title', t(el.dataset.i18nTitle));
-  });
-  document.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
-    el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
-  });
-  document.querySelectorAll('[data-i18n-seconds]').forEach((el) => {
-    el.textContent = t('format.seconds', { value: el.dataset.i18nSeconds });
-  });
-}
 applyStaticI18n();
 renderLanguageSwitcher();
+
+type JsonRecord = Record<string, unknown>;
+
+type AudioDecoderConfigLike = {
+  codec: string;
+  sampleRate: number;
+  numberOfChannels: number;
+};
+
+type EncodedAudioChunkInitLike = {
+  type: 'key' | 'delta';
+  timestamp: number;
+  duration?: number;
+  data: BufferSource;
+};
+
+type EncodedAudioChunkLike = {};
+
+type EncodedAudioChunkConstructorLike = new (init: EncodedAudioChunkInitLike) => EncodedAudioChunkLike;
+
+type AudioDataLike = {
+  numberOfFrames: number;
+  numberOfChannels: number;
+  sampleRate: number;
+  format?: string;
+  copyTo: (destination: BufferSource, options: { planeIndex: number }) => void;
+  close: () => void;
+};
+
+type AudioDecoderLike = {
+  configure: (config: AudioDecoderConfigLike) => void;
+  decode: (chunk: EncodedAudioChunkLike) => void;
+  close: () => void;
+};
+
+type AudioDecoderConstructorLike = {
+  new (init: { output: (audioData: AudioDataLike) => void; error: (err: unknown) => void }): AudioDecoderLike;
+  isConfigSupported: (config: AudioDecoderConfigLike) => Promise<{ supported: boolean }>;
+};
+
+type OpusDecodedFrame = {
+  channelData: Float32Array[];
+  samplesDecoded: number;
+  sampleRate?: number;
+  errors?: Array<{ code?: number; message?: string }>;
+};
+
+type OpusDecoderInstance = {
+  decodeFrame: (data: Uint8Array) => OpusDecodedFrame | null;
+  reset?: () => Promise<void>;
+  free: () => void;
+  ready: Promise<void>;
+};
+
+type OpusDecoderModule = {
+  OpusDecoder: new (opts: { sampleRate: number; channels: number }) => OpusDecoderInstance;
+};
+
+type WindowWithWebkitAudioContext = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+type WindowWithOpusDecoder = Window & {
+  'opus-decoder'?: OpusDecoderModule;
+};
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null;
+}
+
+function safeParseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
 // ============================================================
 // URL プレビュー
 // ============================================================
-function getHostDomain() {
+function getHostDomain(): string {
   return location.hostname || 'localhost';
 }
 
-function buildUrl(ip, sid, ch) {
+function buildUrl(ip: string, sid: string, ch: string | number): string {
   // cloudflared/https時はポートなしwss://
   const hasScheme = /^(wss?|https?):\/\//.test(ip);
   const isTunnel = ip.includes('trycloudflare.com')
@@ -340,31 +128,33 @@ let MAX_CH = 20;
 const PING_SAMPLES = 10;
 let CH_RANGE_TEXT = t('format.chRange', { min: MIN_CH, max: MAX_CH });
 
-const sidInput = document.getElementById('sidInput');
-const chInput = document.getElementById('chInput');
-const chHint = document.getElementById('chHint');
-function applyChRange(max) {
+const sidInput = getRequiredInputElement('sidInput');
+const chInput = getRequiredInputElement('chInput');
+const chHint = getOptionalElement<HTMLElement>('chHint');
+const urlPreview = getOptionalElement<HTMLElement>('urlPreview');
+
+function applyChRange(max: number): void {
   MAX_CH = max;
   CH_RANGE_TEXT = t('format.chRange', { min: MIN_CH, max: MAX_CH });
   if (chHint) chHint.textContent = `(${CH_RANGE_TEXT})`;
-  if (chInput) {
-    chInput.min = String(MIN_CH);
-    chInput.max = String(MAX_CH);
-    const v = parseInt(chInput.value, 10);
-    if (Number.isInteger(v) && v > MAX_CH) chInput.value = String(MAX_CH);
-  }
+  chInput.min = String(MIN_CH);
+  chInput.max = String(MAX_CH);
+  const v = parseInt(chInput.value, 10);
+  if (Number.isInteger(v) && v > MAX_CH) chInput.value = String(MAX_CH);
   updateUrlPreview();
 }
 applyChRange(MAX_CH);
 
-function parseShebangParams() {
+type ShebangParams = { sid: string | null; ch: string | null };
+
+function parseShebangParams(): ShebangParams | null {
   if (!location.hash.startsWith('#!')) return null;
   let raw = location.hash.slice(2);
   if (raw.startsWith('/')) raw = raw.slice(1);
   if (raw.startsWith('?')) raw = raw.slice(1);
   if (!raw) return null;
 
-  const safeDecode = (val) => {
+  const safeDecode = (val: string): string => {
     try { return decodeURIComponent(val); }
     catch { return val; }
   };
@@ -378,19 +168,19 @@ function parseShebangParams() {
   };
 }
 
-function getInitialParams() {
+function getInitialParams(): ShebangParams | null {
   const hashParams = parseShebangParams();
   if (hashParams && (hashParams.sid || hashParams.ch)) return hashParams;
   return null;
 }
 
-function applyUrlParams() {
+function applyUrlParams(): void {
   const params = getInitialParams();
   if (!params) return;
   const sid = params.sid;
   const ch = params.ch;
-  if (sid && sidInput) sidInput.value = sid;
-  if (ch && chInput) {
+  if (sid) sidInput.value = sid;
+  if (ch) {
     const chNum = parseInt(ch, 10);
     if (!Number.isNaN(chNum) && chNum >= MIN_CH && chNum <= MAX_CH) {
       chInput.value = String(chNum);
@@ -400,8 +190,8 @@ function applyUrlParams() {
 }
 applyUrlParams();
 
-function isChromeBrowser() {
-  const uaData = navigator.userAgentData;
+function isChromeBrowser(): boolean {
+  const uaData = (navigator as Navigator & { userAgentData?: { brands?: Array<{ brand: string }> } }).userAgentData;
   if (uaData && Array.isArray(uaData.brands)) {
     return uaData.brands.some((brand) => brand.brand === 'Google Chrome');
   }
@@ -412,48 +202,61 @@ function isChromeBrowser() {
   return !nonChromeToken;
 }
 
-function updateBrowserWarning() {
-  const warning = document.getElementById('browserWarning');
-  if (!warning) return;
-  warning.hidden = isChromeBrowser();
+const browserWarning = getOptionalElement<HTMLElement>('browserWarning');
+
+function updateBrowserWarning(): void {
+  if (!browserWarning) return;
+  browserWarning.hidden = isChromeBrowser();
 }
 updateBrowserWarning();
 
-function loadConfig() {
+type ConfigResponse = { active_ch?: number };
+
+function isConfigResponse(value: unknown): value is ConfigResponse {
+  return isRecord(value)
+    && (value.active_ch === undefined || Number.isInteger(value.active_ch));
+}
+
+function loadConfig(): void {
   fetch('/config', { cache: 'no-store' })
     .then(r => r.ok ? r.json() : null)
     .then(cfg => {
-      if (!cfg) return;
-      const v = Number.isInteger(cfg.active_ch) ? cfg.active_ch : null;
-      if (Number.isInteger(v) && v >= MIN_CH) applyChRange(v);
+      if (!cfg || !isConfigResponse(cfg)) return;
+      const v = cfg.active_ch;
+      if (typeof v === 'number' && Number.isInteger(v) && v >= MIN_CH) applyChRange(v);
     })
     .catch(() => {});
 }
 loadConfig();
 
-function fetchMemoPreview(sid, ch) {
+type MemoResponse = { memo?: string };
+
+function isMemoResponse(value: unknown): value is MemoResponse {
+  return isRecord(value) && (value.memo === undefined || typeof value.memo === 'string');
+}
+
+function fetchMemoPreview(sid: string, ch: string): void {
   const chNum = parseInt(ch, 10);
   if (!sid || !Number.isInteger(chNum) || chNum < MIN_CH || chNum > MAX_CH) return;
-  const memoEl = document.getElementById('infoMemo');
+  const memoEl = getOptionalElement<HTMLElement>('infoMemo');
   if (!memoEl) return;
   const url = `/memo?sid=${encodeURIComponent(sid)}&ch=${encodeURIComponent(String(chNum))}`;
   fetch(url, { cache: 'no-store' })
     .then(r => r.ok ? r.json() : null)
     .then(data => {
-      if (!data || typeof data.memo !== 'string') return;
+      if (!data || !isMemoResponse(data) || typeof data.memo !== 'string') return;
       updateMemoDisplay(memoEl, data.memo);
     })
     .catch(() => {});
 }
 
-function updateUrlPreview() {
+function updateUrlPreview(): void {
   const sid = sidInput.value.trim();
   const ch = chInput.value || '1';
-  const preview = document.getElementById('urlPreview');
-  if (preview) preview.textContent = buildUrl(hostDomain, sid, ch);
+  if (urlPreview) urlPreview.textContent = buildUrl(hostDomain, sid, ch);
 }
 
-function updateShebang(sid, ch) {
+function updateShebang(sid: string, ch: string): void {
   if (sid) {
     const sidEnc = encodeURIComponent(sid);
     const chEnc = encodeURIComponent(ch || '1');
@@ -465,22 +268,22 @@ function updateShebang(sid, ch) {
     history.replaceState(null, '', location.pathname + location.search);
   }
 }
-function onInputChange() {
+function onInputChange(): void {
   updateUrlPreview();
   const sid = sidInput.value.trim();
   const ch = chInput.value || '1';
   updateShebang(sid, ch);
 }
-['sidInput', 'chInput'].forEach(id =>
-  document.getElementById(id).addEventListener('input', onInputChange));
+sidInput.addEventListener('input', onInputChange);
+chInput.addEventListener('input', onInputChange);
 updateUrlPreview();
 
 // ============================================================
 // AudioContext
 // ============================================================
-let ws = null;
-let actx = null;
-let gainNode = null;
+let ws: WebSocket | null = null;
+let actx: AudioContext | null = null;
+let gainNode: GainNode | null = null;
 let nextTime = 0;
 const AHEAD = 0.12;
 const MAGIC_AUDI = 0x41554449;
@@ -488,62 +291,63 @@ const MAGIC_OPUS = 0x4f505553;
 let muted = false;
 let connecting = false;
 let lastWsError = false;
-let connectTimer = null;
+let connectTimer: ReturnType<typeof setTimeout> | null = null;
 const CONNECT_TIMEOUT_MS = 7000;
 let syncAvailable = false;
 
 // 制御メッセージ / 再同期の状態
 let pingCount = 0;
-let autoSyncTimer = null;
 let syncCountdown = 0;
-let syncTickTimer = null;
+let syncTickTimer: ReturnType<typeof setInterval> | null = null;
 let currentSyncInterval = 0;  // 0=オフ
 let pendingSyncInterval = 0;
 
 // WebCodecs (Opus)
-let opusDecoder = null;
-let opusConfig = null;
-let opusInitPromise = null;
-let opusQueue = [];
+type OpusPacket = { buf: ArrayBuffer; sampleRate: number; channels: number; frameCount: number };
+
+let opusDecoder: AudioDecoderLike | null = null;
+let opusConfig: AudioDecoderConfigLike | null = null;
+let opusInitPromise: Promise<boolean> | null = null;
+let opusQueue: OpusPacket[] = [];
 let opusTsUs = 0;
 let opusErrored = false;
 let opusErrorReported = false;
-let opusMode = 'auto'; // 'auto' | 'webcodecs' | 'wasm'
-let opusWebCodecsState = 'idle'; // idle | pending | ready | failed
-let opusWasmState = 'idle'; // idle | pending | ready | failed
-let opusWasmDecoder = null;
-let opusWasmConfig = null;
-let opusWasmInitPromise = null;
-let opusWasmLibPromise = null;
+let opusMode: 'auto' | 'webcodecs' | 'wasm' = 'auto';
+let opusWebCodecsState: 'idle' | 'pending' | 'ready' | 'failed' = 'idle';
+let opusWasmState: 'idle' | 'pending' | 'ready' | 'failed' = 'idle';
+let opusWasmDecoder: OpusDecoderInstance | null = null;
+let opusWasmConfig: { sampleRate: number; numberOfChannels: number } | null = null;
+let opusWasmInitPromise: Promise<unknown> | null = null;
+let opusWasmLibPromise: Promise<unknown> | null = null;
 let opusWasmErrorStreak = 0;
 let opusWasmLastErrorTs = 0;
 let pcmFallbackRequested = false;
 let pcmFallbackReason = '';
 
-function reportOpusError(msg) {
+function reportOpusError(msg: string): void {
   if (opusErrorReported) return;
   opusErrorReported = true;
   setStatus(msg, 'err');
   try { console.warn('[Opus]', msg); } catch { }
 }
 
-function sendPcmFallbackIfPossible() {
+function sendPcmFallbackIfPossible(): void {
   if (!pcmFallbackRequested) return;
   if (ws && ws.readyState === WebSocket.OPEN) {
-    const payload = { type: 'audio_codec', mode: 'pcm' };
+    const payload: { type: string; mode: string; reason?: string } = { type: 'audio_codec', mode: 'pcm' };
     if (pcmFallbackReason) payload.reason = pcmFallbackReason;
     try { ws.send(JSON.stringify(payload)); } catch { }
   }
 }
 
-function requestPcmFallback(reason) {
+function requestPcmFallback(reason?: string): void {
   if (pcmFallbackRequested) return;
   pcmFallbackRequested = true;
   pcmFallbackReason = reason || '';
   sendPcmFallbackIfPossible();
 }
 
-function disableOpus(reason, msg) {
+function disableOpus(reason: string, msg?: string): void {
   if (opusErrored) return;
   opusErrored = true;
   requestPcmFallback(reason);
@@ -551,7 +355,7 @@ function disableOpus(reason, msg) {
   opusQueue = [];
 }
 
-function markWebCodecsFailed(reason) {
+function markWebCodecsFailed(reason?: string): void {
   if (opusWebCodecsState === 'failed') return;
   opusWebCodecsState = 'failed';
   if (reason) {
@@ -559,7 +363,7 @@ function markWebCodecsFailed(reason) {
   }
 }
 
-function markWasmFailed(reason) {
+function markWasmFailed(reason?: string): void {
   if (opusWasmState === 'failed') return;
   opusWasmState = 'failed';
   if (reason) {
@@ -567,7 +371,7 @@ function markWasmFailed(reason) {
   }
 }
 
-function noteWasmError() {
+function noteWasmError(): number {
   const now = Date.now();
   if (now - opusWasmLastErrorTs > 2000) opusWasmErrorStreak = 0;
   opusWasmLastErrorTs = now;
@@ -575,12 +379,12 @@ function noteWasmError() {
   return opusWasmErrorStreak;
 }
 
-function clearWasmErrors() {
+function clearWasmErrors(): void {
   opusWasmErrorStreak = 0;
   opusWasmLastErrorTs = 0;
 }
 
-function loadOpusWasmLibrary() {
+function loadOpusWasmLibrary(): Promise<unknown> {
   if (opusWasmLibPromise) return opusWasmLibPromise;
   opusWasmLibPromise = new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -595,8 +399,8 @@ function loadOpusWasmLibrary() {
 
 // VUメーター
 const NUM_BARS = 20;
-const meterEl = document.getElementById('meter');
-const bars = [];
+const meterEl = getRequiredElement<HTMLDivElement>('meter');
+const bars: HTMLDivElement[] = [];
 for (let i = 0; i < NUM_BARS; i++) {
   const b = document.createElement('div');
   b.className = 'bar';
@@ -608,72 +412,73 @@ for (let i = 0; i < NUM_BARS; i++) {
 // ============================================================
 // 音量
 // ============================================================
-function sliderToGain(val) {
+const volSlider = getRequiredInputElement('volSlider');
+const dbDisplay = getRequiredElement<HTMLElement>('dbDisplay');
+const muteBtn = getRequiredButtonElement('muteBtn');
+const muteIcon = getOptionalElement<HTMLElement>('muteIcon');
+const syncIntervalSelect = getRequiredSelectElement('syncIntervalSelect');
+
+function sliderToGain(val: number): number {
   // 0→-∞dB, 50→-20dB, 84→-3.0dB, 100→0dB (二乗カーブ)
   if (val <= 0) return 0;
   return Math.pow(val / 100, 2);
 }
-function gainToDb(gain) {
+function gainToDb(gain: number): number {
   if (gain <= 0) return -Infinity;
   return 20 * Math.log10(gain);
 }
-function formatDb(gain) {
+function formatDb(gain: number): string {
   if (gain <= 0) return '−∞ dB';
   const db = gainToDb(gain);
   return (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
 }
 
-function onVolumeChange(val) {
-  const v = parseInt(val, 10);
-  localStorage.setItem('volume', v);
-  const gain = sliderToGain(v);
+function onVolumeChange(val: number | string): void {
+  const v = typeof val === 'number' ? val : parseInt(val, 10);
+  const safeV = Number.isFinite(v) ? v : 0;
+  localStorage.setItem('volume', String(safeV));
+  const gain = sliderToGain(safeV);
   if (gainNode && !muted) gainNode.gain.value = gain;
-  const slider = document.getElementById('volSlider');
-  slider.disabled = muted;
-  slider.classList.toggle('is-primary', !muted);
-  const dbEl = document.getElementById('dbDisplay');
-  dbEl.textContent = muted ? t('audio.muted') : formatDb(gain);
+  volSlider.disabled = muted;
+  volSlider.classList.toggle('is-primary', !muted);
+  dbDisplay.textContent = muted ? t('audio.muted') : formatDb(gain);
   const dbClasses = ['tag', 'is-medium', 'has-background-dark', 'has-text-white', 'is-family-monospace'];
   if (muted) {
     dbClasses.push('has-text-grey');
   }
-  dbEl.className = dbClasses.join(' ');
+  dbDisplay.className = dbClasses.join(' ');
 }
 
-function toggleMute() {
+function toggleMute(): void {
   muted = !muted;
-  const btn = document.getElementById('muteBtn');
-  btn.className = muted ? 'button is-ghost has-text-grey' : 'button is-primary';
-  const slider = document.getElementById('volSlider');
-  slider.disabled = muted;
-  slider.classList.toggle('is-primary', !muted);
-  const iconEl = document.getElementById('muteIcon');
-  if (iconEl) iconEl.className = muted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
+  muteBtn.className = muted ? 'button is-ghost has-text-grey' : 'button is-primary';
+  volSlider.disabled = muted;
+  volSlider.classList.toggle('is-primary', !muted);
+  if (muteIcon) muteIcon.className = muted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
   if (gainNode) {
     gainNode.gain.value = muted ? 0
-      : sliderToGain(parseInt(document.getElementById('volSlider').value, 10));
+      : sliderToGain(parseInt(volSlider.value, 10));
   }
-  const val = parseInt(document.getElementById('volSlider').value, 10);
+  const val = parseInt(volSlider.value, 10);
   const gain = sliderToGain(val);
-  const dbEl = document.getElementById('dbDisplay');
-  dbEl.textContent = muted ? t('audio.muted') : formatDb(gain);
+  dbDisplay.textContent = muted ? t('audio.muted') : formatDb(gain);
   const dbClasses = ['tag', 'is-medium', 'has-background-dark', 'has-text-white', 'is-family-monospace'];
   if (muted) {
     dbClasses.push('has-text-grey');
   }
-  dbEl.className = dbClasses.join(' ');
+  dbDisplay.className = dbClasses.join(' ');
 }
 
 // 初期表示（localStorageから復元）
 {
   const savedVol = localStorage.getItem('volume');
   const initVol = savedVol !== null ? Number(savedVol) : 84;
-  document.getElementById('volSlider').value = initVol;
+  volSlider.value = String(initVol);
   onVolumeChange(initVol);
 
   const savedSync = localStorage.getItem('syncInterval');
   if (savedSync !== null) {
-    document.getElementById('syncIntervalSelect').value = savedSync;
+    syncIntervalSelect.value = savedSync;
     onSyncIntervalChange(savedSync);
   }
 }
@@ -681,62 +486,78 @@ function toggleMute() {
 // ============================================================
 // 接続
 // ============================================================
-function setStatus(msg, cls = '') {
-  const el = document.getElementById('statusBar');
-  const textEl = document.getElementById('statusText');
-  const iconEl = document.getElementById('statusIcon');
-  if (textEl) textEl.textContent = msg;
+const statusBar = getRequiredElement<HTMLElement>('statusBar');
+const statusText = getOptionalElement<HTMLElement>('statusText');
+const statusIcon = getOptionalElement<HTMLElement>('statusIcon');
+const infoCodec = getRequiredElement<HTMLElement>('infoCodec');
+const connectBtn = getRequiredButtonElement('connectBtn');
+const stopBtn = getRequiredButtonElement('stopBtn');
+const syncBtn = getRequiredButtonElement('syncBtn');
+const latencyCard = getRequiredElement<HTMLElement>('latencyCard');
+const infoBuf = getRequiredElement<HTMLElement>('infoBuf');
+const infoSR = getRequiredElement<HTMLElement>('infoSR');
+const infoCH = getRequiredElement<HTMLElement>('infoCH');
+const latencyContent = getRequiredElement<HTMLElement>('latencyContent');
+const syncBtnLabel = getRequiredElement<HTMLElement>('syncBtnLabel');
+
+type StatusClass = '' | 'ok' | 'err' | 'mea';
+
+function setStatus(msg: string, cls: StatusClass = ''): void {
+  if (statusText) statusText.textContent = msg;
   const classes = ['notification'];
   if (cls === 'ok') classes.push('is-success');
   else if (cls === 'err') classes.push('is-danger');
   else if (cls === 'mea') classes.push('is-warning');
   else classes.push('is-dark');
-  el.className = classes.join(' ');
+  statusBar.className = classes.join(' ');
   let icon = 'fa-info-circle';
   if (cls === 'ok') icon = 'fa-check-circle';
   else if (cls === 'err') icon = 'fa-times-circle';
   else if (cls === 'mea') icon = 'fa-exclamation-triangle';
-  if (iconEl) iconEl.className = `fas ${icon}`;
+  if (statusIcon) statusIcon.className = `fas ${icon}`;
 }
 
-function setCodecLabel(text) {
-  const el = document.getElementById('infoCodec');
-  if (el) el.textContent = text || '—';
+function setCodecLabel(text?: string): void {
+  infoCodec.textContent = text || '—';
 }
 
-function clearConnectTimer() {
+function clearConnectTimer(): void {
   if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
 }
 
-function setInputsEnabled(enabled) {
-  document.getElementById('sidInput').disabled = !enabled;
-  document.getElementById('chInput').disabled = !enabled;
+function setInputsEnabled(enabled: boolean): void {
+  sidInput.disabled = !enabled;
+  chInput.disabled = !enabled;
 }
 
-function setDisconnectedUi() {
-  document.getElementById('connectBtn').disabled = false;
-  document.getElementById('stopBtn').disabled = true;
-  document.getElementById('syncBtn').disabled = true;
+function setDisconnectedUi(): void {
+  connectBtn.disabled = false;
+  stopBtn.disabled = true;
+  syncBtn.disabled = true;
   enableSyncOptions(false);
-  document.getElementById('latencyCard').classList.remove('has-background-info-light');
+  latencyCard.classList.remove('has-background-info-light');
   setInputsEnabled(true);
   setCodecLabel('—');
 }
 
-function connect() {
+function connect(): void {
   if (connecting) return;
   if (ws) ws.close();
   if (!actx) {
-    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioContextCtor = window.AudioContext || (window as WindowWithWebkitAudioContext).webkitAudioContext;
+    if (!AudioContextCtor) {
+      setStatus(t('status.connectFailed'), 'err');
+      return;
+    }
+    actx = new AudioContextCtor();
     gainNode = actx.createGain();
-    gainNode.gain.value = sliderToGain(
-      parseInt(document.getElementById('volSlider').value, 10));
+    gainNode.gain.value = sliderToGain(parseInt(volSlider.value, 10));
     gainNode.connect(actx.destination);
   }
   nextTime = actx.currentTime + AHEAD;
 
-  const sid = document.getElementById('sidInput').value.trim();
-  const ch = parseInt(document.getElementById('chInput').value, 10);
+  const sid = sidInput.value.trim();
+  const ch = parseInt(chInput.value, 10);
 
   if (!sid) { setStatus(t('status.enterStreamId'), 'err'); return; }
   if (!/^[a-z0-9]+$/i.test(sid)) { setStatus(t('status.invalidStreamId'), 'err'); return; }
@@ -750,13 +571,13 @@ function connect() {
   connecting = true;
   lastWsError = false;
   setInputsEnabled(false);
-  document.getElementById('connectBtn').disabled = true;
+  connectBtn.disabled = true;
   try {
     ws = new WebSocket(url);
-  } catch (e) {
+  } catch {
     connecting = false;
     setStatus(t('status.connectFailed'), 'err');
-    document.getElementById('connectBtn').disabled = false;
+    connectBtn.disabled = false;
     setInputsEnabled(true);
     return;
   }
@@ -778,11 +599,11 @@ function connect() {
     clearConnectTimer();
     connecting = false;
     setStatus(t('status.receivingWithUrl', { url }), 'ok');
-    document.getElementById('connectBtn').disabled = true;
-    document.getElementById('stopBtn').disabled = false;
-    document.getElementById('syncBtn').disabled = false;
+    connectBtn.disabled = true;
+    stopBtn.disabled = false;
+    syncBtn.disabled = false;
     enableSyncOptions(true);
-    document.getElementById('latencyCard').classList.add('has-background-info-light');
+    latencyCard.classList.add('has-background-info-light');
     sendPcmFallbackIfPossible();
   };
   wsLocal.onerror = () => {
@@ -807,18 +628,18 @@ function connect() {
     setDisconnectedUi();
     ws = null;
   };
-  wsLocal.onmessage = ev => {
+  wsLocal.onmessage = (ev: MessageEvent) => {
     if (ws !== wsLocal) return;
     if (ev.data instanceof ArrayBuffer) handleAudio(ev.data);
-    else handleControl(ev.data);
+    else if (typeof ev.data === 'string') handleControl(ev.data);
   };
 }
 
-function disconnect() {
+function disconnect(): void {
   stopAutoSync();
   clearConnectTimer();
   connecting = false;
-  document.getElementById('syncBtn').disabled = true;
+  syncBtn.disabled = true;
   enableSyncOptions(false);
   const wsLocal = ws;
   ws = null;
@@ -832,7 +653,7 @@ function disconnect() {
 // ============================================================
 // 音声受信
 // ============================================================
-function handleAudio(buf) {
+function handleAudio(buf: ArrayBuffer): void {
   if (buf.byteLength < 16) return;
   const u32 = new Uint32Array(buf, 0, 4);
   const magic = u32[0];
@@ -845,8 +666,8 @@ function handleAudio(buf) {
   }
 }
 
-function playBuffer(abuf) {
-  if (!abuf) return;
+function playBuffer(abuf: AudioBuffer | null): void {
+  if (!abuf || !actx || !gainNode) return;
   const src = actx.createBufferSource();
   src.buffer = abuf;
   src.connect(gainNode);
@@ -857,14 +678,14 @@ function playBuffer(abuf) {
   nextTime += abuf.duration;
 
   const bufMs = Math.round((nextTime - actx.currentTime) * 1000);
-  document.getElementById('infoBuf').textContent = bufMs + ' ms';
+  infoBuf.textContent = bufMs + ' ms';
   updateMeter(abuf.getChannelData(0));
 }
 
-function handlePcm16(buf, sampleRate, channels, frameCount) {
+function handlePcm16(buf: ArrayBuffer, sampleRate: number, channels: number, frameCount: number): void {
   if (!actx) return;
-  document.getElementById('infoSR').textContent = sampleRate + ' Hz';
-  document.getElementById('infoCH').textContent = channels + 'ch';
+  infoSR.textContent = sampleRate + ' Hz';
+  infoCH.textContent = channels + 'ch';
   setCodecLabel('PCM16');
 
   const pcm = new Int16Array(buf, 16);
@@ -878,7 +699,7 @@ function handlePcm16(buf, sampleRate, channels, frameCount) {
   playBuffer(abuf);
 }
 
-function handleOpus(buf, sampleRate, channels, frameCount) {
+function handleOpus(buf: ArrayBuffer, sampleRate: number, channels: number, frameCount: number): void {
   if (opusErrored) return;
   if (opusMode === 'webcodecs') {
     if (ensureWebCodecsDecoder(sampleRate, channels)) {
@@ -928,7 +749,7 @@ function handleOpus(buf, sampleRate, channels, frameCount) {
   disableOpus('opus_unavailable', t('codec.opusUnavailable'));
 }
 
-function ensureWebCodecsDecoder(sampleRate, channels) {
+function ensureWebCodecsDecoder(sampleRate: number, channels: number): boolean {
   if (opusWebCodecsState === 'failed') return false;
   if (opusDecoder &&
     opusConfig &&
@@ -949,19 +770,20 @@ function ensureWebCodecsDecoder(sampleRate, channels) {
     markWebCodecsFailed('insecure_context');
     return false;
   }
-  if (typeof AudioDecoder === 'undefined') {
+  const AudioDecoderCtor = (window as unknown as { AudioDecoder?: AudioDecoderConstructorLike }).AudioDecoder;
+  if (!AudioDecoderCtor) {
     markWebCodecsFailed('no_audio_decoder');
     return false;
   }
 
-  const config = { codec: 'opus', sampleRate, numberOfChannels: channels };
+  const config: AudioDecoderConfigLike = { codec: 'opus', sampleRate, numberOfChannels: channels };
   opusWebCodecsState = 'pending';
-  opusInitPromise = AudioDecoder.isConfigSupported(config).then(s => {
+  opusInitPromise = AudioDecoderCtor.isConfigSupported(config).then(s => {
     if (!s.supported) {
       markWebCodecsFailed('config_unsupported');
       return false;
     }
-    opusDecoder = new AudioDecoder({
+    opusDecoder = new AudioDecoderCtor({
       output: onOpusDecoded,
       error: () => {
         markWebCodecsFailed('decode_error');
@@ -989,7 +811,7 @@ function ensureWebCodecsDecoder(sampleRate, channels) {
   return false;
 }
 
-function ensureWasmDecoder(sampleRate, channels) {
+function ensureWasmDecoder(sampleRate: number, channels: number): boolean {
   if (opusWasmState === 'failed') return false;
   if (opusWasmDecoder &&
     opusWasmConfig &&
@@ -1007,7 +829,7 @@ function ensureWasmDecoder(sampleRate, channels) {
 
   opusWasmState = 'pending';
   opusWasmInitPromise = loadOpusWasmLibrary().then(() => {
-    const mod = window['opus-decoder'];
+    const mod = (window as WindowWithOpusDecoder)['opus-decoder'];
     if (!mod || !mod.OpusDecoder) throw new Error('OpusDecoder missing');
     opusWasmDecoder = new mod.OpusDecoder({ sampleRate, channels });
     opusWasmConfig = { sampleRate, numberOfChannels: channels };
@@ -1029,7 +851,7 @@ function ensureWasmDecoder(sampleRate, channels) {
   return false;
 }
 
-function flushOpusQueue() {
+function flushOpusQueue(): void {
   if (opusErrored) { opusQueue = []; return; }
   const q = opusQueue;
   opusQueue = [];
@@ -1044,14 +866,26 @@ function flushOpusQueue() {
   }
 }
 
-function decodeOpusPacketWebCodecs(buf, sampleRate, channels, frameCount) {
+function decodeOpusPacketWebCodecs(
+  buf: ArrayBuffer,
+  sampleRate: number,
+  channels: number,
+  frameCount: number
+): void {
   if (!opusDecoder) return;
-  document.getElementById('infoSR').textContent = sampleRate + ' Hz';
-  document.getElementById('infoCH').textContent = channels + 'ch';
+  infoSR.textContent = sampleRate + ' Hz';
+  infoCH.textContent = channels + 'ch';
+
+  const EncodedAudioChunkCtor = (window as unknown as { EncodedAudioChunk?: EncodedAudioChunkConstructorLike })
+    .EncodedAudioChunk;
+  if (!EncodedAudioChunkCtor) {
+    markWebCodecsFailed('no_encoded_audio_chunk');
+    return;
+  }
 
   const payload = new Uint8Array(buf, 16);
   const durationUs = frameCount > 0 ? Math.round(frameCount * 1000000 / sampleRate) : 0;
-  const chunk = new EncodedAudioChunk({
+  const chunk = new EncodedAudioChunkCtor({
     type: 'key',
     timestamp: opusTsUs,
     duration: durationUs,
@@ -1061,7 +895,7 @@ function decodeOpusPacketWebCodecs(buf, sampleRate, channels, frameCount) {
   if (durationUs > 0) opusTsUs += durationUs;
 }
 
-function onOpusDecoded(ad) {
+function onOpusDecoded(ad: AudioDataLike): void {
   const abuf = audioDataToBuffer(ad);
   if (abuf) {
     setCodecLabel('Opus (WebCodecs)');
@@ -1070,7 +904,7 @@ function onOpusDecoded(ad) {
   ad.close();
 }
 
-function audioDataToBuffer(ad) {
+function audioDataToBuffer(ad: AudioDataLike): AudioBuffer | null {
   if (!actx) return null;
   const frames = ad.numberOfFrames;
   const channels = ad.numberOfChannels;
@@ -1118,16 +952,21 @@ function audioDataToBuffer(ad) {
   return abuf;
 }
 
-function decodeOpusPacketWasm(buf, sampleRate, channels, frameCount) {
+function decodeOpusPacketWasm(
+  buf: ArrayBuffer,
+  sampleRate: number,
+  channels: number,
+  frameCount: number
+): void {
   if (!opusWasmDecoder || !actx) return;
-  document.getElementById('infoSR').textContent = sampleRate + ' Hz';
-  document.getElementById('infoCH').textContent = channels + 'ch';
+  infoSR.textContent = sampleRate + ' Hz';
+  infoCH.textContent = channels + 'ch';
 
   const payload = new Uint8Array(buf, 16);
-  let decoded;
+  let decoded: OpusDecodedFrame | null;
   try {
     decoded = opusWasmDecoder.decodeFrame(payload);
-  } catch (e) {
+  } catch (e: unknown) {
     const streak = noteWasmError();
     try { console.warn('[Opus][WASM] decode_error'); } catch { }
     if (streak >= 3) {
@@ -1171,37 +1010,56 @@ function decodeOpusPacketWasm(buf, sampleRate, channels, frameCount) {
 // ============================================================
 // 制御メッセージ
 // ============================================================
-function handleControl(text) {
-  let msg; try { msg = JSON.parse(text); } catch { return; }
+type LatencyResultMessage = {
+  one_way: number;
+  avg_rtt: number;
+  min: number;
+  max: number;
+};
+
+function isLatencyResultMessage(value: JsonRecord): value is LatencyResultMessage {
+  return typeof value.one_way === 'number'
+    && typeof value.avg_rtt === 'number'
+    && typeof value.min === 'number'
+    && typeof value.max === 'number';
+}
+
+function handleControl(text: string): void {
+  const msg = safeParseJson(text);
+  if (!isRecord(msg) || typeof msg.type !== 'string') return;
 
   switch (msg.type) {
     case 'session_info':
       // サーバーからセッション確認情報を受信
-      if (msg.stream_id) document.getElementById('sidInput').value = msg.stream_id;
+      if (typeof msg.stream_id === 'string') sidInput.value = msg.stream_id;
       if (msg.ch !== undefined && msg.ch !== null) {
-        document.getElementById('chInput').value = String(msg.ch);
+        const chNum = Number(msg.ch);
+        if (Number.isFinite(chNum)) chInput.value = String(chNum);
       }
       {
-        const memoEl = document.getElementById('infoMemo');
+        const memoEl = getOptionalElement<HTMLElement>('infoMemo');
         if (memoEl) updateMemoDisplay(memoEl, msg.memo);
       }
       break;
 
     case 'memo':
       {
-        const memoEl = document.getElementById('infoMemo');
+        const memoEl = getOptionalElement<HTMLElement>('infoMemo');
         if (memoEl) updateMemoDisplay(memoEl, msg.memo);
       }
       break;
 
     case 'ping':
-      if (ws && ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({ type: 'pong', seq: msg.seq }));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const payload: { type: string; seq?: number } = { type: 'pong' };
+        if (typeof msg.seq === 'number') payload.seq = msg.seq;
+        ws.send(JSON.stringify(payload));
+      }
       showMeasuring(++pingCount);
       break;
 
     case 'latency_result':
-      showLatencyResult(msg);
+      if (isLatencyResultMessage(msg)) showLatencyResult(msg);
       pingCount = 0;
       break;
 
@@ -1210,19 +1068,19 @@ function handleControl(text) {
         const reason = (typeof msg.reason === 'string') ? msg.reason : '';
         if (reason === 'manual_adjust') break;
         if (reason === 'auto_measure') {
-          showApplied(msg.ms);
+          if (typeof msg.ms === 'number' || typeof msg.ms === 'string') showApplied(msg.ms);
           break;
         }
         // 旧サーバ互換: reason未送信時は「計測→適用待ち」の文脈だけ表示
-        if (document.getElementById('waitingApply')) {
-          showApplied(msg.ms);
+        if (getOptionalElement<HTMLElement>('waitingApply')) {
+          if (typeof msg.ms === 'number' || typeof msg.ms === 'string') showApplied(msg.ms);
         }
       }
       break;
   }
 }
 
-function updateMemoDisplay(memoEl, memoText) {
+function updateMemoDisplay(memoEl: HTMLElement | null, memoText: unknown): void {
   if (!memoEl) return;
   const text = (typeof memoText === 'string') ? memoText.trim() : '';
   if (!text.length) {
@@ -1237,7 +1095,7 @@ function updateMemoDisplay(memoEl, memoText) {
 // ============================================================
 // 再同期
 // ============================================================
-function resync() {
+function resync(): void {
   if (!actx) return;
   // バッファをリセットして次のパケットから即座に再開
   nextTime = actx.currentTime + AHEAD;
@@ -1249,7 +1107,7 @@ function resync() {
   }, 500);
 }
 
-function startAutoSync(interval) {
+function startAutoSync(interval: number): void {
   stopAutoSync();
   if (interval <= 0) return;
   currentSyncInterval = interval;
@@ -1265,15 +1123,15 @@ function startAutoSync(interval) {
   }, 1000);
 }
 
-function stopAutoSync() {
+function stopAutoSync(): void {
   if (syncTickTimer) { clearInterval(syncTickTimer); syncTickTimer = null; }
   currentSyncInterval = 0;
   updateCountdown();
 }
 
-function onSyncIntervalChange(interval) {
+function onSyncIntervalChange(interval: number | string): void {
   const value = Number(interval);
-  localStorage.setItem('syncInterval', value);
+  localStorage.setItem('syncInterval', String(value));
   pendingSyncInterval = Number.isFinite(value) ? value : 0;
   if (pendingSyncInterval === 0) {
     stopAutoSync();
@@ -1284,33 +1142,32 @@ function onSyncIntervalChange(interval) {
   }
 }
 
-function enableSyncOptions(enabled) {
+function enableSyncOptions(enabled: boolean): void {
   syncAvailable = enabled;
   if (!enabled) {
     stopAutoSync();
     return;
   }
-  onSyncIntervalChange(document.getElementById('syncIntervalSelect').value);
+  onSyncIntervalChange(syncIntervalSelect.value);
 }
 
-function updateCountdown() {
-  const labelEl = document.getElementById('syncBtnLabel');
+function updateCountdown(): void {
   if (syncTickTimer && currentSyncInterval > 0) {
-    labelEl.textContent = tr(
+    syncBtnLabel.textContent = tr(
       'button.resyncCountdown',
       { sec: syncCountdown },
       '再同期（あと{{sec}}秒）',
       'Resync ({{sec}}s)'
     );
   } else {
-    labelEl.textContent = tr('button.resync', {}, '再同期', 'Resync');
+    syncBtnLabel.textContent = tr('button.resync', {}, '再同期', 'Resync');
   }
 }
 
 // ============================================================
 // 計測UI
 // ============================================================
-function showMeasuring(n) {
+function showMeasuring(n: number): void {
   const statusText = tr(
     'status.measuring',
     { current: n, total: PING_SAMPLES },
@@ -1324,14 +1181,14 @@ function showMeasuring(n) {
     'Measuring ({{current}} / {{total}} ping)'
   );
   setStatus(statusText, 'mea');
-  document.getElementById('latencyContent').innerHTML = `
+  latencyContent.innerHTML = `
 <div class="measuring-box">
   ${measuringText}<span class="dots"><span>.</span><span>.</span><span>.</span></span>
   <progress class="progress is-small is-warning" style="margin-top:6px" value="${n}" max="${PING_SAMPLES}">${n}</progress>
 </div>`;
 }
 
-function showLatencyResult(r) {
+function showLatencyResult(r: LatencyResultMessage): void {
   setStatus(t('status.receiving'), 'ok');
   const colCls = r.avg_rtt < 50 ? 'has-text-success' : r.avg_rtt < 150 ? 'has-text-warning' : 'has-text-danger';
   const lbl = r.avg_rtt < 50
@@ -1349,7 +1206,7 @@ function showLatencyResult(r) {
     'OBSが遅延設定を反映するまでお待ちください。',
     'Please wait while OBS applies delay settings.'
   );
-  document.getElementById('latencyContent').innerHTML = `
+  latencyContent.innerHTML = `
 <div class="latency-grid">
   <div class="metric has-text-centered">
     <span class="val ${colCls}">${r.one_way.toFixed(1)}</span>
@@ -1376,19 +1233,19 @@ function showLatencyResult(r) {
   <i class="fas fa-info-circle mr-1"></i>
   ${waitingApply}
 </div>`;
-  document.getElementById('latencyCard').classList.add('has-background-info-light');
+  latencyCard.classList.add('has-background-info-light');
 }
 
-function showApplied(ms) {
+function showApplied(ms: number | string): void {
   document.querySelectorAll('#waitingApply').forEach((el) => el.remove());
   document.querySelectorAll('#appliedDelayNote').forEach((el) => el.remove());
   const appliedText = tr(
     'latency.applied',
-    { ms: parseFloat(ms).toFixed(1) },
+    { ms: Number.parseFloat(String(ms)).toFixed(1) },
     'OBSがサブch遅延を <strong>{{ms}} ms</strong> に自動設定しました',
     'OBS auto-set sub-channel delay to <strong>{{ms}} ms</strong>'
   );
-  document.getElementById('latencyContent').innerHTML +=
+  latencyContent.innerHTML +=
     `<div class="notification is-success py-3 px-4 mt-3" id="appliedDelayNote">
   <i class="fas fa-check-circle mr-1"></i>
   ${appliedText}
@@ -1398,7 +1255,7 @@ function showApplied(ms) {
 // ============================================================
 // VUメーター
 // ============================================================
-function updateMeter(samples) {
+function updateMeter(samples: Float32Array): void {
   const g = gainNode ? gainNode.gain.value : 1;
   const step = Math.floor(samples.length / NUM_BARS) || 1;
   for (let i = 0; i < NUM_BARS; i++) {
