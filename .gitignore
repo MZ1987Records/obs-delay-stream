@@ -34,6 +34,7 @@ Makefile
 .claude/*
 !.claude/skills/
 !.claude/commands/
+.codex/
 .vs/
 .vscode/
 .idea/

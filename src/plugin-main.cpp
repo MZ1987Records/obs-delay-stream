@@ -1176,8 +1176,7 @@ static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
     apply_sub_delay_to_buffer(d, i);
     d->router.notify_apply_delay(
         i,
-        calc_effective_sub_delay_value_ms(
-            d, d->sub[i].delay_ms, d->sub[i].adjust_ms),
+        d->sub[i].delay_ms,
         "auto_measure");
 }
 // 全チャンネルのURLと名前の一覧をMarkdown箇条書き形式でクリップボードへコピーする。
