@@ -81,6 +81,14 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($repoPath)) { return $url }
 
             if ($forImage) {
+              if (Test-Path $localPath -PathType Leaf) {
+                $ext = [System.IO.Path]::GetExtension($localPath).ToLowerInvariant()
+                if ($ext -eq '.svg') {
+                  $bytes = [System.IO.File]::ReadAllBytes($localPath)
+                  $base64 = [System.Convert]::ToBase64String($bytes)
+                  return "data:image/svg+xml;base64,$base64"
+                }
+              }
               return "$rawBase/$repoPath$suffix"
             }
 
@@ -266,6 +274,16 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $zip = "obs-delay-stream-$tag.zip"
+          $dist = "$env:GITHUB_WORKSPACE/dist"
+          $extraFiles = @("LICENSE", "THIRD_PARTY_NOTICES", "CHANGELOG.md")
+          New-Item -ItemType Directory -Force $dist | Out-Null
+
+          foreach ($file in $extraFiles) {
+            $src = Join-Path $env:GITHUB_WORKSPACE $file
+            if (-Not (Test-Path $src -PathType Leaf)) { throw "Required file not found: $src" }
+            Copy-Item $src (Join-Path $dist $file) -Force
+          }
+
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path "dist\\*" -DestinationPath $zip
 
