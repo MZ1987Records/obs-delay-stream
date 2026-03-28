@@ -13,7 +13,7 @@ export const state = {
   // WebSocket
   ws: null as WebSocket | null,
   connecting: false,
-  lastWsError: false,
+  closeReason: null as null | 'timeout' | 'error',
   connectTimer: null as ReturnType<typeof setTimeout> | null,
 
   // AudioContext

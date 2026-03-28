@@ -21,3 +21,21 @@ export function getRequiredSelectElement(id: string): HTMLSelectElement {
 export function getRequiredButtonElement(id: string): HTMLButtonElement {
   return getRequiredElement<HTMLButtonElement>(id);
 }
+
+/** 軽量な要素生成ヘルパー */
+export function h(
+  tag: string,
+  attrs: Record<string, string> | null,
+  ...children: (string | Node)[]
+): HTMLElement {
+  const el = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      el.setAttribute(k, v);
+    }
+  }
+  for (const child of children) {
+    el.append(child);
+  }
+  return el;
+}

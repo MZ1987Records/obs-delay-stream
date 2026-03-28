@@ -25,7 +25,7 @@ import {
   syncIntervalSelect,
 } from './elements';
 import { t, tr } from './i18n';
-import { getOptionalElement } from './dom';
+import { getOptionalElement, h } from './dom';
 import type {
   LatencyResultMessage,
   ShebangParams,
@@ -275,11 +275,21 @@ export function showMeasuring(n: number): void {
     'Measuring ({{current}} / {{total}} ping)',
   );
   setStatus(statusMsg, 'mea');
-  latencyContent.innerHTML = `
-<div class="measuring-box">
-  ${measuringText}<span class="dots"><span>.</span><span>.</span><span>.</span></span>
-  <progress class="progress is-small is-warning" style="margin-top:6px" value="${n}" max="${PING_SAMPLES}">${n}</progress>
-</div>`;
+  latencyContent.textContent = '';
+  latencyContent.appendChild(
+    h('div', { class: 'measuring-box' },
+      measuringText,
+      h('span', { class: 'dots' },
+        h('span', null, '.'), h('span', null, '.'), h('span', null, '.'),
+      ),
+      h('progress', {
+        class: 'progress is-small is-warning',
+        style: 'margin-top:6px',
+        value: String(n),
+        max: String(PING_SAMPLES),
+      }, String(n)),
+    ),
+  );
 }
 
 export function showLatencyResult(r: LatencyResultMessage): void {
@@ -316,49 +326,47 @@ export function showLatencyResult(r: LatencyResultMessage): void {
     'OBSが遅延設定を反映するまでお待ちください。',
     'Please wait while OBS applies delay settings.',
   );
-  latencyContent.innerHTML = `
-<div class="latency-grid">
-  <div class="metric has-text-centered">
-    <span class="val ${colCls}">${r.one_way.toFixed(1)}</span>
-    <span class="unit has-text-grey">ms</span>
-    <div class="lbl has-text-grey">${estimatedOneWay}</div>
-  </div>
-  <div class="metric has-text-centered">
-    <span class="val ${colCls}">${r.avg_rtt.toFixed(1)}</span>
-    <span class="unit has-text-grey">ms RTT</span>
-    <div class="lbl has-text-grey">${avgRoundTrip}</div>
-  </div>
-  <div class="metric has-text-centered">
-    <span class="val" style="color:#888">${r.min.toFixed(1)}</span>
-    <span class="unit has-text-grey">ms</span>
-    <div class="lbl has-text-grey">${minRtt}</div>
-  </div>
-  <div class="metric has-text-centered">
-    <span class="val" style="color:#888">${r.max.toFixed(1)}</span>
-    <span class="unit has-text-grey">ms</span>
-    <div class="lbl has-text-grey">${maxRtt}</div>
-  </div>
-</div>
-<div class="notification is-info py-3 px-4 mt-3" id="waitingApply">
-  <i class="fas fa-info-circle mr-1"></i>
-  ${waitingApply}
-</div>`;
+  const metricCell = (
+    val: string, unit: string, label: string, valAttrs: Record<string, string>,
+  ): HTMLElement =>
+    h('div', { class: 'metric has-text-centered' },
+      h('span', valAttrs, val),
+      h('span', { class: 'unit has-text-grey' }, unit),
+      h('div', { class: 'lbl has-text-grey' }, label),
+    );
+
+  const grid = h('div', { class: 'latency-grid' },
+    metricCell(r.one_way.toFixed(1), 'ms', estimatedOneWay, { class: `val ${colCls}` }),
+    metricCell(r.avg_rtt.toFixed(1), 'ms RTT', avgRoundTrip, { class: `val ${colCls}` }),
+    metricCell(r.min.toFixed(1), 'ms', minRtt, { class: 'val', style: 'color:#888' }),
+    metricCell(r.max.toFixed(1), 'ms', maxRtt, { class: 'val', style: 'color:#888' }),
+  );
+
+  latencyContent.textContent = '';
+  latencyContent.append(
+    grid,
+    h('div', { class: 'notification is-info py-3 px-4 mt-3', id: 'waitingApply' },
+      h('i', { class: 'fas fa-info-circle mr-1' }),
+      waitingApply,
+    ),
+  );
   latencyCard.classList.add('has-background-info-light');
 }
 
 export function showApplied(ms: number | string): void {
-  document.querySelectorAll('#waitingApply').forEach((el) => el.remove());
-  document.querySelectorAll('#appliedDelayNote').forEach((el) => el.remove());
-  const appliedText = tr(
-    'latency.applied',
-    { ms: Number.parseFloat(String(ms)).toFixed(1) },
-    'OBSがサブch遅延を <strong>{{ms}} ms</strong> に自動設定しました',
-    'OBS auto-set sub-channel delay to <strong>{{ms}} ms</strong>',
+  document.getElementById('waitingApply')?.remove();
+  document.getElementById('appliedDelayNote')?.remove();
+  const msText = `${Number.parseFloat(String(ms)).toFixed(1)} ms`;
+  const prefix = tr('latency.appliedPrefix', {}, 'OBSがチャンネル遅延を ', 'OBS auto-set channel delay to ');
+  const suffix = tr('latency.appliedSuffix', {}, ' に自動設定しました', '');
+  latencyContent.appendChild(
+    h('div', { class: 'notification is-success py-3 px-4 mt-3', id: 'appliedDelayNote' },
+      h('i', { class: 'fas fa-check-circle mr-1' }),
+      prefix,
+      h('strong', null, msText),
+      suffix,
+    ),
   );
-  latencyContent.innerHTML += `<div class="notification is-success py-3 px-4 mt-3" id="appliedDelayNote">
-  <i class="fas fa-check-circle mr-1"></i>
-  ${appliedText}
-</div>`;
 }
 
 // ============================================================

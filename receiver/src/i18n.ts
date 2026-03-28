@@ -65,7 +65,8 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         minRtt: '最小RTT',
         maxRtt: '最大RTT',
         waitingApply: 'OBSが遅延設定を反映するまでお待ちください。',
-        applied: 'OBSがサブch遅延を <strong>{{ms}} ms</strong> に自動設定しました'
+        appliedPrefix: 'OBSがチャンネル遅延を ',
+        appliedSuffix: ' に自動設定しました'
       },
       quality: {
         good: '良好',
@@ -150,7 +151,8 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         minRtt: 'Min RTT',
         maxRtt: 'Max RTT',
         waitingApply: 'Please wait while OBS applies delay settings.',
-        applied: 'OBS auto-set sub-channel delay to <strong>{{ms}} ms</strong>'
+        appliedPrefix: 'OBS auto-set channel delay to ',
+        appliedSuffix: ''
       },
       quality: {
         good: 'Good',
@@ -288,7 +290,10 @@ export function renderLanguageSwitcher(): void {
 
   const icon = document.createElement('span');
   icon.className = 'icon is-small';
-  icon.innerHTML = '<i class="fas fa-globe" aria-hidden="true"></i>';
+  const globe = document.createElement('i');
+  globe.className = 'fas fa-globe';
+  globe.setAttribute('aria-hidden', 'true');
+  icon.appendChild(globe);
   root.appendChild(icon);
 
   const links = document.createElement('span');
