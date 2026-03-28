@@ -157,11 +157,9 @@ obs-delay-stream/
     ui.css
     *.svg
     package.json                   npm ビルド定義
-    scripts/
-      build.mjs                    receiver 配布用出力を生成
+    vite.config.mjs                receiver 配布用 Vite 設定
+    node_modules/                  npm 依存（i18next / bulma / fontawesome）
     third_party/
-      bulma.min.css
-      fontawesome/
       opus-decoder/
   src/
     plugin-main.cpp                プラグイン本体

@@ -1,3 +1,8 @@
+import '@fortawesome/fontawesome-free/css/all.min.css';
+import 'bulma/css/bulma.min.css';
+import i18next from 'i18next';
+import './ui.css';
+
 const I18N_RESOURCES = {
   ja: {
     translation: {
@@ -580,7 +585,7 @@ function loadOpusWasmLibrary() {
   opusWasmLibPromise = new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.async = true;
-    s.src = 'third_party/opus-decoder/opus-decoder.min.js';
+    s.src = 'opus-decoder/opus-decoder.min.js';
     s.onload = () => resolve(true);
     s.onerror = () => reject(new Error('opus-decoder load failed'));
     document.head.appendChild(s);
@@ -1406,3 +1411,12 @@ function updateMeter(samples) {
       : h > 80 ? '#ef4444' : h > 50 ? '#f59e0b' : '#22c55e';
   }
 }
+
+Object.assign(window, {
+  connect,
+  disconnect,
+  resync,
+  onSyncIntervalChange,
+  toggleMute,
+  onVolumeChange,
+});

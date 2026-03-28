@@ -4,6 +4,14 @@
   "version": "0.0.0",
   "description": "Build scripts for obs-delay-stream receiver assets",
   "scripts": {
-    "build": "node ./scripts/build.mjs"
+    "build": "vite build --logLevel warn"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-free": "^5.15.4",
+    "bulma": "^0.9.4",
+    "i18next": "^23.16.8"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
   }
 }

@@ -1,14 +1,15 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
-chcp 437 > nul
+chcp 65001 > nul
 title obs-delay-stream Build Script
 for %%I in ("%~dp0.") do set "PLUGIN_DIR=%%~fI"
 set "PLUGIN_VERSION=unknown"
 if exist "%PLUGIN_DIR%\CMakeLists.txt" (
-    for /f "usebackq tokens=3 delims= )" %%V in (`findstr /B /C:"project(obs-delay-stream VERSION " "%PLUGIN_DIR%\CMakeLists.txt"`) do (
+    for /f "usebackq tokens=4 delims= " %%V in (`findstr /B /C:"project(obs-delay-stream VERSION " "%PLUGIN_DIR%\CMakeLists.txt"`) do (
         set "PLUGIN_VERSION=%%V"
     )
 )
+set "PLUGIN_VERSION=%PLUGIN_VERSION:)=%"
 set "BANNER_VERSION="
 if not "%PLUGIN_VERSION%"=="unknown" set "BANNER_VERSION= v%PLUGIN_VERSION%"
 
@@ -262,12 +263,8 @@ if errorlevel 1 (
     echo [ERROR] Failed to copy receiver build output.
     goto :error
 )
-if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
-    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\i18next.min.js
-    goto :error
-)
-if not exist "%RECEIVER_DEST%\third_party\i18next\LICENSE" (
-    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\LICENSE
+if not exist "%RECEIVER_DEST%\opus-decoder\opus-decoder.min.js" (
+    echo [ERROR] Failed to deploy receiver asset: opus-decoder\opus-decoder.min.js
     goto :error
 )
 if not exist "%RECEIVER_DEST%\index.html" (
@@ -305,20 +302,54 @@ set RECEIVER_DEST=%OBS_INSTALL_DIR%\data\obs-plugins\obs-delay-stream\receiver
 
 if not exist "%RECEIVER_DEST%" mkdir "%RECEIVER_DEST%"
 
-call :build_receiver_assets
-if errorlevel 1 goto :error
+echo.
+echo ================================================================
+echo  [Receiver Build] Building receiver assets with npm...
+echo ================================================================
+echo.
+
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] npm not found. Install Node.js 20+ from: https://nodejs.org/
+    goto :error
+)
+
+if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
+if exist "%RECEIVER_BUILD_DIR%" rmdir /s /q "%RECEIVER_BUILD_DIR%"
+
+set "RECEIVER_BUILD_OUT_DIR=%RECEIVER_BUILD_DIR%"
+set "RECEIVER_PROJECT_VERSION=%PLUGIN_VERSION%"
+set "NO_COLOR=1"
+set "FORCE_COLOR=0"
+set "NPM_CONFIG_COLOR=false"
+pushd "%PLUGIN_DIR%\receiver"
+npm run build
+set "RECEIVER_BUILD_RC=%ERRORLEVEL%"
+popd
+set "RECEIVER_BUILD_OUT_DIR="
+set "RECEIVER_PROJECT_VERSION="
+set "NO_COLOR="
+set "FORCE_COLOR="
+set "NPM_CONFIG_COLOR="
+
+if not "%RECEIVER_BUILD_RC%"=="0" (
+    echo [ERROR] Receiver npm build failed.
+    goto :error
+)
+if not exist "%RECEIVER_BUILD_DIR%\index.html" (
+    echo [ERROR] Receiver build output missing: %RECEIVER_BUILD_DIR%\index.html
+    goto :error
+)
+
+echo   Receiver build OK: %RECEIVER_BUILD_DIR%
 
 xcopy /E /I /Y "%RECEIVER_BUILD_DIR%" "%RECEIVER_DEST%\" >nul
 if errorlevel 1 (
     echo [ERROR] Failed to copy receiver build output.
     goto :error
 )
-if not exist "%RECEIVER_DEST%\third_party\i18next\i18next.min.js" (
-    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\i18next.min.js
-    goto :error
-)
-if not exist "%RECEIVER_DEST%\third_party\i18next\LICENSE" (
-    echo [ERROR] Failed to deploy receiver asset: third_party\i18next\LICENSE
+if not exist "%RECEIVER_DEST%\opus-decoder\opus-decoder.min.js" (
+    echo [ERROR] Failed to deploy receiver asset: opus-decoder\opus-decoder.min.js
     goto :error
 )
 if not exist "%RECEIVER_DEST%\index.html" (
@@ -335,43 +366,6 @@ echo  Receiver : %RECEIVER_DEST%
 echo.
 if "%CI_MODE%"=="1" exit /b 0
 pause
-exit /b 0
-
-:build_receiver_assets
-echo.
-echo ================================================================
-echo  [Receiver Build] Building receiver assets with npm...
-echo ================================================================
-echo.
-
-where npm >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] npm not found. Install Node.js 20+ from: https://nodejs.org/
-    exit /b 1
-)
-
-if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
-if exist "%RECEIVER_BUILD_DIR%" rmdir /s /q "%RECEIVER_BUILD_DIR%"
-
-set "RECEIVER_BUILD_OUT_DIR=%RECEIVER_BUILD_DIR%"
-set "RECEIVER_PROJECT_VERSION=%PLUGIN_VERSION%"
-pushd "%PLUGIN_DIR%\receiver"
-npm run build
-set "RECEIVER_BUILD_RC=%ERRORLEVEL%"
-popd
-set "RECEIVER_BUILD_OUT_DIR="
-set "RECEIVER_PROJECT_VERSION="
-
-if not "%RECEIVER_BUILD_RC%"=="0" (
-    echo [ERROR] Receiver npm build failed.
-    exit /b 1
-)
-if not exist "%RECEIVER_BUILD_DIR%\index.html" (
-    echo [ERROR] Receiver build output missing: %RECEIVER_BUILD_DIR%\index.html
-    exit /b 1
-)
-
-echo   Receiver build OK: %RECEIVER_BUILD_DIR%
 exit /b 0
 
 :skip_install
