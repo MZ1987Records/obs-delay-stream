@@ -56,10 +56,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <fstream>
-
-#include <websocketpp/config/asio_no_tls.hpp>
-#include <websocketpp/server.hpp>
 
 #include <thread>
 #include <mutex>
@@ -76,72 +72,9 @@
 #include <memory>
 
 #include "constants.hpp"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include <libavcodec/avcodec.h>
-#include <libavutil/avutil.h>
-#include <libavutil/channel_layout.h>
-#include <libavutil/error.h>
-#include <libavutil/frame.h>
-#include <libavutil/opt.h>
-#include <libavutil/samplefmt.h>
-#include <libswresample/swresample.h>
-#ifdef __cplusplus
-}
-#endif
-
-using WsServer   = websocketpp::server<websocketpp::config::asio>;
-using ConnHandle = websocketpp::connection_hdl;
-using Clock      = std::chrono::steady_clock;
-using Ms         = std::chrono::duration<double, std::milli>;
-
-static constexpr uint32_t MAGIC_AUDI = 0x41554449u; // "AUDI"
-static constexpr uint32_t MAGIC_OPUS = 0x4F505553u; // "OPUS"
-
-// ============================================================
-// LatencyResult
-// ============================================================
-struct LatencyResult {
-    bool   valid       = false;
-    double avg_rtt_ms  = 0.0;
-    double avg_one_way = 0.0;
-    double min_rtt_ms  = 0.0;
-    double max_rtt_ms  = 0.0;
-    int    samples     = 0;
-};
-
-// ============================================================
-// ConnInfo: 各接続のメタ情報
-// ============================================================
-struct ConnInfo {
-    std::string stream_id; // 配信ID
-    int         ch = -1;   // 0-indexed ch番号 (0〜9)
-    bool        force_pcm = false; // クライアント要求でPCM固定
-};
-
-// ============================================================
-// ChannelState: ch毎の状態 (配信ID + ch番号でキー)
-// ============================================================
-struct ChannelState {
-    // 接続ハンドル集合
-    std::set<ConnHandle, std::owner_less<ConnHandle>> conns;
-
-    // RTT計測
-    std::map<int, Clock::time_point> ping_times;
-    std::vector<double>              rtt_samples;
-    std::atomic<bool>                measuring{false};
-    LatencyResult                    last_result;
-
-    // 最後に適用された遅延 (ms)。負値=未設定
-    double                           last_applied_delay{-1.0};
-    // 適用理由 ("auto_measure" / "manual_adjust")
-    std::string                      last_applied_reason;
-
-    // コールバック (計測完了時)
-    std::function<void(const std::string& stream_id, int ch, LatencyResult)> on_result;
-};
+#include "websocket-opus-encoder.hpp"
+#include "websocket-server-types.hpp"
+#include "websocket-server-utils.hpp"
 
 // ============================================================
 // StreamRouter
@@ -491,266 +424,37 @@ public:
     }
 
 private:
-    // ----- Opus Encoder (per channel) -----
-    struct OpusEnc {
-        bool disabled = false; // 初期化失敗で無効化
-        int  sample_rate = 0;
-        int  channels = 0;
-        int  frame_size = 0;   // samples per channel
-        int64_t pts = 0;
+    using OpusEnc = websocket_server_detail::OpusEnc;
+    using PathParseResult = websocket_server_detail::PathParseResult;
 
-        size_t in_offset_frames = 0;
-        std::vector<float> in_buf; // interleaved float
-
-        AVCodecContext* ctx = nullptr;
-        SwrContext*     swr = nullptr;
-        AVFrame*        frame = nullptr;
-        AVPacket*       pkt = nullptr;
-
-        void reset() {
-            if (pkt)   { av_packet_free(&pkt); }
-            if (frame) { av_frame_free(&frame); }
-            if (swr)   { swr_free(&swr); }
-            if (ctx)   { avcodec_free_context(&ctx); }
-            in_buf.clear();
-            in_offset_frames = 0;
-            sample_rate = 0;
-            channels = 0;
-            frame_size = 0;
-            pts = 0;
-            disabled = false;
-        }
-
-        bool init(int sr, int ch, int bitrate_kbps) {
-            reset();
-            const AVCodec* codec = avcodec_find_encoder_by_name("libopus");
-            if (!codec) codec = avcodec_find_encoder_by_name("opus");
-            if (!codec) {
-                blog(LOG_WARNING, "[obs-delay-stream] Opus encoder not found (libopus/opus)");
-                disabled = true;
-                return false;
-            }
-
-            ctx = avcodec_alloc_context3(codec);
-            if (!ctx) { disabled = true; return false; }
-
-            ctx->sample_rate = sr;
-            av_channel_layout_default(&ctx->ch_layout, ch);
-            ctx->bit_rate = (bitrate_kbps > 0) ? (int64_t)bitrate_kbps * 1000 : 0;
-            ctx->time_base = AVRational{1, sr};
-            ctx->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
-
-            // prefer packed float if available
-            const enum AVSampleFormat* sample_fmts = nullptr;
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 13, 100)
-            sample_fmts = codec->sample_fmts;
-#else
-            avcodec_get_supported_config(ctx, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
-                                         (const void**)&sample_fmts, NULL);
-#endif
-            ctx->sample_fmt = AV_SAMPLE_FMT_NONE;
-            if (sample_fmts) {
-                for (const enum AVSampleFormat* fmt = sample_fmts; *fmt != AV_SAMPLE_FMT_NONE; ++fmt) {
-                    if (*fmt == AV_SAMPLE_FMT_FLT) { ctx->sample_fmt = *fmt; break; }
-                }
-                if (ctx->sample_fmt == AV_SAMPLE_FMT_NONE)
-                    ctx->sample_fmt = sample_fmts[0];
-            } else {
-                ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;
-            }
-
-            if (avcodec_open2(ctx, codec, nullptr) < 0) {
-                blog(LOG_WARNING, "[obs-delay-stream] Opus encoder open failed");
-                disabled = true;
-                return false;
-            }
-
-            frame_size = ctx->frame_size;
-            if (frame_size <= 0) {
-                // Opus は通常 frame_size が設定される。未設定なら無効化。
-                blog(LOG_WARNING, "[obs-delay-stream] Opus frame_size unavailable");
-                disabled = true;
-                return false;
-            }
-
-            frame = av_frame_alloc();
-            pkt   = av_packet_alloc();
-            if (!frame || !pkt) { disabled = true; return false; }
-
-            frame->nb_samples = frame_size;
-            frame->format = ctx->sample_fmt;
-            frame->sample_rate = ctx->sample_rate;
-            if (av_channel_layout_copy(&frame->ch_layout, &ctx->ch_layout) < 0) {
-                disabled = true;
-                return false;
-            }
-            if (av_frame_get_buffer(frame, 0) < 0) {
-                blog(LOG_WARNING, "[obs-delay-stream] Opus frame buffer alloc failed");
-                disabled = true;
-                return false;
-            }
-
-            if (ctx->sample_fmt != AV_SAMPLE_FMT_FLT) {
-                AVChannelLayout in_layout;
-                av_channel_layout_default(&in_layout, ch);
-                if (swr_alloc_set_opts2(&swr,
-                        &ctx->ch_layout, ctx->sample_fmt, ctx->sample_rate,
-                        &in_layout, AV_SAMPLE_FMT_FLT, ctx->sample_rate,
-                        0, nullptr) < 0 || !swr) {
-                    blog(LOG_WARNING, "[obs-delay-stream] Opus swr_alloc failed");
-                    disabled = true;
-                    return false;
-                }
-                if (swr_init(swr) < 0) {
-                    blog(LOG_WARNING, "[obs-delay-stream] Opus swr_init failed");
-                    disabled = true;
-                    return false;
-                }
-            }
-
-            sample_rate = sr;
-            channels = ch;
-            pts = 0;
-            return true;
-        }
-    };
-
-    // ----- キー生成 -----
     static std::string make_key(const std::string& sid, int ch) {
-        return sid + "/" + std::to_string(ch);
+        return websocket_server_detail::make_key(sid, ch);
     }
-
-    // ----- 配信IDのサニタイズ (半角英数字のみ許可、大小は保持) -----
     static std::string sanitize_id(const std::string& raw) {
-        std::string out;
-        for (char c : raw) {
-            if (std::isalnum((unsigned char)c))
-                out += c;
-        }
-        return out;
+        return websocket_server_detail::sanitize_id(raw);
     }
-
     static std::string json_escape(const std::string& s) {
-        std::string out;
-        out.reserve(s.size() + 8);
-        for (unsigned char c : s) {
-            switch (c) {
-            case '\\': out += "\\\\"; break;
-            case '"':  out += "\\\""; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    snprintf(buf, sizeof(buf), "\\u%04x", c);
-                    out += buf;
-                } else {
-                    out.push_back((char)c);
-                }
-            }
-        }
-        return out;
+        return websocket_server_detail::json_escape(s);
     }
-
     static std::string url_decode(const std::string& s) {
-        std::string out;
-        out.reserve(s.size());
-        for (size_t i = 0; i < s.size(); ++i) {
-            unsigned char c = (unsigned char)s[i];
-            if (c == '%' && i + 2 < s.size()
-                && std::isxdigit((unsigned char)s[i + 1])
-                && std::isxdigit((unsigned char)s[i + 2])) {
-                auto hex = [](unsigned char v) -> int {
-                    if (v >= '0' && v <= '9') return v - '0';
-                    if (v >= 'a' && v <= 'f') return 10 + (v - 'a');
-                    if (v >= 'A' && v <= 'F') return 10 + (v - 'A');
-                    return 0;
-                };
-                int hi = hex((unsigned char)s[i + 1]);
-                int lo = hex((unsigned char)s[i + 2]);
-                out.push_back((char)((hi << 4) | lo));
-                i += 2;
-            } else if (c == '+') {
-                out.push_back(' ');
-            } else {
-                out.push_back((char)c);
-            }
-        }
-        return out;
+        return websocket_server_detail::url_decode(s);
     }
-
-    // ----- WebSocketパスから (stream_id, ch) を解析 -----
-    enum class PathParseResult {
-        Ok,
-        Invalid,
-        ChOutOfRange,
-    };
-
     static PathParseResult parse_path(const std::string& path,
                                       std::string& stream_id, int& ch_0idx,
-                                      int max_ch)
-    {
-        std::string p = path;
-        if (!p.empty() && p[0] == '/') p = p.substr(1);
-
-        auto slash = p.find('/');
-        if (slash == std::string::npos || slash == 0) return PathParseResult::Invalid;
-
-        stream_id = sanitize_id(p.substr(0, slash));
-        std::string ch_str = p.substr(slash + 1);
-        auto q = ch_str.find_first_of("?#");
-        if (q != std::string::npos) ch_str = ch_str.substr(0, q);
-
-        char* end = nullptr;
-        long ch_1idx = std::strtol(ch_str.c_str(), &end, 10);
-        if (end == ch_str.c_str() || *end != '\0') return PathParseResult::Invalid;
-        if (ch_1idx < 1 || ch_1idx > max_ch) return PathParseResult::ChOutOfRange;
-        ch_0idx = (int)ch_1idx - 1;
-        return stream_id.empty() ? PathParseResult::Invalid : PathParseResult::Ok;
+                                      int max_ch) {
+        return websocket_server_detail::parse_path(path, stream_id, ch_0idx, max_ch);
     }
-
     static bool is_safe_rel_path(const std::string& rel) {
-        if (rel.empty()) return false;
-        if (rel.find("..") != std::string::npos) return false;
-        if (rel.find('\\') != std::string::npos) return false;
-        if (rel.find(':') != std::string::npos) return false; // Windows drive
-        return true;
+        return websocket_server_detail::is_safe_rel_path(rel);
     }
-
     static std::string join_path(const std::string& base, const std::string& rel) {
-        if (base.empty()) return rel;
-        std::string out = base;
-        char last = out.back();
-        if (last != '/' && last != '\\') out += '/';
-        out += rel;
-        return out;
+        return websocket_server_detail::join_path(base, rel);
     }
-
     static bool read_file_to_string(const std::string& path, std::string& out) {
-        std::ifstream ifs(path, std::ios::binary);
-        if (!ifs) return false;
-        out.assign(std::istreambuf_iterator<char>(ifs),
-                   std::istreambuf_iterator<char>());
-        return true;
+        return websocket_server_detail::read_file_to_string(path, out);
     }
-
     static const char* guess_content_type(const std::string& path) {
-        auto dot = path.find_last_of('.');
-        std::string ext = (dot == std::string::npos) ? "" : path.substr(dot);
-        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){
-            return (char)std::tolower(c);
-        });
-        if (ext == ".html") return "text/html; charset=utf-8";
-        if (ext == ".js" || ext == ".mjs") return "application/javascript; charset=utf-8";
-        if (ext == ".css") return "text/css; charset=utf-8";
-        if (ext == ".wasm") return "application/wasm";
-        if (ext == ".json" || ext == ".map") return "application/json; charset=utf-8";
-        if (ext == ".svg") return "image/svg+xml";
-        if (ext == ".png") return "image/png";
-        if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
-        if (ext == ".gif") return "image/gif";
-        return "application/octet-stream";
+        return websocket_server_detail::guess_content_type(path);
     }
 
     // ----- ch_map_検索 -----
