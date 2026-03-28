@@ -1709,21 +1709,12 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
             T_("WsServerStart"), cb_ws_server_start, d);
         obs_property_set_enabled(start_p, has_sid);
     }
-    if (!ws_running && !has_sid) {
-        char ws_start_note[224];
-        snprintf(ws_start_note, sizeof(ws_start_note),
-            T_("WsServerStartNoteStreamIdAndFirewallFmt"), ws_port);
-        obs_property_t* note_p = obs_properties_add_text(
-            grp, "ws_server_start_note_sid", ws_start_note, OBS_TEXT_INFO);
-        obs_property_text_set_info_word_wrap(note_p, false);
-    } else {
-        char ws_firewall_note[160];
-        snprintf(ws_firewall_note, sizeof(ws_firewall_note),
-            T_("WsFirewallNoteFmt"), ws_port);
-        obs_property_t* fw_note_p = obs_properties_add_text(
-            grp, "ws_firewall_note", ws_firewall_note, OBS_TEXT_INFO);
-        obs_property_text_set_info_word_wrap(fw_note_p, false);
-    }
+    char ws_firewall_note[160];
+    snprintf(ws_firewall_note, sizeof(ws_firewall_note),
+        T_("WsFirewallNoteFmt"), ws_port);
+    obs_property_t* fw_note_p = obs_properties_add_text(
+        grp, "ws_firewall_note", ws_firewall_note, OBS_TEXT_INFO);
+    obs_property_text_set_info_word_wrap(fw_note_p, false);
 
     obs_property_t* send_p = obs_properties_add_bool(grp, "ws_send_paused", T_("WsSendPause"));
     if (!ws_running) {
