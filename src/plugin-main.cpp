@@ -1333,7 +1333,9 @@ static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     obs_data_t* s = obs_source_get_settings(d->context);
     std::string out;
     out.reserve(512);
-    out += "演者は各自、以下のURLをChromeで開いて音声ストリームを再生してください。\r\n\r\n";
+    out += "演者は各自、以下のURLをChromeで開いて音声ストリームを再生してください。\r\n"
+        "Each performer should open the following URL in Chrome and play the audio stream.\r\n"
+        "\r\n";
     int sub_count = d->sub_ch_count;
     for (int i = 0; i < sub_count; ++i) {
         std::string url = make_sub_url(d, i + 1);
