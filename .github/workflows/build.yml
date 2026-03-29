@@ -30,26 +30,24 @@ jobs:
       - name: Convert README to PDF
         shell: pwsh
         run: |
-          $src = "$env:GITHUB_WORKSPACE/README.md"
+          $sources = @(
+            [pscustomobject]@{ src = "README.md";    dst = "README.pdf"    },
+            [pscustomobject]@{ src = "README-en.md"; dst = "README-en.pdf" }
+          )
           $tmpDir = "$env:GITHUB_WORKSPACE/.pdf-tmp"
-          $tmpSrc = "$tmpDir/README.md"
-          $tmpPdf = "$tmpDir/README.pdf"
-          $dist = "$env:GITHUB_WORKSPACE/dist"
-          $dst = "$dist/README.pdf"
-          $css = "$env:GITHUB_WORKSPACE/node_modules/github-markdown-css/github-markdown-light.css"
+          $dist   = "$env:GITHUB_WORKSPACE/dist"
+          $css    = "$env:GITHUB_WORKSPACE/node_modules/github-markdown-css/github-markdown-light.css"
           $cjkCss = "$env:GITHUB_WORKSPACE/.github/pdf-cjk.css"
-          if (-Not (Test-Path $src)) { throw "README.md not found." }
           if (-Not (Test-Path $css)) { throw "github-markdown CSS not found: $css" }
-          New-Item -ItemType Directory -Force $dist | Out-Null
+          New-Item -ItemType Directory -Force $dist   | Out-Null
           New-Item -ItemType Directory -Force $tmpDir | Out-Null
 
-          $repoUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
-          $refName = $env:GITHUB_REF_NAME
+          $repoUrl  = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+          $refName  = $env:GITHUB_REF_NAME
           $blobBase = "$repoUrl/blob/$refName"
           $treeBase = "$repoUrl/tree/$refName"
-          $rawBase = "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$refName"
+          $rawBase  = "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$refName"
           $workspace = [System.IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
-          $srcDir = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($src))
 
           function Resolve-GitHubUrl {
             param(
@@ -99,36 +97,47 @@ jobs:
             return "$blobBase/$repoPath$suffix"
           }
 
-          $content = Get-Content $src -Raw
-          $content = [regex]::Replace($content, '!\[(?<label>[^\]]*)\]\((?<url>[^)]+)\)', {
-            param($m)
-            $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $true
-            return "![{0}]({1})" -f $m.Groups['label'].Value, $newUrl
-          })
-          $content = [regex]::Replace($content, '(?<!!)\[(?<label>[^\]]+)\]\((?<url>[^)]+)\)', {
-            param($m)
-            $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $false
-            return "[{0}]({1})" -f $m.Groups['label'].Value, $newUrl
-          })
-          $content = [regex]::Replace($content, '(?<attr>src|href)\s*=\s*"(?<url>[^"]+)"', {
-            param($m)
-            $forImage = $m.Groups['attr'].Value.ToLowerInvariant() -eq 'src'
-            $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $forImage
-            return "{0}=""{1}""" -f $m.Groups['attr'].Value, $newUrl
-          })
-          $content = [regex]::Replace($content, "(?<attr>src|href)\s*=\s*'(?<url>[^']+)'", {
-            param($m)
-            $forImage = $m.Groups['attr'].Value.ToLowerInvariant() -eq 'src'
-            $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $forImage
-            return "{0}='{1}'" -f $m.Groups['attr'].Value, $newUrl
-          })
+          foreach ($item in $sources) {
+            $src    = "$env:GITHUB_WORKSPACE/$($item.src)"
+            $srcDir = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($src))
+            $tmpSrc = "$tmpDir/$($item.src)"
+            $tmpPdf = [System.IO.Path]::ChangeExtension($tmpSrc, ".pdf")
+            $dst    = "$dist/$($item.dst)"
 
-          $content | Set-Content $tmpSrc -Encoding UTF8
-          if (Test-Path $tmpPdf) { Remove-Item $tmpPdf -Force }
-          npx md-to-pdf $tmpSrc --stylesheet $css --stylesheet $cjkCss --body-class "markdown-body"
-          if (-Not (Test-Path $tmpPdf)) { throw "PDF was not generated: $tmpPdf" }
-          Move-Item $tmpPdf $dst -Force
-          if (-Not (Test-Path $dst)) { throw "PDF was not generated: $dst" }
+            if (-Not (Test-Path $src)) { throw "$($item.src) not found." }
+
+            $content = Get-Content $src -Raw
+            $content = [regex]::Replace($content, '\s*\|\s*\[[^\]]+\]\(README[^)]*\.md\)', '')
+            $content = [regex]::Replace($content, '!\[(?<label>[^\]]*)\]\((?<url>[^)]+)\)', {
+              param($m)
+              $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $true
+              return "![{0}]({1})" -f $m.Groups['label'].Value, $newUrl
+            })
+            $content = [regex]::Replace($content, '(?<!!)\[(?<label>[^\]]+)\]\((?<url>[^)]+)\)', {
+              param($m)
+              $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $false
+              return "[{0}]({1})" -f $m.Groups['label'].Value, $newUrl
+            })
+            $content = [regex]::Replace($content, '(?<attr>src|href)\s*=\s*"(?<url>[^"]+)"', {
+              param($m)
+              $forImage = $m.Groups['attr'].Value.ToLowerInvariant() -eq 'src'
+              $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $forImage
+              return "{0}=""{1}""" -f $m.Groups['attr'].Value, $newUrl
+            })
+            $content = [regex]::Replace($content, "(?<attr>src|href)\s*=\s*'(?<url>[^']+)'", {
+              param($m)
+              $forImage = $m.Groups['attr'].Value.ToLowerInvariant() -eq 'src'
+              $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $forImage
+              return "{0}='{1}'" -f $m.Groups['attr'].Value, $newUrl
+            })
+
+            $content | Set-Content $tmpSrc -Encoding UTF8
+            if (Test-Path $tmpPdf) { Remove-Item $tmpPdf -Force }
+            npx md-to-pdf $tmpSrc --stylesheet $css --stylesheet $cjkCss --body-class "markdown-body"
+            if (-Not (Test-Path $tmpPdf)) { throw "PDF was not generated: $tmpPdf" }
+            Move-Item $tmpPdf $dst -Force
+            if (-Not (Test-Path $dst)) { throw "PDF was not generated: $dst" }
+          }
 
       - name: Detect Windows SDK
         id: sdk
