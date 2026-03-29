@@ -26,6 +26,7 @@ import {
   syncBtn,
   syncBtnLabel,
   syncIntervalSelect,
+  meterEl,
 } from './elements';
 import { t, tr } from './i18n';
 import { getOptionalElement, h } from './dom';
@@ -250,6 +251,10 @@ export function setInputsEnabled(enabled: boolean): void {
   chInput.disabled = !enabled;
 }
 
+export function setMeterOffline(offline: boolean): void {
+  meterEl.classList.toggle('is-offline', offline);
+}
+
 export function setDisconnectedUi(): void {
   connectBtn.disabled = false;
   stopBtn.disabled = true;
@@ -258,6 +263,7 @@ export function setDisconnectedUi(): void {
   latencyCard.classList.remove('has-background-info-light');
   setInputsEnabled(true);
   setCodecLabel('—');
+  setMeterOffline(true);
 }
 
 // ============================================================

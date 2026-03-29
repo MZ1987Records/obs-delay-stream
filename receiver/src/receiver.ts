@@ -31,6 +31,7 @@ import {
   showMeasuring,
   showLatencyResult,
   showApplied,
+  setMeterOffline,
   updateMemoDisplay,
   getChRangeText,
 } from './ui';
@@ -120,6 +121,7 @@ bus.on('ws:open', ({ url }) => {
   syncBtn.disabled = false;
   enableSyncOptions(true);
   latencyCard.classList.add('has-background-info-light');
+  setMeterOffline(false);
 });
 
 bus.on('ws:close', ({ code, reason, cause }) => {
