@@ -21,6 +21,8 @@ export const state = {
   gainNode: null as GainNode | null,
   nextTime: 0,
   muted: false,
+  activeSources: new Set<AudioBufferSourceNode>(),
+  nextBufferRampIn: false,
 
   // CH範囲
   maxCh: DEFAULT_MAX_CH,

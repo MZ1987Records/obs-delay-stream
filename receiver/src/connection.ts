@@ -4,7 +4,7 @@ import { isRecord, isLatencyResultMessage, safeParseJson } from './types';
 import type { JsonRecord } from './types';
 import { sidInput, chInput } from './elements';
 import { buildUrl, clearConnectTimer } from './ui';
-import { ensureAudioContext, handlePcm16 } from './audio';
+import { ensureAudioContext, handlePcm16, armNextBufferRampIn } from './audio';
 import { handleOpus, sendPcmFallbackIfPossible } from './opus';
 import { bus } from './bus';
 
@@ -142,6 +142,7 @@ export function connect(): void {
     if (state.ws !== wsLocal) return;
     clearConnectTimer();
     state.connecting = false;
+    armNextBufferRampIn();
     bus.emit('ws:open', { url });
     sendPcmFallbackIfPossible();
   };

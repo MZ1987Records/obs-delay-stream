@@ -1,5 +1,5 @@
 import { state } from './state';
-import { AHEAD, NUM_BARS } from './constants';
+import { AHEAD, NUM_BARS, RESYNC_RAMP_MS } from './constants';
 import {
   volSlider,
   dbDisplay,
@@ -97,11 +97,36 @@ export function ensureAudioContext(): boolean {
 // バッファ再生
 // ============================================================
 
+function applyFadeInToBuffer(abuf: AudioBuffer, rampMs: number): void {
+  const rampFrames = Math.min(
+    abuf.length,
+    Math.max(1, Math.floor((abuf.sampleRate * rampMs) / 1000)),
+  );
+  for (let c = 0; c < abuf.numberOfChannels; c++) {
+    const d = abuf.getChannelData(c);
+    for (let i = 0; i < rampFrames; i++) {
+      d[i] *= (i + 1) / rampFrames;
+    }
+  }
+}
+
+export function armNextBufferRampIn(): void {
+  state.nextBufferRampIn = true;
+}
+
 export function playBuffer(abuf: AudioBuffer | null): void {
   if (!abuf || !state.actx || !state.gainNode) return;
+  if (state.nextBufferRampIn) {
+    applyFadeInToBuffer(abuf, RESYNC_RAMP_MS);
+    state.nextBufferRampIn = false;
+  }
   const src = state.actx.createBufferSource();
   src.buffer = abuf;
   src.connect(state.gainNode);
+  state.activeSources.add(src);
+  src.onended = () => {
+    state.activeSources.delete(src);
+  };
 
   const now = state.actx.currentTime;
   if (state.nextTime < now + 0.01) state.nextTime = now + AHEAD;

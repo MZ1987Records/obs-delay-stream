@@ -4,6 +4,9 @@ import {
   PING_SAMPLES,
   WS_PORT,
   RESYNC_DISPLAY_MS,
+  RESYNC_RAMP_MAX_MS,
+  RESYNC_RAMP_MIN_DRIFT_MS,
+  RESYNC_RAMP_MS,
   AHEAD,
 } from './constants';
 import {
@@ -374,8 +377,51 @@ export function showApplied(ms: number | string): void {
 // ============================================================
 
 export function resync(): void {
-  if (!state.actx) return;
-  state.nextTime = state.actx.currentTime + AHEAD;
+  if (state.currentSyncInterval > 0) {
+    startAutoSync(state.currentSyncInterval);
+  }
+
+  if (!state.actx || !state.gainNode) return;
+  const now = state.actx.currentTime;
+  const bufferedSec = Math.max(0, state.nextTime - now);
+  const driftSec = Math.abs(bufferedSec - AHEAD);
+  const minDriftSec = RESYNC_RAMP_MIN_DRIFT_MS / 1000;
+  if (driftSec < minDriftSec) {
+    state.nextTime = now + AHEAD;
+    setStatus(t('status.resynced'), 'ok');
+    setTimeout(() => {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN)
+        setStatus(t('status.receiving'), 'ok');
+    }, RESYNC_DISPLAY_MS);
+    return;
+  }
+  const rampOutSec = Math.min(bufferedSec, RESYNC_RAMP_MAX_MS / 1000);
+  const rampInSec = RESYNC_RAMP_MS / 1000;
+  const stopAt = now + rampOutSec;
+  const gainParam = state.gainNode.gain;
+  const currentGain = gainParam.value;
+
+  gainParam.cancelScheduledValues(now);
+  gainParam.setValueAtTime(currentGain, now);
+  if (rampOutSec > 0) {
+    gainParam.linearRampToValueAtTime(0, stopAt);
+  } else {
+    gainParam.setValueAtTime(0, now);
+  }
+
+  for (const src of state.activeSources) {
+    try {
+      src.stop(stopAt);
+    } catch {
+      /* already stopped */
+    }
+  }
+
+  gainParam.setValueAtTime(0, stopAt);
+  gainParam.linearRampToValueAtTime(currentGain, stopAt + rampInSec);
+  state.nextTime = now + AHEAD;
+  state.nextBufferRampIn = true;
+
   setStatus(t('status.resynced'), 'ok');
   setTimeout(() => {
     if (state.ws && state.ws.readyState === WebSocket.OPEN)
@@ -407,7 +453,6 @@ export function startAutoSync(interval: number): void {
     updateCountdown();
     if (state.syncCountdown <= 0) {
       resync();
-      state.syncCountdown = state.currentSyncInterval;
     }
   }, 1000);
 }
