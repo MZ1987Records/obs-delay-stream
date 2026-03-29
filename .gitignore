@@ -32,6 +32,7 @@ Makefile
 
 # IDE / Editor
 .claude/*
+!.claude/settings.json
 !.claude/skills/
 !.claude/commands/
 .codex
