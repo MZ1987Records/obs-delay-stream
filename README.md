@@ -2,7 +2,7 @@
 
 **VRChat Dancer/音楽パフォーマー支援ツール[obs-delay-stream]**
 
-[BOOTH](https://mz1987records.booth.pm/items/8134637) | [バグ報告](https://github.com/MZ1987Records/obs-delay-stream/issues/new/choose) | [English](README_EN.md)
+[BOOTH](https://mz1987records.booth.pm/items/8134637) | [バグ報告](https://github.com/MZ1987Records/obs-delay-stream/issues/new/choose) | [English](README-en.md)
 
 <p align="center">
   <img src="receiver/images/obs-delay-stream-logo.svg" alt="obs-delay-stream logo" width="400">
