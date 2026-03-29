@@ -68,6 +68,39 @@ static std::string trim_copy(std::string s) {
     return s.substr(begin, end - begin + 1);
 }
 
+// URL文字列からホスト名（ドメイン/IP）を抽出する。
+static std::string extract_host_from_url(const std::string& url) {
+    if (url.empty()) return "";
+    const size_t scheme = url.find("://");
+    const size_t host_begin = (scheme == std::string::npos) ? 0 : (scheme + 3);
+    if (host_begin >= url.size()) return "";
+
+    size_t host_end = url.find_first_of("/?#", host_begin);
+    if (host_end == std::string::npos) host_end = url.size();
+    if (host_end <= host_begin) return "";
+
+    std::string host_port = url.substr(host_begin, host_end - host_begin);
+    if (host_port.empty()) return "";
+
+    // userinfo が含まれる場合は除外する。
+    const size_t at = host_port.rfind('@');
+    if (at != std::string::npos) {
+        if (at + 1 >= host_port.size()) return "";
+        host_port = host_port.substr(at + 1);
+    }
+
+    if (host_port.empty()) return "";
+    if (host_port.front() == '[') {
+        // IPv6 [addr]:port 形式
+        const size_t close = host_port.find(']');
+        if (close == std::string::npos || close <= 1) return "";
+        return host_port.substr(1, close - 1);
+    }
+
+    const size_t colon = host_port.find(':');
+    return colon == std::string::npos ? host_port : host_port.substr(0, colon);
+}
+
 // RTMP/RTMPSスキームのURLならそのまま返す。対象外は空文字。
 static std::string normalize_rtmp_url_candidate(const char* raw) {
     if (!raw || !*raw) return "";
@@ -1952,6 +1985,7 @@ static void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
     obs_properties_t* grp = obs_properties_create();
     obs_properties_add_text(grp, "cloudflared_exe_path", T_("CloudflaredExePath"), OBS_TEXT_DEFAULT);
 
+    bool show_tunnel_start_note = false;
     bool cloudflared_downloading =
         d->tunnel.cloudflared_downloading();
     if (ts == TunnelState::Running) {
@@ -1972,11 +2006,24 @@ static void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
             obs_properties_add_button2(grp, "tunnel_start_btn", T_("TunnelStart"), cb_tunnel_start, d);
         bool ws_running = d->router_running.load();
         obs_property_set_enabled(start_p, ws_running);
-        if (!ws_running) {
-            obs_properties_add_text(grp, "tunnel_start_note",
-                T_("TunnelStartNote"), OBS_TEXT_INFO);
-        }
+        show_tunnel_start_note = !ws_running;
     }
+
+    std::string tunnel_domain = extract_host_from_url(turl);
+    if (!tunnel_domain.empty()) {
+        char db[320];
+        snprintf(db, sizeof(db), T_("TunnelAssignedDomainFmt"), tunnel_domain.c_str());
+        obs_properties_add_text(grp, "tunnel_domain_info", db, OBS_TEXT_INFO);
+    } else {
+        obs_properties_add_text(grp, "tunnel_domain_info",
+            T_("TunnelUnassignedDomain"), OBS_TEXT_INFO);
+    }
+
+    if (show_tunnel_start_note) {
+        obs_properties_add_text(grp, "tunnel_start_note",
+            T_("TunnelStartNote"), OBS_TEXT_INFO);
+    }
+
     if (ts == TunnelState::Running && !turl.empty()) {
         // URL 表示は「演者別チャンネル」に集約
     } else if (ts == TunnelState::Error && !terr.empty()) {
