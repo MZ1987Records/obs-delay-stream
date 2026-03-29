@@ -588,24 +588,31 @@ static std::string resolve_rtmp_url(DelayStreamData* d) {
     return url;
 }
 
-// cloudflaredの自動検出結果があれば設定へ反映する。
+// cloudflared の自動モード表記を正規化する（空文字は "auto" へ移行）。
 static void maybe_fill_cloudflared_path_from_auto(DelayStreamData* d) {
     if (!d || !d->context) return;
     obs_data_t* s = obs_source_get_settings(d->context);
     const char* cur = obs_data_get_string(s, "cloudflared_exe_path");
-    if (cur && _stricmp(cur, "auto") == 0) {
-        obs_data_set_string(s, "cloudflared_exe_path", "");
-        cur = "";
+    if (!cur || !*cur) {
+        // 旧設定（空文字=自動）を "auto" 表記へ移行する。
+        obs_data_set_string(s, "cloudflared_exe_path", "auto");
     }
-    bool is_auto = (!cur || !*cur);
-    if (is_auto) {
-        std::string auto_path;
-        if (TunnelManager::get_auto_cloudflared_path_if_exists(auto_path)) {
-            std::string ui_path = TunnelManager::to_localappdata_env_path(auto_path);
-            if (!cur || _stricmp(cur, ui_path.c_str()) != 0) {
-                obs_data_set_string(s, "cloudflared_exe_path", ui_path.c_str());
-            }
-        }
+    obs_data_release(s);
+}
+
+// auto/空文字指定で cloudflared 解決後、実体パスを設定へ保存する。
+static void maybe_persist_cloudflared_path_after_auto_ready(DelayStreamData* d) {
+    if (!d || !d->context) return;
+    std::string auto_path;
+    if (!TunnelManager::get_auto_cloudflared_path_if_exists(auto_path)) return;
+    std::string ui_path = TunnelManager::to_localappdata_env_path(auto_path);
+
+    obs_data_t* s = obs_source_get_settings(d->context);
+    if (!s) return;
+    const char* cur = obs_data_get_string(s, "cloudflared_exe_path");
+    bool is_auto = (!cur || !*cur || _stricmp(cur, "auto") == 0);
+    if (is_auto && (!cur || _stricmp(cur, ui_path.c_str()) != 0)) {
+        obs_data_set_string(s, "cloudflared_exe_path", ui_path.c_str());
     }
     obs_data_release(s);
 }
@@ -854,7 +861,14 @@ static void setup_event_callbacks(DelayStreamData* d) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         request_properties_refresh(d, "tunnel.on_stopped");
     };
-    d->tunnel.on_download_state = [d](bool) {
+    d->tunnel.on_download_state = [d](bool downloading) {
+        if (!downloading) {
+            queue_ui_safe(d, [](DelayStreamData* d) {
+                maybe_persist_cloudflared_path_after_auto_ready(d);
+                request_properties_refresh(d, "tunnel.on_download_state.done");
+            });
+            return;
+        }
         request_properties_refresh(d, "tunnel.on_download_state");
     };
     d->router.on_conn_change = [d](const std::string& sid, int, size_t) {
@@ -2296,7 +2310,7 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_double(settings, "sub_offset_ms",         0.0);
     obs_data_set_default_bool  (settings, "rtmp_url_auto",         true);
     obs_data_set_default_string(settings, "rtmp_url",              "");
-    obs_data_set_default_string(settings, "cloudflared_exe_path",  "");
+    obs_data_set_default_string(settings, "cloudflared_exe_path",  "auto");
     for (int i = 0; i < MAX_SUB_CH; ++i) {
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
         obs_data_set_default_double(settings, key, 0.0);
