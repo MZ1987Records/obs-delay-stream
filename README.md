@@ -1,22 +1,34 @@
 # obs-delay-stream  v4.1.0
 
-OBSにパフォーマー向けWebSocket配信機能を追加するプラグインです。各パフォーマーへの遅延時間が自動計測され、タイミングが揃うように自動調整されます。IP隠蔽トンネル機能つき。
+**VRChat Dancer/音楽パフォーマー支援ツール[obs-delay-stream]**
 
 [BOOTH](https://mz1987records.booth.pm/items/8134637) | [バグ報告](https://github.com/MZ1987Records/obs-delay-stream/issues/new/choose)
 
 <p align="center">
-  <img src="receiver/images/obs-delay-stream-logo.svg" alt="obs-delay-stream logo" width="280">
+  <img src="receiver/images/obs-delay-stream-logo.svg" alt="obs-delay-stream logo" width="400">
 </p>
+
+ダンサー間の同期ズレやダンスとワールド音楽の同期ズレをOBSプラグインとGoogleChromeのみで自動測定・設定し解決する事を目的としOBSにパフォーマー向けWebSocket音声配信機能を追加するプラグインです。
+同時接続ダンサー/パフォーマ数20人まで。
+
+各パフォーマーへの遅延時間が自動計測され、タイミングが揃うように自動調整された音声ストリームをGoogleChromeブラウザで受信可能です。
+ワールドへ配信される音声との遅延同期調整機能も実装しています。
+IP隠蔽トンネル機能つき。
+
+- SYNCROOMやDAWを必要としません。
+- ダンサー/パフォーマーの方は配信者の方から渡された受信用URLにGoogleChromeでアクセスする事でブラウザから低遅延且つ同期された音声を視聴できます。
+- VRChatクライアントに影響を与えません。
+- 受信ページは音量調整・リシンク/自動リシンク・JP/EN言語表示に対応しています。
 
 ---
 
-## 機能一覧
+## 設定項目一覧
 
-| 機能セクション | 内容 |
+| 設定セクション | 内容 |
 |------|------|
 | 演者別チャンネル設定 | 演者ごとの名前を管理します。詳細編集モードでは個別に同期設定を調整できます |
 | 配信ID / IP | 配信IDとホストIPは自動設定されます。詳細モードではホストIPを手動設定できます |
-| WebSocket | 配信サーバーの起動・停止と送信制御を行います |
+| WebSocket | 音声コーデックの設定、配信サーバーの起動・停止と送信制御を行います |
 | トンネル | cloudflared で公開URLを発行します。IPを直接公開せずに外部共有できます |
 | URL配布 | 演者用URLの一括コピーができます。共有時の手間や配布ミスを減らせます |
 | 同期フロー | 演者側・RTMP側の遅延を2ステップで計測・反映します。案内に沿って全体のタイミングを揃えられます |
@@ -108,4 +120,5 @@ C:\Program Files\obs-studio\data\obs-plugins\
 
 ## ライセンス
 
-[GNU General Public License v2.0 or later](LICENSE) — サードパーティライセンスについては [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) を参照してください。
+- [GNU General Public License v2.0 or later](LICENSE)
+- サードパーティライセンスについては [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) を参照してください。
