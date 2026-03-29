@@ -11,7 +11,7 @@ export const sidInput = getRequiredInputElement('sidInput');
 export const chInput = getRequiredInputElement('chInput');
 export const chHint = getOptionalElement<HTMLElement>('chHint');
 export const urlPreview = getOptionalElement<HTMLElement>('urlPreview');
-export const browserWarning = getOptionalElement<HTMLElement>('browserWarning');
+export const browserWarningBlock = getOptionalElement<HTMLElement>('browserWarningBlock');
 
 // ステータス
 export const statusBar = getRequiredElement<HTMLElement>('statusBar');

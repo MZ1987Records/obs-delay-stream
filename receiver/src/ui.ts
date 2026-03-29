@@ -20,7 +20,7 @@ import {
   chInput,
   chHint,
   urlPreview,
-  browserWarning,
+  browserWarningBlock,
   connectBtn,
   stopBtn,
   syncBtn,
@@ -168,8 +168,8 @@ export function isChromeBrowser(): boolean {
 }
 
 export function updateBrowserWarning(): void {
-  if (!browserWarning) return;
-  browserWarning.hidden = isChromeBrowser();
+  if (!browserWarningBlock) return;
+  browserWarningBlock.hidden = isChromeBrowser();
 }
 
 // ============================================================
