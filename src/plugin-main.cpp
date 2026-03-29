@@ -510,6 +510,7 @@ struct DelayStreamData {
     std::atomic<bool> create_done{false};    // set true after ds_create completes
     std::atomic<bool> in_get_props{false};   // true while ds_get_properties is running
     std::atomic<uint64_t> adjust_debounce_seq{0}; // スライダー変更デバウンス用シーケンス
+    std::atomic<bool> adjust_debounce_running{false}; // デバウンスタイマースレッド実行中フラグ
     std::atomic<bool> sid_autofill_guard{false};
     std::atomic<bool> detail_mode{false};
     std::atomic<bool> rtmp_url_auto{true};
@@ -1097,7 +1098,8 @@ static void ds_update(void* data, obs_data_t* settings) {
     }
     d->set_stream_id(sid);
     d->router.set_stream_id(sid);
-    maybe_autofill_rtmp_url(settings, false);
+    maybe_autofill_rtmp_url(settings, true);
+    maybe_fill_cloudflared_path_from_auto(d);
     {
         int ws_port = (int)obs_data_get_int(settings, "ws_port");
         if (ws_port < 1 || ws_port > 65535) {
@@ -1235,18 +1237,30 @@ static bool cb_sub_adjust_changed(void* priv, obs_properties_t*, obs_property_t*
     // 表示中の適用遅延値と差分があればデバウンス付きリビルドを予約する。
     // ドラッグ中はリビルドしない（スライダーウィジェットが破棄されドラッグが途切れるため）。
     // 最後のスライダー変更から 200ms 経過後にリビルドすることで「ドラッグ終了」を近似する。
+    // タイマースレッドは同時に最大1本だけ走る。
     if (std::fabs(d->sub[i].displayed_effective_ms - effective) > 0.01f) {
-        uint64_t seq = d->adjust_debounce_seq.fetch_add(1) + 1;
-        obs_source_t* ref = obs_source_get_ref(d->context);
-        if (ref) {
-            std::thread([d, ref, seq]() {
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                if (d->adjust_debounce_seq.load() == seq &&
-                    !d->destroying.load()) {
-                    request_properties_refresh(d, "adjust_debounce");
-                }
-                obs_source_release(ref);
-            }).detach();
+        d->adjust_debounce_seq.fetch_add(1, std::memory_order_relaxed);
+        bool expected = false;
+        if (d->adjust_debounce_running.compare_exchange_strong(expected, true)) {
+            obs_source_t* ref = obs_source_get_ref(d->context);
+            if (ref) {
+                std::thread([d, ref]() {
+                    // seq が安定する（=ドラッグ終了）まで 200ms ごとに再チェック
+                    uint64_t prev = 0;
+                    do {
+                        prev = d->adjust_debounce_seq.load(std::memory_order_relaxed);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    } while (prev != d->adjust_debounce_seq.load(std::memory_order_relaxed)
+                             && !d->destroying.load());
+                    d->adjust_debounce_running.store(false, std::memory_order_relaxed);
+                    if (!d->destroying.load()) {
+                        request_properties_refresh(d, "adjust_debounce");
+                    }
+                    obs_source_release(ref);
+                }).detach();
+            } else {
+                d->adjust_debounce_running.store(false, std::memory_order_relaxed);
+            }
         }
     }
     return false;
@@ -1504,16 +1518,11 @@ static bool cb_flow_reset(obs_properties_t*, obs_property_t*, void* priv) {
     request_properties_refresh(d, "cb_flow_reset");
     return false;
 }
-// 遅延有効/無効を切り替え、各バッファへ反映する。
-static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
+// 遅延有効/無効の切り替え時にUIを再構築する。
+// ランタイム状態（enabled, バッファ遅延）の反映は ds_update が担う。
+static bool cb_enabled_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t*) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
-    bool delay_disable = obs_data_get_bool(settings, "delay_disable");
-    bool en = !delay_disable;
-    d->enabled.store(en);
-    d->master_buf.set_delay_ms(en ? (uint32_t)d->master_delay_ms : 0);
-    for (int i = 0; i < MAX_SUB_CH; ++i)
-        apply_sub_delay_to_buffer(d, i);
     request_properties_refresh(d, "cb_enabled_changed");
     return false;
 }
@@ -2240,11 +2249,6 @@ static obs_properties_t* ds_get_properties(void* data) {
     if (d->in_get_props.exchange(true)) {
         return props;
     }
-
-    // 自動取得ON時は、プロパティ表示のたびに最新の配信設定URLへ更新する。
-    maybe_autofill_rtmp_url_from_source(d->context, true);
-
-    maybe_fill_cloudflared_path_from_auto(d);
 
     bool has_sid = false;
     bool detail_mode = false;
