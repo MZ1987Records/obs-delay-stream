@@ -1,0 +1,23 @@
+/* Japanese-friendly font stack for PDF generation via md-to-pdf (Puppeteer) */
+body,
+.markdown-body {
+  font-family:
+    "Noto Sans JP",
+    "Noto Sans CJK JP",
+    "Yu Gothic Medium",
+    "Yu Gothic",
+    "Meiryo",
+    "Hiragino Kaku Gothic ProN",
+    system-ui,
+    sans-serif;
+}
+
+/* Ensure code blocks also use a readable monospace with JP fallback */
+.markdown-body code,
+.markdown-body pre {
+  font-family:
+    "Cascadia Code",
+    "Consolas",
+    "Noto Sans Mono CJK JP",
+    monospace;
+}
