@@ -747,14 +747,10 @@ static std::string make_sub_url(DelayStreamData* d, int ch1) {
         if (ip.empty()) ip = d->auto_ip;
         if (ip.empty()) return "";
         int ws_port = d->ws_port.load(std::memory_order_relaxed);
-        char buf[256];
-        snprintf(buf, sizeof(buf), "http://%s:%d", ip.c_str(), ws_port);
-        base = buf;
+        base = "http://" + ip + ":" + std::to_string(ws_port);
     }
     if (!base.empty() && base.back() == '/') base.pop_back();
-    char buf[512];
-    snprintf(buf, sizeof(buf), "%s/#!/%s/%d", base.c_str(), sid.c_str(), ch1);
-    return buf;
+    return base + "/#!/" + sid + "/" + std::to_string(ch1);
 }
 
 
@@ -1679,8 +1675,7 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
         break;
     }
     case FlowPhase::Step1_Done: {
-        char buf[1536];
-        snprintf(buf, sizeof(buf), "%s", T_("FlowStep1DoneApplied"));
+        std::string buf = T_("FlowStep1DoneApplied");
         obs_data_t* s = obs_source_get_settings(d->context);
         for (int i = 0; i < sub_count; ++i) {
             if (!res.channels[i].connected) continue;
@@ -1688,19 +1683,17 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
             snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
             const char* memo = s ? obs_data_get_string(s, memo_key) : "";
             std::string name = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
-            char line[192];
             if (res.channels[i].measured) {
-                // 個別計測の自動適用後、現在の基準遅延値を表示する。
+                char line[192];
                 snprintf(line, sizeof(line), "\n  Ch.%d %s : %.1f ms",
                          i + 1, name.c_str(), d->sub[i].delay_ms);
+                buf += line;
             } else {
-                snprintf(line, sizeof(line), "\n  Ch.%d %s : %s",
-                         i + 1, name.c_str(), T_("FlowChFailed"));
+                buf += "\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
             }
-            strncat(buf, line, sizeof(buf)-strlen(buf)-1);
         }
         if (s) obs_data_release(s);
-        obs_properties_add_text(props, "flow_s1_result", buf, OBS_TEXT_INFO);
+        obs_properties_add_text(props, "flow_s1_result", buf.c_str(), OBS_TEXT_INFO);
         // 失敗CHがあればリトライボタンを表示
         if (res.measured_count < res.connected_count)
             obs_properties_add_button2(props, "flow_retry_btn",
@@ -1828,14 +1821,16 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
         ? (int)d->router.port()
         : d->ws_port.load(std::memory_order_relaxed);
 
-    char ws_title[96];
-    if (ws_running)
-        snprintf(ws_title, sizeof(ws_title), T_("WsRunningFmt"), ws_port);
-    else
-        snprintf(ws_title, sizeof(ws_title), "%s", T_("WsStopped"));
+    char ws_title_buf[96];
+    std::string ws_title;
+    if (ws_running) {
+        snprintf(ws_title_buf, sizeof(ws_title_buf), T_("WsRunningFmt"), ws_port);
+        ws_title = ws_title_buf;
+    } else {
+        ws_title = T_("WsStopped");
+    }
     if (ws_running && !d->ws_send_enabled.load()) {
-        strncat(ws_title, T_("WsPausedSuffix"),
-            sizeof(ws_title) - strlen(ws_title) - 1);
+        ws_title += T_("WsPausedSuffix");
     }
 
     obs_properties_t* grp = obs_properties_create();
@@ -1917,7 +1912,7 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     if (!ws_running) {
         obs_property_set_enabled(delay_p, false);
     }
-    obs_properties_add_group(props, "grp_ws", ws_title, OBS_GROUP_NORMAL, grp);
+    obs_properties_add_group(props, "grp_ws", ws_title.c_str(), OBS_GROUP_NORMAL, grp);
 }
 
 // Tunnel 設定グループ
@@ -2126,7 +2121,7 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     d->btn_ctx[i] = { d, i };
 
     char uk[32], mk[32], rk[32], nk[32], dk_rm[32], ajk[32], eik[32];
-    char ul[32], us[512], gk[32], gt[32];
+    char ul[32], gk[32], gt[32];
     snprintf(uk, sizeof(uk), "sub%d_url", i);
     snprintf(mk, sizeof(mk), "sub%d_meas", i);
     snprintf(rk, sizeof(rk), "sub%d_result", i);
@@ -2141,10 +2136,11 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     obs_properties_t* ch_grp = obs_properties_create();
     std::string url = make_sub_url(d, i + 1);
     size_t nc = d->router.client_count(i);
+    std::string us;
     if (url.empty()) {
-        snprintf(us, sizeof(us), "%s", T_("NotConfigured"));
+        us = T_("NotConfigured");
     } else {
-        snprintf(us, sizeof(us), "<a href=\"%s\">%s</a>", url.c_str(), url.c_str());
+        us = std::string("<a href=\"") + url + "\">" + url + "</a>";
     }
 
     obs_property_t* memo_p = obs_properties_add_text(ch_grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
@@ -2152,7 +2148,7 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
         obs_property_set_enabled(memo_p, false);
     }
     obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
-    obs_property_set_long_description(up, us);
+    obs_property_set_long_description(up, us.c_str());
     obs_property_text_set_info_word_wrap(up, false);
     obs_property_t* sp = obs_properties_add_int_slider(
         ch_grp, ajk, T_("SubAdjust"),

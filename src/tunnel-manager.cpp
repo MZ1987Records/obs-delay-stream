@@ -261,7 +261,7 @@ bool TunnelManager::launch_process(const std::string& exe_path, const std::strin
     // ファイルリダイレクト方式（パイプバッファ詰まりを完全回避）
     char tmp_path[MAX_PATH] = {};
     GetTempPathA(MAX_PATH, tmp_path);
-    if (tmp_path[0] == 0) strcpy(tmp_path, "C:\\Temp\\");
+    if (tmp_path[0] == 0) strncpy(tmp_path, "C:\\Temp\\", MAX_PATH - 1);
     CreateDirectoryA(tmp_path, nullptr);
     log_file_path_ = std::string(tmp_path) + "obs_tunnel_out.txt";
     blog(LOG_INFO, "[obs-delay-stream] tunnel log file: %s", log_file_path_.c_str());
