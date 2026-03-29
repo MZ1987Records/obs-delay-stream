@@ -56,6 +56,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
 static std::atomic<bool> g_delay_stream_filter_exists{false};
 static constexpr float   SUB_ADJUST_MIN_MS = -500.0f;
 static constexpr float   SUB_ADJUST_MAX_MS = 500.0f;
+static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
 static std::atomic<uint64_t> g_props_refresh_seq{0};
 
 // 前後の空白を削除した文字列を返す。
@@ -1729,6 +1730,18 @@ static void read_properties_view_state(DelayStreamData* d, bool& has_sid, bool& 
     detail_mode = d->detail_mode.load(std::memory_order_relaxed);
 }
 
+// このフィルタが付いているオーディオソースの同期オフセット(ns)を取得する。
+static bool try_get_parent_audio_sync_offset_ns(DelayStreamData* d, int64_t& out_offset_ns) {
+    if (!d || !d->context) return false;
+
+    obs_source_t* parent = obs_filter_get_parent(d->context);
+    if (!parent) parent = obs_filter_get_target(d->context);
+    if (!parent || is_obs_source_removed(parent)) return false;
+
+    out_offset_ns = obs_source_get_sync_offset(parent);
+    return true;
+}
+
 // プラグイン情報と詳細モードをまとめた先頭グループを追加する。
 static void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
@@ -1751,6 +1764,17 @@ static void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
         obs_property_t* detail_p =
             obs_properties_add_bool(grp, "detail_mode", T_("DetailMode"));
         obs_property_set_modified_callback2(detail_p, cb_detail_mode_changed, d);
+
+        int64_t sync_offset_ns = 0;
+        if (try_get_parent_audio_sync_offset_ns(d, sync_offset_ns) &&
+            sync_offset_ns != REQUIRED_AUDIO_SYNC_OFFSET_NS) {
+            obs_property_t* warn_p = obs_properties_add_text(
+                grp,
+                "audio_sync_offset_warning_top",
+                T_("AudioSyncOffsetWarning"),
+                OBS_TEXT_INFO);
+            obs_property_text_set_info_word_wrap(warn_p, true);
+        }
     }
 
     obs_properties_add_group(props, "grp_plugin", T_("Plugin"), OBS_GROUP_NORMAL, grp);
@@ -1955,6 +1979,16 @@ static void add_flow_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
     build_flow_panel(grp, d);
+    int64_t sync_offset_ns = 0;
+    if (try_get_parent_audio_sync_offset_ns(d, sync_offset_ns) &&
+        sync_offset_ns != REQUIRED_AUDIO_SYNC_OFFSET_NS) {
+        obs_property_t* warn_p = obs_properties_add_text(
+            grp,
+            "audio_sync_offset_warning",
+            T_("AudioSyncOffsetWarning"),
+            OBS_TEXT_INFO);
+        obs_property_text_set_info_word_wrap(warn_p, true);
+    }
     int active_channels = d->sub_ch_count;
     int connected_channels = 0;
     for (int i = 0; i < active_channels; ++i) {
