@@ -6,7 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        ありがとうございます。分かる範囲で記入してください。
+        ありがとうございます。以下のIssue一覧に既に同様の報告がないことをご確認の上、分かる範囲で詳細に記入してください。
+        https://github.com/MZ1987Records/obs-delay-stream/issues
 
   - type: input
     id: summary

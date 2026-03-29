@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        ありがとうございます。分かる範囲で記入してください。
+        ありがとうございます。以下のIssue一覧に既に同様の提案がないことをご確認の上、簡潔に記入してください。
 
   - type: input
     id: summary
