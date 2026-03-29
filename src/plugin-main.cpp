@@ -497,6 +497,7 @@ struct DelayStreamData {
     struct SubChannel {
         float        delay_ms = 0.0f;
         float        adjust_ms = 0.0f;
+        float        displayed_effective_ms = -1.0f; // UI上に最後に表示した適用遅延値
         DelayBuffer  buf;
         MeasureState measure;
     };
@@ -506,8 +507,9 @@ struct DelayStreamData {
     uint32_t      sample_rate = 48000;
     uint32_t      channels    = 2;
     bool          initialized = false;
-    std::atomic<bool> create_done{false}; // set true after ds_create completes
-    std::atomic<bool> in_get_props{false}; // true while ds_get_properties is running
+    std::atomic<bool> create_done{false};    // set true after ds_create completes
+    std::atomic<bool> in_get_props{false};   // true while ds_get_properties is running
+    std::atomic<uint64_t> adjust_debounce_seq{0}; // スライダー変更デバウンス用シーケンス
     std::atomic<bool> sid_autofill_guard{false};
     std::atomic<bool> detail_mode{false};
     std::atomic<bool> rtmp_url_auto{true};
@@ -1227,17 +1229,29 @@ static bool cb_sub_adjust_changed(void* priv, obs_properties_t*, obs_property_t*
         obs_data_set_double(settings, key, adjust);
     }
 
-    float prev_adjust = d->sub[i].adjust_ms;
-    bool changed = std::fabs(prev_adjust - adjust) > 0.0001f;
-    d->sub[i].adjust_ms = adjust;
-    apply_sub_delay_to_buffer(d, i);
-    d->router.notify_apply_delay(
-        i,
-        calc_effective_sub_delay_value_ms(
-            d, d->sub[i].delay_ms, d->sub[i].adjust_ms),
-        "manual_adjust");
-    if (changed) {
-        request_properties_refresh(d, "cb_sub_adjust_changed");
+    // ds_update は visUpdateCb 経由で本コールバックより先に呼ばれるため、
+    // d->sub[i].adjust_ms は既に新値に更新されている。
+    // バッファ・ルーター通知は ds_update に含まれないためここで呼ぶ。
+    float effective = calc_effective_sub_delay_value_ms(
+        d, d->sub[i].delay_ms, adjust);
+    d->router.notify_apply_delay(i, effective, "manual_adjust");
+
+    // 表示中の適用遅延値と差分があればデバウンス付きリビルドを予約する。
+    // ドラッグ中はリビルドしない（スライダーウィジェットが破棄されドラッグが途切れるため）。
+    // 最後のスライダー変更から 200ms 経過後にリビルドすることで「ドラッグ終了」を近似する。
+    if (std::fabs(d->sub[i].displayed_effective_ms - effective) > 0.01f) {
+        uint64_t seq = d->adjust_debounce_seq.fetch_add(1) + 1;
+        obs_source_t* ref = obs_source_get_ref(d->context);
+        if (ref) {
+            std::thread([d, ref, seq]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                if (d->adjust_debounce_seq.load() == seq &&
+                    !d->destroying.load()) {
+                    request_properties_refresh(d, "adjust_debounce");
+                }
+                obs_source_release(ref);
+            }).detach();
+        }
     }
     return false;
 }
@@ -2148,6 +2162,7 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     char ei[192];
     float effective = calc_effective_sub_delay_value_ms(
         d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
+    d->sub[i].displayed_effective_ms = effective;
     snprintf(ei, sizeof(ei), T_("SubDelayEffectiveInfoFmt"),
              effective, d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms);
     obs_properties_add_text(ch_grp, eik, ei, OBS_TEXT_INFO);
