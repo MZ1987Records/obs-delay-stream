@@ -77,11 +77,13 @@ enum class PathParseResult {
     Ok,
     Invalid,
     ChOutOfRange,
+    CodeNotFound,
 };
 
-inline PathParseResult parse_path(const std::string& path,
-                                  std::string& stream_id, int& ch_0idx,
-                                  int max_ch)
+// チャンネル識別コード版: stream_id と code を抽出する。
+inline PathParseResult parse_path_code(const std::string& path,
+                                       std::string& stream_id,
+                                       std::string& code)
 {
     std::string p = path;
     if (!p.empty() && p[0] == '/') p = p.substr(1);
@@ -90,16 +92,13 @@ inline PathParseResult parse_path(const std::string& path,
     if (slash == std::string::npos || slash == 0) return PathParseResult::Invalid;
 
     stream_id = sanitize_id(p.substr(0, slash));
-    std::string ch_str = p.substr(slash + 1);
-    auto q = ch_str.find_first_of("?#");
-    if (q != std::string::npos) ch_str = ch_str.substr(0, q);
+    std::string raw_code = p.substr(slash + 1);
+    auto q = raw_code.find_first_of("?#");
+    if (q != std::string::npos) raw_code = raw_code.substr(0, q);
 
-    char* end = nullptr;
-    long ch_1idx = std::strtol(ch_str.c_str(), &end, 10);
-    if (end == ch_str.c_str() || *end != '\0') return PathParseResult::Invalid;
-    if (ch_1idx < 1 || ch_1idx > max_ch) return PathParseResult::ChOutOfRange;
-    ch_0idx = (int)ch_1idx - 1;
-    return stream_id.empty() ? PathParseResult::Invalid : PathParseResult::Ok;
+    code = sanitize_id(raw_code);
+    if (stream_id.empty() || code.empty()) return PathParseResult::Invalid;
+    return PathParseResult::Ok;
 }
 
 inline bool is_safe_rel_path(const std::string& rel) {

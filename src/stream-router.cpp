@@ -137,6 +137,27 @@ int StreamRouter::active_channels() const {
     return active_ch_max_;
 }
 
+void StreamRouter::set_sub_code(int ch, const std::string& code) {
+    if (ch < 0 || ch >= MAX_SUB_CH) return;
+    std::lock_guard<std::mutex> lk(mtx_);
+    sub_code_[ch] = code;
+}
+
+std::string StreamRouter::sub_code(int ch) const {
+    if (ch < 0 || ch >= MAX_SUB_CH) return "";
+    std::lock_guard<std::mutex> lk(mtx_);
+    return sub_code_[ch];
+}
+
+int StreamRouter::resolve_code(const std::string& code) const {
+    if (code.empty()) return -1;
+    std::lock_guard<std::mutex> lk(mtx_);
+    for (int i = 0; i < active_ch_max_; ++i) {
+        if (sub_code_[i] == code) return i;
+    }
+    return -1;
+}
+
 void StreamRouter::set_sub_memo(int ch, const std::string& memo) {
     if (ch < 0 || ch >= MAX_SUB_CH) return;
     std::string sid;
@@ -358,11 +379,15 @@ size_t StreamRouter::client_count(int ch) const {
 
 std::string StreamRouter::make_url(const std::string& host, int ch_1indexed) const {
     std::lock_guard<std::mutex> lk(mtx_);
+    int ch0 = ch_1indexed - 1;
+    std::string code_str;
+    if (ch0 >= 0 && ch0 < MAX_SUB_CH) code_str = sub_code_[ch0];
+    if (code_str.empty()) code_str = "(code未設定)";
     char buf[256];
-    snprintf(buf, sizeof(buf), "ws://%s:%d/%s/%d",
+    snprintf(buf, sizeof(buf), "ws://%s:%d/%s/%s",
              host.c_str(), (int)port_,
              stream_id_.empty() ? "(配信ID未設定)" : stream_id_.c_str(),
-             ch_1indexed);
+             code_str.c_str());
     return buf;
 }
 
@@ -466,10 +491,10 @@ std::string StreamRouter::json_escape(const std::string& s) {
 std::string StreamRouter::url_decode(const std::string& s) {
     return websocket_server_detail::url_decode(s);
 }
-websocket_server_detail::PathParseResult StreamRouter::parse_path(
-    const std::string& path, std::string& stream_id, int& ch_0idx, int max_ch)
+websocket_server_detail::PathParseResult StreamRouter::parse_path_code(
+    const std::string& path, std::string& stream_id, std::string& code)
 {
-    return websocket_server_detail::parse_path(path, stream_id, ch_0idx, max_ch);
+    return websocket_server_detail::parse_path_code(path, stream_id, code);
 }
 bool StreamRouter::is_safe_rel_path(const std::string& rel) {
     return websocket_server_detail::is_safe_rel_path(rel);
@@ -720,20 +745,11 @@ void StreamRouter::on_open(ConnHandle h) {
     if (!srv) return;
     auto con = srv->get_con_from_hdl(h);
     std::string path = con->get_resource();
-    std::string sid; int ch;
-    int max_ch = MAX_SUB_CH;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        max_ch = active_ch_max_;
-    }
-    auto parse_res = parse_path(path, sid, ch, max_ch);
+    std::string sid; std::string code;
+    auto parse_res = parse_path_code(path, sid, code);
     if (parse_res != PathParseResult::Ok) {
-        if (parse_res == PathParseResult::ChOutOfRange) {
-            con->close(websocketpp::close::status::policy_violation, "ch_out_of_range");
-            return;
-        }
         con->close(websocketpp::close::status::policy_violation,
-                   "invalid path: use /stream_id/ch");
+                   "invalid path: use /stream_id/code");
         return;
     }
     std::string current_sid;
@@ -743,6 +759,13 @@ void StreamRouter::on_open(ConnHandle h) {
     }
     if (!current_sid.empty() && sid != current_sid) {
         con->close(websocketpp::close::status::policy_violation, "stream_id_mismatch");
+        return;
+    }
+
+    // 識別コードからチャンネルを解決
+    int ch = resolve_code(code);
+    if (ch < 0) {
+        con->close(websocketpp::close::status::policy_violation, "code_not_found");
         return;
     }
 
@@ -777,7 +800,8 @@ void StreamRouter::on_open(ConnHandle h) {
     if (cb) cb(sid, ch, count);
 
     std::string info = "{\"type\":\"session_info\",\"stream_id\":\"" + sid
-                     + "\",\"ch\":" + std::to_string(ch + 1);
+                     + "\",\"ch\":" + std::to_string(ch + 1)
+                     + ",\"code\":\"" + json_escape(code) + "\"";
     if (!memo.empty()) info += ",\"memo\":\"" + json_escape(memo) + "\"";
     info += "}";
     try { srv->send(h, info, websocketpp::frame::opcode::text); }
@@ -925,7 +949,7 @@ void StreamRouter::on_http(ConnHandle h) {
 
         if (path == "/memo") {
             std::string sid_param;
-            int ch_1idx = -1;
+            std::string code_param;
             size_t pos = 0;
             while (pos < query.size()) {
                 size_t amp = query.find('&', pos);
@@ -935,20 +959,24 @@ void StreamRouter::on_http(ConnHandle h) {
                 std::string key = (eq == std::string::npos) ? kv : kv.substr(0, eq);
                 std::string val = (eq == std::string::npos) ? "" : kv.substr(eq + 1);
                 if (key == "sid") sid_param = url_decode(val);
-                else if (key == "ch") ch_1idx = std::atoi(val.c_str());
+                else if (key == "code") code_param = url_decode(val);
                 pos = amp + 1;
             }
 
             std::string sid = sanitize_id(sid_param);
-            int active = MAX_SUB_CH;
-            {
-                std::lock_guard<std::mutex> lk(mtx_);
-                active = active_ch_max_;
-            }
-            if (sid.empty() || ch_1idx < 1 || ch_1idx > active) {
+            std::string code = sanitize_id(code_param);
+            if (sid.empty() || code.empty()) {
                 con->set_status(websocketpp::http::status_code::bad_request);
                 con->replace_header("Content-Type", "text/plain; charset=utf-8");
                 con->set_body("Bad Request");
+                return;
+            }
+
+            int ch = resolve_code(code);
+            if (ch < 0) {
+                con->set_status(websocketpp::http::status_code::not_found);
+                con->replace_header("Content-Type", "text/plain; charset=utf-8");
+                con->set_body("Code Not Found");
                 return;
             }
 
@@ -957,8 +985,8 @@ void StreamRouter::on_http(ConnHandle h) {
             {
                 std::lock_guard<std::mutex> lk(mtx_);
                 current_sid = stream_id_;
-                if (ch_1idx - 1 >= 0 && ch_1idx - 1 < MAX_SUB_CH)
-                    memo = sub_memo_[ch_1idx - 1];
+                if (ch >= 0 && ch < MAX_SUB_CH)
+                    memo = sub_memo_[ch];
             }
             if (current_sid.empty() || sid != current_sid) {
                 con->set_status(websocketpp::http::status_code::not_found);
@@ -968,8 +996,9 @@ void StreamRouter::on_http(ConnHandle h) {
             }
 
             std::string resp = "{\"ok\":true,\"stream_id\":\"" + current_sid
-                             + "\",\"ch\":" + std::to_string(ch_1idx)
-                             + ",\"memo\":\"" + json_escape(memo) + "\"}";
+                             + "\",\"ch\":" + std::to_string(ch + 1)
+                             + ",\"code\":\"" + json_escape(code)
+                             + "\",\"memo\":\"" + json_escape(memo) + "\"}";
             con->set_status(websocketpp::http::status_code::ok);
             con->replace_header("Content-Type", "application/json; charset=utf-8");
             con->replace_header("Cache-Control", "no-store");

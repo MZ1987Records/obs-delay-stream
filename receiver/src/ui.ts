@@ -15,7 +15,6 @@ import {
   latencyContent,
   sidInput,
   chInput,
-  chHint,
   urlPreview,
   browserWarningBlock,
   connectBtn,
@@ -72,7 +71,7 @@ const hostDomain = location.hostname || 'localhost';
 export function buildUrl(
   ip: string,
   sid: string,
-  ch: string | number,
+  code: string,
 ): string {
   const hasScheme = /^(wss?|https?):\/\//.test(ip);
   const isTunnel =
@@ -82,22 +81,26 @@ export function buildUrl(
   const cleanIp = ip.replace(/^(wss?|https?):\/\//, '').replace(/\/.*$/, '');
   const sidPart = sid || t('url.streamIdMissing');
   if (isTunnel) {
-    return `wss://${cleanIp}/${sidPart}/${ch}`;
+    return `wss://${cleanIp}/${sidPart}/${code}`;
   }
-  return `ws://${cleanIp}:${WS_PORT}/${sidPart}/${ch}`;
+  return `ws://${cleanIp}:${WS_PORT}/${sidPart}/${code}`;
 }
 
 export function updateUrlPreview(): void {
-  const sid = sidInput.value.trim();
-  const ch = chInput.value || '1';
-  if (urlPreview) urlPreview.textContent = buildUrl(hostDomain, sid, ch);
+  const sid = state.streamId;
+  const code = state.channelCode;
+  if (urlPreview) {
+    urlPreview.textContent = (sid && code)
+      ? buildUrl(hostDomain, sid, code)
+      : '';
+  }
 }
 
-export function updateShebang(sid: string, ch: string): void {
-  if (sid) {
+export function updateShebang(sid: string, code: string): void {
+  if (sid && code) {
     const sidEnc = encodeURIComponent(sid);
-    const chEnc = encodeURIComponent(ch || '1');
-    const newHash = `#!/${sidEnc}/${chEnc}`;
+    const codeEnc = encodeURIComponent(code);
+    const newHash = `#!/${sidEnc}/${codeEnc}`;
     if (location.hash !== newHash) {
       history.replaceState(null, '', newHash);
     }
@@ -125,28 +128,28 @@ function parseShebangParams(): ShebangParams | null {
   const parts = base.split('/');
   return {
     sid: parts[0] ? safeDecode(parts[0]) : null,
-    ch: parts.length >= 2 ? safeDecode(parts[1]) : null,
+    code: parts.length >= 2 ? safeDecode(parts[1]) : null,
   };
 }
 
 function getInitialParams(): ShebangParams | null {
   const hashParams = parseShebangParams();
-  if (hashParams && (hashParams.sid || hashParams.ch)) return hashParams;
+  if (hashParams && (hashParams.sid || hashParams.code)) return hashParams;
   return null;
 }
 
 export function applyUrlParams(): void {
   const params = getInitialParams();
   if (!params) return;
-  const { sid, ch } = params;
-  if (sid) sidInput.value = sid;
-  if (ch) {
-    const chNum = parseInt(ch, 10);
-    if (!Number.isNaN(chNum) && chNum >= MIN_CH && chNum <= state.maxCh) {
-      chInput.value = String(chNum);
-    }
+  const { sid, code } = params;
+  if (sid) {
+    state.streamId = sid;
+    sidInput.value = sid;
   }
-  if (sid && ch) fetchMemoPreview(sid, ch);
+  if (code) {
+    state.channelCode = code;
+  }
+  if (sid && code) fetchMemoPreview(sid, code);
 }
 
 export function isChromeBrowser(): boolean {
@@ -181,12 +184,6 @@ export function getChRangeText(): string {
 
 export function applyChRange(max: number): void {
   state.maxCh = max;
-  if (chHint) chHint.textContent = `(${getChRangeText()})`;
-  chInput.min = String(MIN_CH);
-  chInput.max = String(max);
-  const v = parseInt(chInput.value, 10);
-  if (Number.isInteger(v) && v > max) chInput.value = String(max);
-  updateUrlPreview();
 }
 
 export function loadConfig(): void {
@@ -201,19 +198,20 @@ export function loadConfig(): void {
     .catch(() => {});
 }
 
-export function fetchMemoPreview(sid: string, ch: string): void {
-  const chNum = parseInt(ch, 10);
-  if (!sid || !Number.isInteger(chNum) || chNum < MIN_CH || chNum > state.maxCh)
-    return;
+export function fetchMemoPreview(sid: string, code: string): void {
+  if (!sid || !code) return;
   const memoEl = getOptionalElement<HTMLElement>('infoMemo');
-  if (!memoEl) return;
-  const url = `/memo?sid=${encodeURIComponent(sid)}&ch=${encodeURIComponent(String(chNum))}`;
+  const url = `/memo?sid=${encodeURIComponent(sid)}&code=${encodeURIComponent(code)}`;
   fetch(url, { cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
-      if (!data || !isMemoResponse(data) || typeof data.memo !== 'string')
-        return;
-      updateMemoDisplay(memoEl, data.memo);
+      if (!data || !isMemoResponse(data)) return;
+      if (typeof data.ch === 'number' && Number.isFinite(data.ch)) {
+        chInput.value = String(data.ch);
+      }
+      if (memoEl && typeof data.memo === 'string') {
+        updateMemoDisplay(memoEl, data.memo);
+      }
     })
     .catch(() => {});
 }
@@ -244,9 +242,8 @@ export function clearConnectTimer(): void {
   }
 }
 
-export function setInputsEnabled(enabled: boolean): void {
-  sidInput.disabled = !enabled;
-  chInput.disabled = !enabled;
+export function setInputsEnabled(_enabled: boolean): void {
+  // sidInput/chInput は常に読み取り専用（URLから取得・サーバから受信）
 }
 
 export function setMeterOffline(offline: boolean): void {

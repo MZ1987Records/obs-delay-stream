@@ -780,10 +780,12 @@ static void queue_ui_safe(DelayStreamData* d,
     }, c, false);
 }
 
-// 指定チャンネル用の受信用URLを生成する。
-static std::string make_sub_url(DelayStreamData* d, int ch1) {
+// 指定チャンネル用の受信用URLを生成する（識別コードを使用）。
+static std::string make_sub_url(DelayStreamData* d, int ch0) {
     std::string sid = d->get_stream_id();
     if (sid.empty()) return "";
+    std::string code = d->router.sub_code(ch0);
+    if (code.empty()) return "";
     std::string base;
     std::string turl = d->tunnel.url();
     if (!turl.empty()) {
@@ -798,7 +800,7 @@ static std::string make_sub_url(DelayStreamData* d, int ch1) {
         base = "http://" + ip + ":" + std::to_string(ws_port);
     }
     if (!base.empty() && base.back() == '/') base.pop_back();
-    return base + "/#!/" + sid + "/" + std::to_string(ch1);
+    return base + "/#!/" + sid + "/" + code;
 }
 
 
@@ -1195,6 +1197,15 @@ static void ds_update(void* data, obs_data_t* settings) {
         char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         const char* memo = obs_data_get_string(settings, memo_key);
         d->router.set_sub_memo(i, memo ? memo : "");
+        // チャンネル識別コードの読み込み・自動生成
+        char code_key[32]; snprintf(code_key, sizeof(code_key), "sub%d_code", i);
+        const char* code_raw = obs_data_get_string(settings, code_key);
+        std::string code = code_raw ? code_raw : "";
+        if (code.empty()) {
+            code = generate_stream_id(8);
+            obs_data_set_string(settings, code_key, code.c_str());
+        }
+        d->router.set_sub_code(i, code);
         apply_sub_delay_to_buffer(d, i);
     }
     d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
@@ -1354,7 +1365,7 @@ static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
         "\r\n";
     int sub_count = d->sub_ch_count;
     for (int i = 0; i < sub_count; ++i) {
-        std::string url = make_sub_url(d, i + 1);
+        std::string url = make_sub_url(d, i);
         char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         const char* memo = obs_data_get_string(s, memo_key);
         const char* url_show = url.empty() ? T_("NotConfigured") : url.c_str();
@@ -1394,6 +1405,13 @@ static bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
         d->router.set_sub_memo(added_ch, auto_memo);
     } else {
         d->router.set_sub_memo(added_ch, memo);
+    }
+    // 識別コードを生成する。
+    {
+        char code_key[32]; snprintf(code_key, sizeof(code_key), "sub%d_code", added_ch);
+        std::string code = generate_stream_id(8);
+        obs_data_set_string(s, code_key, code.c_str());
+        d->router.set_sub_code(added_ch, code);
     }
 
     obs_data_set_int(s, "sub_ch_count", next);
@@ -1438,6 +1456,13 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
         const char* m = obs_data_get_string(s, memo_from);
         obs_data_set_string(s, memo_to, m ? m : "");
         d->router.set_sub_memo(i, m ? m : "");
+
+        char code_from[32], code_to[32];
+        snprintf(code_from, sizeof(code_from), "sub%d_code", i + 1);
+        snprintf(code_to,   sizeof(code_to),   "sub%d_code", i);
+        const char* c = obs_data_get_string(s, code_from);
+        obs_data_set_string(s, code_to, c ? c : "");
+        d->router.set_sub_code(i, c ? c : "");
     }
     // clear last
     {
@@ -1445,6 +1470,9 @@ static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
         obs_data_set_double(s, key_last, 0.0);
         char adjust_last[32]; snprintf(adjust_last, sizeof(adjust_last), "sub%d_adjust_ms", MAX_SUB_CH - 1);
         obs_data_set_double(s, adjust_last, 0.0);
+        char code_last[32]; snprintf(code_last, sizeof(code_last), "sub%d_code", MAX_SUB_CH - 1);
+        obs_data_set_string(s, code_last, "");
+        d->router.set_sub_code(MAX_SUB_CH - 1, "");
     }
     obs_data_set_int(s, "sub_ch_count", next);
     obs_data_release(s);
@@ -2226,7 +2254,7 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     snprintf(gt, sizeof(gt), "Ch.%d", i + 1);
 
     obs_properties_t* ch_grp = obs_properties_create();
-    std::string url = make_sub_url(d, i + 1);
+    std::string url = make_sub_url(d, i);
     size_t nc = d->router.client_count(i);
     std::string us;
     if (url.empty()) {

@@ -9,7 +9,6 @@ import {
 } from './constants';
 import { isRecord, isLatencyResultMessage, safeParseJson } from './types';
 import type { JsonRecord } from './types';
-import { sidInput, chInput } from './elements';
 import { buildUrl, clearConnectTimer, resync } from './ui';
 import { ensureAudioContext, handlePcm16 } from './audio';
 import { handleOpus, sendPcmFallbackIfPossible } from './opus';
@@ -47,6 +46,7 @@ function handleControl(text: string): void {
       bus.emit('ctrl:session', {
         streamId: typeof msg.stream_id === 'string' ? msg.stream_id : undefined,
         ch: msg.ch !== undefined && msg.ch !== null ? Number(msg.ch) : undefined,
+        code: typeof msg.code === 'string' ? msg.code : undefined,
         memo: msg.memo,
       });
       break;
@@ -116,8 +116,8 @@ export function connect(): void {
   state.playbackBuffer = PLAYBACK_BUFFER_DEFAULT;
   state.nextTime = 0;
 
-  const sid = sidInput.value.trim();
-  const ch = parseInt(chInput.value, 10);
+  const sid = state.streamId;
+  const code = state.channelCode;
 
   if (!sid) {
     bus.emit('connect:rejected', { reason: 'no-sid' });
@@ -127,8 +127,12 @@ export function connect(): void {
     bus.emit('connect:rejected', { reason: 'invalid-sid' });
     return;
   }
+  if (!code) {
+    bus.emit('connect:rejected', { reason: 'no-code' });
+    return;
+  }
 
-  const url = buildUrl(hostDomain, sid, ch);
+  const url = buildUrl(hostDomain, sid, code);
   state.connecting = true;
   state.closeReason = null;
 

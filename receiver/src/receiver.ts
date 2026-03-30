@@ -33,7 +33,6 @@ import {
   showApplied,
   setMeterOffline,
   updateMemoDisplay,
-  getChRangeText,
 } from './ui';
 import { connect, disconnect } from './connection';
 import { bus } from './bus';
@@ -81,18 +80,11 @@ initMeter();
 }
 
 // ============================================================
-// イベントリスナー
+// 初期URL表示
 // ============================================================
 
-function onInputChange(): void {
-  updateUrlPreview();
-  const sid = sidInput.value.trim();
-  const ch = chInput.value || '1';
-  updateShebang(sid, ch);
-}
-
-sidInput.addEventListener('input', onInputChange);
-chInput.addEventListener('input', onInputChange);
+// sidInput/chInput は読み取り専用。URLパラメータから初期値を表示する。
+if (state.streamId) sidInput.value = state.streamId;
 updateUrlPreview();
 
 // ============================================================
@@ -104,6 +96,7 @@ bus.on('connect:rejected', ({ reason }) => {
     'no-audio': 'status.connectFailed',
     'no-sid': 'status.enterStreamId',
     'invalid-sid': 'status.invalidStreamId',
+    'no-code': 'status.codeNotFound',
     'ws-failed': 'status.connectFailed',
   };
   setStatus(t(keys[reason]), 'err');
@@ -132,8 +125,8 @@ bus.on('ws:close', ({ code, reason, cause }) => {
     setStatus(t('status.connectTimeout'), 'err');
   } else if (code === 1008 && reason === 'stream_id_mismatch') {
     setStatus(t('status.streamIdMismatch'), 'err');
-  } else if (code === 1008 && reason === 'ch_out_of_range') {
-    setStatus(t('status.chOutOfRange', { range: getChRangeText() }), 'err');
+  } else if (code === 1008 && reason === 'code_not_found') {
+    setStatus(t('status.codeNotFound'), 'err');
   } else if (cause === 'error') {
     setStatus(t('status.connectionError'), 'err');
   } else {
@@ -142,12 +135,20 @@ bus.on('ws:close', ({ code, reason, cause }) => {
   setDisconnectedUi();
 });
 
-bus.on('ctrl:session', ({ streamId, ch, memo }) => {
-  if (typeof streamId === 'string') sidInput.value = streamId;
+bus.on('ctrl:session', ({ streamId, ch, code, memo }) => {
+  // サーバーから受信した値で表示を更新（編集不可）
+  if (typeof streamId === 'string') {
+    state.streamId = streamId;
+    sidInput.value = streamId;
+  }
   if (ch !== undefined) {
     const chNum = Number(ch);
     if (Number.isFinite(chNum)) chInput.value = String(chNum);
   }
+  if (typeof code === 'string') {
+    state.channelCode = code;
+  }
+  updateShebang(state.streamId, state.channelCode);
   const memoEl = getOptionalElement<HTMLElement>('infoMemo');
   if (memoEl) updateMemoDisplay(memoEl, memo);
 });

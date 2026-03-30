@@ -91,9 +91,9 @@ export type LatencyResultMessage = {
   max: number;
 };
 
-export type ShebangParams = { sid: string | null; ch: string | null };
+export type ShebangParams = { sid: string | null; code: string | null };
 export type ConfigResponse = { active_ch?: number };
-export type MemoResponse = { memo?: string };
+export type MemoResponse = { memo?: string; ch?: number };
 
 export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null;

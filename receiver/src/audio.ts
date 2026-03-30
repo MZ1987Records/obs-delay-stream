@@ -142,7 +142,7 @@ export function updateAudioInfo(
   channels: number,
 ): void {
   infoSR.textContent = sampleRate + ' Hz';
-  infoCH.textContent = channels + 'ch';
+  infoCH.textContent = channels === 1 ? 'Mono' : channels === 2 ? 'Stereo' : channels + 'ch';
 }
 
 export function handlePcm16(

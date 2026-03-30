@@ -91,6 +91,12 @@ public:
 
     void set_sub_memo(int ch, const std::string& memo);
 
+    // ----- チャンネル識別コード -----
+    void set_sub_code(int ch, const std::string& code);
+    std::string sub_code(int ch) const;
+    // 識別コードからチャンネル(0-indexed)を解決。見つからなければ -1。
+    int resolve_code(const std::string& code) const;
+
     // ----- 音声送信 (ch: 0-indexed) -----
     // 音声スレッドから呼ばれる。非ブロッキング: ASIO スレッドに委譲。
     void send_audio(int ch, const float* data, size_t frames,
@@ -141,9 +147,9 @@ private:
     static std::string    sanitize_id(const std::string& raw);
     static std::string    json_escape(const std::string& s);
     static std::string    url_decode(const std::string& s);
-    static PathParseResult parse_path(const std::string& path,
-                                      std::string& stream_id, int& ch_0idx,
-                                      int max_ch);
+    static PathParseResult parse_path_code(const std::string& path,
+                                          std::string& stream_id,
+                                          std::string& code);
     static bool           is_safe_rel_path(const std::string& rel);
     static std::string    join_path(const std::string& base, const std::string& rel);
     static bool           read_file_to_string(const std::string& path, std::string& out);
@@ -220,6 +226,7 @@ private:
     // "stream_id/ch_0idx" → ChannelState
     std::map<std::string, ChannelState> ch_map_;
     std::array<std::string, MAX_SUB_CH> sub_memo_{};
+    std::array<std::string, MAX_SUB_CH> sub_code_{};
 
     // stop() 時に退避される計測結果・適用遅延キャッシュ
     std::map<std::string, ChannelCache> ch_cache_;

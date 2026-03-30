@@ -9,7 +9,6 @@ import {
 // 接続設定
 export const sidInput = getRequiredInputElement('sidInput');
 export const chInput = getRequiredInputElement('chInput');
-export const chHint = getOptionalElement<HTMLElement>('chHint');
 export const urlPreview = getOptionalElement<HTMLElement>('urlPreview');
 export const browserWarningBlock = getOptionalElement<HTMLElement>('browserWarningBlock');
 

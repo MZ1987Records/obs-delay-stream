@@ -26,6 +26,10 @@ export const state = {
   muted: false,
   playbackBuffer: PLAYBACK_BUFFER_DEFAULT,
 
+  // 接続パラメータ（URLから取得、編集不可）
+  streamId: '',
+  channelCode: '',
+
   // CH範囲
   maxCh: DEFAULT_MAX_CH,
 

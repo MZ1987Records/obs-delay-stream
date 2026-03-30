@@ -4,7 +4,7 @@ import type { LatencyResultMessage } from './types';
 export type AppEvents = {
   /** 接続前バリデーション失敗 */
   'connect:rejected': {
-    reason: 'no-audio' | 'no-sid' | 'invalid-sid' | 'ws-failed';
+    reason: 'no-audio' | 'no-sid' | 'invalid-sid' | 'no-code' | 'ws-failed';
   };
   /** 接続開始（WebSocket 生成済み） */
   'ws:connecting': { url: string };
@@ -20,6 +20,7 @@ export type AppEvents = {
   'ctrl:session': {
     streamId?: string;
     ch?: number | string;
+    code?: string;
     memo?: unknown;
   };
   /** memo 受信 */
