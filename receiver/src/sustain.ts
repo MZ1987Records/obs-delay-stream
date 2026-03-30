@@ -29,12 +29,14 @@ function buildPingPongBuffer(src: AudioBuffer): AudioBuffer | null {
 
 /**
  * 指定ノードにサステインソースをスケジュールする。
- * startTime から最大 durationSec 秒間、フェードアウトしながらループ再生。
+ * fadeOut=true (既定) ではフェードアウトしながらループ再生。
+ * fadeOut=false ではフルボリュームで再生し、外部のクロスフェードに委ねる。
  */
 export function scheduleSustain(
   dest: AudioNode,
   startTime: number,
   durationSec: number,
+  fadeOut = true,
 ): void {
   if (!state.actx || !state.lastBuffer) return;
   const ppBuf = buildPingPongBuffer(state.lastBuffer);
@@ -42,15 +44,20 @@ export function scheduleSustain(
   const dur = Math.min(durationSec, SUSTAIN_MAX_MS / 1000);
   if (dur <= 0) return;
 
-  const env = state.actx.createGain();
-  env.gain.setValueAtTime(1, startTime);
-  env.gain.linearRampToValueAtTime(0, startTime + dur);
-  env.connect(dest);
-
   const src = state.actx.createBufferSource();
   src.buffer = ppBuf;
   src.loop = true;
-  src.connect(env);
+
+  if (fadeOut) {
+    const env = state.actx.createGain();
+    env.gain.setValueAtTime(1, startTime);
+    env.gain.linearRampToValueAtTime(0, startTime + dur);
+    env.connect(dest);
+    src.connect(env);
+  } else {
+    src.connect(dest);
+  }
+
   src.start(startTime);
   src.stop(startTime + dur);
 }

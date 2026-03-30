@@ -391,30 +391,55 @@ export function resync(): void {
   const newNextTime = now + state.playbackBuffer;
   state.nextTime = newNextTime;
 
-  const dest = state.xfade[state.xfadeIdx] || state.gainNode;
   const overlapSec = oldNextTime - newNextTime;
 
   if (overlapSec > RESYNC_XFADE_MIN_SEC && state.xfade[0] && state.xfade[1]) {
     // 旧バッファと新バッファが重なる → クロスフェード
+    // newNextTime〜oldNextTime の重複区間でフェードし、ギャップを作らない
     const oldIdx = state.xfadeIdx;
     const newIdx: 0 | 1 = oldIdx === 0 ? 1 : 0;
     state.xfadeIdx = newIdx;
 
-    const fadeEnd = now + overlapSec;
+    const fadeStart = newNextTime;
+    const fadeEnd = oldNextTime;
     const oldGain = state.xfade[oldIdx]!.gain;
     const newGain = state.xfade[newIdx]!.gain;
 
     oldGain.cancelScheduledValues(now);
     oldGain.setValueAtTime(1, now);
+    oldGain.linearRampToValueAtTime(1, fadeStart);
     oldGain.linearRampToValueAtTime(0, fadeEnd);
 
     newGain.cancelScheduledValues(now);
     newGain.setValueAtTime(0, now);
+    newGain.linearRampToValueAtTime(0, fadeStart);
     newGain.linearRampToValueAtTime(1, fadeEnd);
-  } else if (overlapSec < -RESYNC_XFADE_MIN_SEC && dest) {
-    // 旧バッファが先に途切れる → サステインで隙間を埋める
+  } else if (overlapSec < -RESYNC_XFADE_MIN_SEC && state.xfade[0] && state.xfade[1]) {
+    // 旧バッファが先に途切れる → サステインで隙間を埋め、クロスフェードで新バッファへ遷移
+    const oldIdx = state.xfadeIdx;
+    const newIdx: 0 | 1 = oldIdx === 0 ? 1 : 0;
+    state.xfadeIdx = newIdx;
+
     const gapStart = Math.max(oldNextTime, now);
-    scheduleSustain(dest, gapStart, newNextTime - gapStart);
+    const gapDur = newNextTime - gapStart;
+    const xfadeSec = Math.min(0.020, gapDur);
+
+    // サステインを旧ノードにフルボリュームで接続、クロスフェード分だけ延長
+    scheduleSustain(state.xfade[oldIdx]!, gapStart, gapDur + xfadeSec, false);
+
+    // newNextTime でクロスフェード: サステイン(old)→0, 新バッファ(new)→1
+    const oldGain = state.xfade[oldIdx]!.gain;
+    const newGain = state.xfade[newIdx]!.gain;
+
+    oldGain.cancelScheduledValues(now);
+    oldGain.setValueAtTime(1, now);
+    oldGain.linearRampToValueAtTime(1, newNextTime);
+    oldGain.linearRampToValueAtTime(0, newNextTime + xfadeSec);
+
+    newGain.cancelScheduledValues(now);
+    newGain.setValueAtTime(0, now);
+    newGain.linearRampToValueAtTime(0, newNextTime);
+    newGain.linearRampToValueAtTime(1, newNextTime + xfadeSec);
   }
 
   setStatus(t('status.resynced'), 'ok');
