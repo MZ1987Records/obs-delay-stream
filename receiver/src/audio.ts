@@ -1,5 +1,5 @@
 import { state } from './state';
-import { AHEAD, NUM_BARS, RESYNC_RAMP_MS } from './constants';
+import { NUM_BARS, RESYNC_RAMP_MS } from './constants';
 import {
   volSlider,
   dbDisplay,
@@ -129,11 +129,11 @@ export function playBuffer(abuf: AudioBuffer | null): void {
   };
 
   const now = state.actx.currentTime;
-  if (state.nextTime < now + 0.01) state.nextTime = now + AHEAD;
+  if (state.nextTime < now + 0.01) state.nextTime = now + state.playbackBuffer;
   src.start(state.nextTime);
+  const bufMs = Math.round((state.nextTime - state.actx.currentTime) * 1000);
   state.nextTime += abuf.duration;
 
-  const bufMs = Math.round((state.nextTime - state.actx.currentTime) * 1000);
   infoBuf.textContent = bufMs + ' ms';
   updateMeter(abuf.getChannelData(0));
 }

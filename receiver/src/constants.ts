@@ -1,5 +1,8 @@
-/** オーディオバッファの先読み秒数 */
-export const AHEAD = 0.12;
+/** 再生バッファの先読み秒数（ホスト未接続/未通知時のデフォルト） */
+export const PLAYBACK_BUFFER_DEFAULT_MS = 120;
+export const PLAYBACK_BUFFER_DEFAULT = PLAYBACK_BUFFER_DEFAULT_MS / 1000;
+export const PLAYBACK_BUFFER_MIN_MS = 20;
+export const PLAYBACK_BUFFER_MAX_MS = 500;
 
 /** PCMパケットのマジックナンバー (0x41554449 = "AUDI") */
 export const MAGIC_AUDI = 0x41554449;

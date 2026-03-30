@@ -399,6 +399,28 @@ void StreamRouter::set_pcm_downsample_ratio(int ratio) {
     pcm_downsample_ratio_.store(ratio, std::memory_order_relaxed);
 }
 
+void StreamRouter::set_playback_buffer_ms(int ms) {
+    if (ms < PLAYBACK_BUFFER_MIN_MS) ms = PLAYBACK_BUFFER_MIN_MS;
+    if (ms > PLAYBACK_BUFFER_MAX_MS) ms = PLAYBACK_BUFFER_MAX_MS;
+    int prev = playback_buffer_ms_.exchange(ms, std::memory_order_relaxed);
+    if (prev == ms) return;
+
+    std::string sid;
+    int active = 0;
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        sid = stream_id_;
+        active = active_ch_max_;
+    }
+    if (sid.empty() || active <= 0) return;
+
+    const std::string msg =
+        "{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(ms) + "}";
+    for (int ch = 0; ch < active; ++ch) {
+        broadcast_text(sid, ch, msg);
+    }
+}
+
 void StreamRouter::set_http_root_dir(std::string dir) {
     std::lock_guard<std::mutex> lk(mtx_);
     http_root_dir_ = std::move(dir);
@@ -694,6 +716,7 @@ void StreamRouter::on_open(ConnHandle h) {
     size_t count = 0;
     LatencyResult cached_result;
     double cached_delay = -1.0;
+    int pb_ms = playback_buffer_ms_.load(std::memory_order_relaxed);
     std::string cached_delay_reason;
     std::string memo;
     {
@@ -725,6 +748,11 @@ void StreamRouter::on_open(ConnHandle h) {
     info += "}";
     try { srv->send(h, info, websocketpp::frame::opcode::text); }
     catch (...) {}
+    try {
+        std::string pb_msg =
+            "{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(pb_ms) + "}";
+        srv->send(h, pb_msg, websocketpp::frame::opcode::text);
+    } catch (...) {}
 
     if (cached_result.valid) {
         try { srv->send(h, format_latency_result_json(cached_result),

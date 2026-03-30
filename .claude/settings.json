@@ -21,6 +21,7 @@
       "Bash(where:*)",
       "Bash(test:*)",
       "Bash(echo:*)",
+      "Bash(sort:*)",
       "Bash(pwd)",
       "Bash(npm run:*)",
       "Bash(./node_modules/.bin/vite build:*)",

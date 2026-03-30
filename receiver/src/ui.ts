@@ -7,7 +7,6 @@ import {
   RESYNC_RAMP_MAX_MS,
   RESYNC_RAMP_MIN_DRIFT_MS,
   RESYNC_RAMP_MS,
-  AHEAD,
 } from './constants';
 import {
   statusBar,
@@ -390,10 +389,10 @@ export function resync(): void {
   if (!state.actx || !state.gainNode) return;
   const now = state.actx.currentTime;
   const bufferedSec = Math.max(0, state.nextTime - now);
-  const driftSec = Math.abs(bufferedSec - AHEAD);
+  const driftSec = Math.abs(bufferedSec - state.playbackBuffer);
   const minDriftSec = RESYNC_RAMP_MIN_DRIFT_MS / 1000;
   if (driftSec < minDriftSec) {
-    state.nextTime = now + AHEAD;
+    state.nextTime = now + state.playbackBuffer;
     setStatus(t('status.resynced'), 'ok');
     setTimeout(() => {
       if (state.ws && state.ws.readyState === WebSocket.OPEN)
@@ -425,7 +424,7 @@ export function resync(): void {
 
   gainParam.setValueAtTime(0, stopAt);
   gainParam.linearRampToValueAtTime(currentGain, stopAt + rampInSec);
-  state.nextTime = now + AHEAD;
+  state.nextTime = now + state.playbackBuffer;
   state.nextBufferRampIn = true;
 
   setStatus(t('status.resynced'), 'ok');

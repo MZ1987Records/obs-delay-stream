@@ -322,6 +322,12 @@ static int normalize_pcm_downsample_ratio(int v) {
     }
 }
 
+static int normalize_playback_buffer_ms(int v) {
+    if (v < PLAYBACK_BUFFER_MIN_MS) return PLAYBACK_BUFFER_MIN_MS;
+    if (v > PLAYBACK_BUFFER_MAX_MS) return PLAYBACK_BUFFER_MAX_MS;
+    return v;
+}
+
 // ファイル全体を文字列として読み込む。
 static std::string read_file_to_string(const char* path) {
     if (!path || !*path) return "";
@@ -519,6 +525,7 @@ struct DelayStreamData {
     std::string   host_ip;
     std::string   auto_ip;
     std::atomic<int> ws_port{WS_PORT};
+    int           playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS;
     float         master_delay_ms = 0.0f;
     float         sub_offset_ms   = 0.0f; // global offset added to all channel after Sync Flow
     int           sub_ch_count    = 1; // active channel count (1..MAX_SUB_CH)
@@ -1130,6 +1137,15 @@ static void ds_update(void* data, obs_data_t* settings) {
         if (ratio != (int)obs_data_get_int(settings, "pcm_downsample_ratio"))
             obs_data_set_int(settings, "pcm_downsample_ratio", ratio);
         d->router.set_pcm_downsample_ratio(ratio);
+    }
+    {
+        int raw_pb_ms = (int)obs_data_get_int(settings, "playback_buffer_ms");
+        int pb_ms = normalize_playback_buffer_ms(raw_pb_ms);
+        if (pb_ms != raw_pb_ms) {
+            obs_data_set_int(settings, "playback_buffer_ms", pb_ms);
+        }
+        d->playback_buffer_ms = pb_ms;
+        d->router.set_playback_buffer_ms(pb_ms);
     }
     const char* raw = obs_data_get_string(settings, "stream_id");
     std::string sid = raw ? sanitize_stream_id(raw) : "";
@@ -1929,6 +1945,10 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     obs_property_list_add_int(pcm_ds_ratio_p, T_("PcmDownsampleRatioNone"), 1);
     obs_property_list_add_int(pcm_ds_ratio_p, "1/2", 2);
     obs_property_list_add_int(pcm_ds_ratio_p, "1/4", 4);
+    obs_property_t* pb_buf_p = obs_properties_add_int_slider(
+        grp, "playback_buffer_ms", T_("PlaybackBufferMs"),
+        PLAYBACK_BUFFER_MIN_MS, PLAYBACK_BUFFER_MAX_MS, 1);
+    obs_property_int_set_suffix(pb_buf_p, " ms");
 
     if (ws_running) {
         obs_property_set_enabled(codec_p, false);
@@ -2352,6 +2372,7 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_int   (settings, "quantization_bits",     8);
     obs_data_set_default_bool  (settings, "audio_mono",            true);
     obs_data_set_default_int   (settings, "pcm_downsample_ratio",  4);
+    obs_data_set_default_int   (settings, "playback_buffer_ms",        PLAYBACK_BUFFER_DEFAULT_MS);
     obs_data_set_default_int   (settings, "ws_port",               WS_PORT);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");

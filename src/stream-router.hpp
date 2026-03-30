@@ -21,6 +21,7 @@
  *   OBS → Browser: {"type":"latency_result","avg_rtt":X,"one_way":Y,"min":A,"max":B,"samples":N}
  *   OBS → Browser: {"type":"apply_delay","ms":X,"reason":"auto_measure|manual_adjust"}
  *   OBS → Browser: {"type":"session_info","stream_id":"xxx","ch":N,"memo":"..."}  ← 接続直後に送信
+ *   OBS → Browser: {"type":"playback_buffer","ms":X}  ← 接続直後/設定変更時に送信
  *   OBS → Browser: {"type":"memo","ch":N,"memo":"..."}  ← メモ変更通知
  *   Browser → OBS: {"type":"audio_codec","mode":"pcm"}  ← Opus不可時のPCM要求
  *   Browser → OBS: {"type":"audio_codec","mode":"opus","bitrate_kbps":96,"sample_rate":48000}
@@ -129,6 +130,7 @@ public:
     void set_audio_quantization_bits(int bits);
     void set_audio_mono(bool mono);
     void set_pcm_downsample_ratio(int ratio);
+    void set_playback_buffer_ms(int ms);
     void set_http_root_dir(std::string dir);
 
 private:
@@ -206,6 +208,7 @@ private:
     std::atomic<int>   audio_quantization_bits_{8};
     std::atomic<bool>  audio_mono_{true};
     std::atomic<int>   pcm_downsample_ratio_{4}; // 1: そのまま, 2: 1/2, 4: 1/4
+    std::atomic<int>   playback_buffer_ms_{PLAYBACK_BUFFER_DEFAULT_MS};
     std::vector<OpusEnc> opus_;
     int active_ch_max_ = MAX_SUB_CH;
 

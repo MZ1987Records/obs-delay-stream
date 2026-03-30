@@ -4,7 +4,7 @@ import type {
   OpusDecoderInstance,
   OpusPacket,
 } from './types';
-import { DEFAULT_MAX_CH } from './constants';
+import { PLAYBACK_BUFFER_DEFAULT, DEFAULT_MAX_CH } from './constants';
 
 export type OpusMode = 'auto' | 'webcodecs' | 'wasm';
 export type OpusDecoderState = 'idle' | 'pending' | 'ready' | 'failed';
@@ -23,6 +23,7 @@ export const state = {
   muted: false,
   activeSources: new Set<AudioBufferSourceNode>(),
   nextBufferRampIn: false,
+  playbackBuffer: PLAYBACK_BUFFER_DEFAULT,
 
   // CH範囲
   maxCh: DEFAULT_MAX_CH,

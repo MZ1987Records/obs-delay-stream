@@ -1,5 +1,12 @@
 import { state } from './state';
-import { MAGIC_AUDI, MAGIC_OPUS, AHEAD, CONNECT_TIMEOUT_MS } from './constants';
+import {
+  MAGIC_AUDI,
+  MAGIC_OPUS,
+  PLAYBACK_BUFFER_DEFAULT,
+  PLAYBACK_BUFFER_MIN_MS,
+  PLAYBACK_BUFFER_MAX_MS,
+  CONNECT_TIMEOUT_MS,
+} from './constants';
 import { isRecord, isLatencyResultMessage, safeParseJson } from './types';
 import type { JsonRecord } from './types';
 import { sidInput, chInput } from './elements';
@@ -78,6 +85,15 @@ function handleControl(text: string): void {
         }
       }
       break;
+
+    case 'playback_buffer':
+      {
+        const raw = typeof msg.ms === 'number' ? msg.ms : Number(msg.ms);
+        if (!Number.isFinite(raw)) break;
+        const clamped = Math.min(PLAYBACK_BUFFER_MAX_MS, Math.max(PLAYBACK_BUFFER_MIN_MS, raw));
+        state.playbackBuffer = clamped / 1000;
+      }
+      break;
   }
 }
 
@@ -95,7 +111,8 @@ export function connect(): void {
     bus.emit('connect:rejected', { reason: 'no-audio' });
     return;
   }
-  state.nextTime = state.actx!.currentTime + AHEAD;
+  state.playbackBuffer = PLAYBACK_BUFFER_DEFAULT;
+  state.nextTime = 0;
 
   const sid = sidInput.value.trim();
   const ch = parseInt(chInput.value, 10);

@@ -6,6 +6,9 @@
 static constexpr int   MAX_SUB_CH      = 20;
 static constexpr int   WS_PORT         = 19000;
 static constexpr float MAX_DELAY_MS    = 10000.0f;
+static constexpr int   PLAYBACK_BUFFER_MIN_MS = 20;
+static constexpr int   PLAYBACK_BUFFER_MAX_MS = 500;
+static constexpr int   PLAYBACK_BUFFER_DEFAULT_MS = 120;
 
 // WebSocket遅延計測パラメータ
 static constexpr int   PING_COUNT      = 10;
