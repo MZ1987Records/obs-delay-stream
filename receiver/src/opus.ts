@@ -12,7 +12,7 @@ import type {
   OpusPacket,
   WindowWithOpusDecoder,
 } from './types';
-import { playBuffer, updateAudioInfo } from './audio';
+import { playBuffer, updateAudioInfo, ensureAudioContext } from './audio';
 import { setCodecLabel, setStatus } from './ui';
 import { t } from './i18n';
 
@@ -225,6 +225,7 @@ function decodeOpusPacketWebCodecs(
 }
 
 function onOpusDecoded(ad: AudioDataLike): void {
+  ensureAudioContext(ad.sampleRate);
   const abuf = audioDataToBuffer(ad);
   if (abuf) {
     setCodecLabel('Opus');
@@ -349,6 +350,7 @@ function decodeOpusPacketWasm(
   channels: number,
   _frameCount: number,
 ): void {
+  ensureAudioContext(sampleRate);
   if (!state.opusWasmDecoder || !state.actx) return;
   updateAudioInfo(sampleRate, channels);
 

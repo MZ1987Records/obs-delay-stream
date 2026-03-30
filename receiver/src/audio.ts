@@ -93,13 +93,26 @@ export function toggleMute(): void {
 // AudioContext
 // ============================================================
 
-export function ensureAudioContext(): boolean {
-  if (state.actx) return true;
+export function ensureAudioContext(sampleRate?: number): boolean {
+  if (state.actx) {
+    if (!sampleRate || state.actx.sampleRate === sampleRate) return true;
+    // サンプルレート不一致 — 再生成して per-buffer リサンプリングノイズを回避
+    try { state.actx.close(); } catch { /* */ }
+    state.actx = null;
+    state.gainNode = null;
+    state.xfade = [null, null];
+    state.nextTime = 0;
+    state.lastBuffer = null;
+  }
   const AudioContextCtor =
     window.AudioContext ||
     (window as WindowWithWebkitAudioContext).webkitAudioContext;
   if (!AudioContextCtor) return false;
-  state.actx = new AudioContextCtor();
+  try {
+    state.actx = new AudioContextCtor(sampleRate ? { sampleRate } : undefined);
+  } catch {
+    state.actx = new AudioContextCtor();
+  }
   state.gainNode = state.actx.createGain();
   state.gainNode.gain.value = sliderToGain(parseInt(volSlider.value, 10));
   meterAnalyserNode = state.actx.createAnalyser();
@@ -137,7 +150,7 @@ export function playBuffer(abuf: AudioBuffer | null): void {
 
   const now = state.actx.currentTime;
   // アンダーラン検出: nextTime が過去に落ちた場合、サステインで隙間を埋める
-  if (state.nextTime < now + 0.01) {
+  if (state.nextTime < now + 0.02) {
     const gapStart = Math.max(state.nextTime, now);
     const newNext = now + state.playbackBuffer;
     const gapSec = newNext - gapStart;
@@ -177,6 +190,7 @@ export function handlePcm16(
   channels: number,
   frameCount: number,
 ): void {
+  ensureAudioContext(sampleRate);
   if (!state.actx) return;
   updateAudioInfo(sampleRate, channels);
   setCodecLabel('PCM');
