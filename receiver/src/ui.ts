@@ -4,9 +4,7 @@ import {
   PING_SAMPLES,
   WS_PORT,
   RESYNC_DISPLAY_MS,
-  RESYNC_RAMP_MAX_MS,
-  RESYNC_RAMP_MIN_DRIFT_MS,
-  RESYNC_RAMP_MS,
+  RESYNC_XFADE_MIN_SEC,
 } from './constants';
 import {
   statusBar,
@@ -386,46 +384,31 @@ export function resync(): void {
     startAutoSync(state.currentSyncInterval);
   }
 
-  if (!state.actx || !state.gainNode) return;
+  if (!state.actx) return;
   const now = state.actx.currentTime;
-  const bufferedSec = Math.max(0, state.nextTime - now);
-  const driftSec = Math.abs(bufferedSec - state.playbackBuffer);
-  const minDriftSec = RESYNC_RAMP_MIN_DRIFT_MS / 1000;
-  if (driftSec < minDriftSec) {
-    state.nextTime = now + state.playbackBuffer;
-    setStatus(t('status.resynced'), 'ok');
-    setTimeout(() => {
-      if (state.ws && state.ws.readyState === WebSocket.OPEN)
-        setStatus(t('status.receiving'), 'ok');
-    }, RESYNC_DISPLAY_MS);
-    return;
-  }
-  const rampOutSec = Math.min(bufferedSec, RESYNC_RAMP_MAX_MS / 1000);
-  const rampInSec = RESYNC_RAMP_MS / 1000;
-  const stopAt = now + rampOutSec;
-  const gainParam = state.gainNode.gain;
-  const currentGain = gainParam.value;
+  const oldNextTime = state.nextTime;
+  const newNextTime = now + state.playbackBuffer;
+  state.nextTime = newNextTime;
 
-  gainParam.cancelScheduledValues(now);
-  gainParam.setValueAtTime(currentGain, now);
-  if (rampOutSec > 0) {
-    gainParam.linearRampToValueAtTime(0, stopAt);
-  } else {
-    gainParam.setValueAtTime(0, now);
-  }
+  // 旧バッファと新バッファが重なる場合はクロスフェード
+  const overlapSec = Math.max(0, oldNextTime - newNextTime);
+  if (overlapSec > RESYNC_XFADE_MIN_SEC && state.xfade[0] && state.xfade[1]) {
+    const oldIdx = state.xfadeIdx;
+    const newIdx: 0 | 1 = oldIdx === 0 ? 1 : 0;
+    state.xfadeIdx = newIdx;
 
-  for (const src of state.activeSources) {
-    try {
-      src.stop(stopAt);
-    } catch {
-      /* already stopped */
-    }
-  }
+    const fadeEnd = now + overlapSec;
+    const oldGain = state.xfade[oldIdx]!.gain;
+    const newGain = state.xfade[newIdx]!.gain;
 
-  gainParam.setValueAtTime(0, stopAt);
-  gainParam.linearRampToValueAtTime(currentGain, stopAt + rampInSec);
-  state.nextTime = now + state.playbackBuffer;
-  state.nextBufferRampIn = true;
+    oldGain.cancelScheduledValues(now);
+    oldGain.setValueAtTime(1, now);
+    oldGain.linearRampToValueAtTime(0, fadeEnd);
+
+    newGain.cancelScheduledValues(now);
+    newGain.setValueAtTime(0, now);
+    newGain.linearRampToValueAtTime(1, fadeEnd);
+  }
 
   setStatus(t('status.resynced'), 'ok');
   setTimeout(() => {

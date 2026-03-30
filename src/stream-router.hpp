@@ -203,6 +203,7 @@ private:
     std::string        http_root_dir_;
     std::atomic<int>   audio_codec_{0}; // 0: Opus, 1: PCM
     std::atomic<bool>  opus_reset_pending_{false};
+    std::atomic<bool>  opus_flush_pending_{false};
     std::atomic<int>   opus_bitrate_kbps_{96};
     std::atomic<int>   opus_target_sample_rate_{0}; // 0: source sample rate
     std::atomic<int>   audio_quantization_bits_{8};

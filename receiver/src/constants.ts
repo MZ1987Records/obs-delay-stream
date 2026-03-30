@@ -37,14 +37,8 @@ export const WASM_ERROR_STREAK_THRESHOLD = 3;
 /** 再同期メッセージ表示時間 (ms) */
 export const RESYNC_DISPLAY_MS = 500;
 
-/** 再同期境界で使う短時間ランプ長 (ms) */
-export const RESYNC_RAMP_MS = 8;
-
-/** 再同期ランプアウト上限 (ms) */
-export const RESYNC_RAMP_MAX_MS = 120;
-
-/** 再同期ランプ適用の最小ズレ閾値 (AHEAD基準差分, ms) */
-export const RESYNC_RAMP_MIN_DRIFT_MS = 20;
+/** 再同期クロスフェードを適用する最小重複時間 (秒) */
+export const RESYNC_XFADE_MIN_SEC = 0.005;
 
 /** デフォルト音量 (0–100 スライダー値) */
 export const DEFAULT_VOLUME = 84;

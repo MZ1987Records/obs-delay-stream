@@ -1,5 +1,5 @@
 import { state } from './state';
-import { NUM_BARS, RESYNC_RAMP_MS } from './constants';
+import { NUM_BARS } from './constants';
 import {
   volSlider,
   dbDisplay,
@@ -90,6 +90,13 @@ export function ensureAudioContext(): boolean {
   state.gainNode = state.actx.createGain();
   state.gainNode.gain.value = sliderToGain(parseInt(volSlider.value, 10));
   state.gainNode.connect(state.actx.destination);
+  // クロスフェード用ノード 2 本を gainNode の手前に配置
+  state.xfade[0] = state.actx.createGain();
+  state.xfade[1] = state.actx.createGain();
+  state.xfade[0].connect(state.gainNode);
+  state.xfade[1].connect(state.gainNode);
+  state.xfade[1].gain.value = 0;   // 非アクティブ側は無音
+  state.xfadeIdx = 0;
   return true;
 }
 
@@ -97,36 +104,12 @@ export function ensureAudioContext(): boolean {
 // バッファ再生
 // ============================================================
 
-function applyFadeInToBuffer(abuf: AudioBuffer, rampMs: number): void {
-  const rampFrames = Math.min(
-    abuf.length,
-    Math.max(1, Math.floor((abuf.sampleRate * rampMs) / 1000)),
-  );
-  for (let c = 0; c < abuf.numberOfChannels; c++) {
-    const d = abuf.getChannelData(c);
-    for (let i = 0; i < rampFrames; i++) {
-      d[i] *= (i + 1) / rampFrames;
-    }
-  }
-}
-
-export function armNextBufferRampIn(): void {
-  state.nextBufferRampIn = true;
-}
-
 export function playBuffer(abuf: AudioBuffer | null): void {
   if (!abuf || !state.actx || !state.gainNode) return;
-  if (state.nextBufferRampIn) {
-    applyFadeInToBuffer(abuf, RESYNC_RAMP_MS);
-    state.nextBufferRampIn = false;
-  }
+  const dest = state.xfade[state.xfadeIdx] || state.gainNode;
   const src = state.actx.createBufferSource();
   src.buffer = abuf;
-  src.connect(state.gainNode);
-  state.activeSources.add(src);
-  src.onended = () => {
-    state.activeSources.delete(src);
-  };
+  src.connect(dest);
 
   const now = state.actx.currentTime;
   if (state.nextTime < now + 0.01) state.nextTime = now + state.playbackBuffer;

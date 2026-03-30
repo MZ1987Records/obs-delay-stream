@@ -28,6 +28,7 @@ namespace websocket_server_detail {
 
 struct OpusEnc {
     bool disabled = false;
+    bool flush_pending = false;
     int  input_sample_rate = 0;
     int  output_sample_rate = 0;
     int  channels = 0;
@@ -56,6 +57,7 @@ struct OpusEnc {
         complexity = 10;
         pts = 0;
         disabled = false;
+        flush_pending = false;
     }
 
     bool init(int input_sr, int ch, int bitrate, int target_sr) {
@@ -181,6 +183,52 @@ struct OpusEnc {
         bitrate_kbps = bitrate;
         // complexity は宣言時に 10 で初期化済み
         pts = 0;
+        return true;
+    }
+
+    // FIFO 内の完全フレームをすべてエンコードし out へ追加。
+    // 端数サンプルは破棄し、エンコーダ予測状態をリセットする。
+    // PTS はそのまま継続する（パケットヘッダの連続性を維持）。
+    bool drain(uint32_t magic_opus,
+               std::vector<std::shared_ptr<std::string>>& out) {
+        if (!ctx || !fifo || !frame || !pkt) return true;
+
+        // 完全フレーム分をエンコード＆送出
+        while (av_audio_fifo_size(fifo) >= frame_size) {
+            if (av_frame_make_writable(frame) < 0) return false;
+            frame->nb_samples = frame_size;
+            frame->pts = pts;
+            pts += frame_size;
+            int rd = av_audio_fifo_read(fifo, (void**)frame->data, frame_size);
+            if (rd != frame_size) return false;
+
+            int ret = avcodec_send_frame(ctx, frame);
+            if (ret < 0) return false;
+            while (ret >= 0) {
+                ret = avcodec_receive_packet(ctx, pkt);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
+                if (ret < 0) return false;
+                uint32_t pkt_frames = (pkt->duration > 0)
+                    ? (uint32_t)pkt->duration
+                    : (uint32_t)frame_size;
+                auto p = std::make_shared<std::string>(16 + pkt->size, '\0');
+                uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*p)[0]);
+                hdr[0] = magic_opus;
+                hdr[1] = (uint32_t)output_sample_rate;
+                hdr[2] = (uint32_t)channels;
+                hdr[3] = pkt_frames;
+                std::memcpy(&(*p)[16], pkt->data, pkt->size);
+                out.push_back(std::move(p));
+                av_packet_unref(pkt);
+            }
+        }
+
+        // 端数破棄
+        int remain = av_audio_fifo_size(fifo);
+        if (remain > 0) av_audio_fifo_drain(fifo, remain);
+
+        // エンコーダ予測状態リセット（PTS は維持）
+        avcodec_flush_buffers(ctx);
         return true;
     }
 

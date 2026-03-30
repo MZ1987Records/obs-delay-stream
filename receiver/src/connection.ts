@@ -10,8 +10,8 @@ import {
 import { isRecord, isLatencyResultMessage, safeParseJson } from './types';
 import type { JsonRecord } from './types';
 import { sidInput, chInput } from './elements';
-import { buildUrl, clearConnectTimer } from './ui';
-import { ensureAudioContext, handlePcm16, armNextBufferRampIn } from './audio';
+import { buildUrl, clearConnectTimer, resync } from './ui';
+import { ensureAudioContext, handlePcm16 } from './audio';
 import { handleOpus, sendPcmFallbackIfPossible } from './opus';
 import { bus } from './bus';
 
@@ -91,7 +91,9 @@ function handleControl(text: string): void {
         const raw = typeof msg.ms === 'number' ? msg.ms : Number(msg.ms);
         if (!Number.isFinite(raw)) break;
         const clamped = Math.min(PLAYBACK_BUFFER_MAX_MS, Math.max(PLAYBACK_BUFFER_MIN_MS, raw));
+        const prev = state.playbackBuffer;
         state.playbackBuffer = clamped / 1000;
+        if (Math.abs(state.playbackBuffer - prev) > 0.001) resync();
       }
       break;
   }
@@ -159,7 +161,6 @@ export function connect(): void {
     if (state.ws !== wsLocal) return;
     clearConnectTimer();
     state.connecting = false;
-    armNextBufferRampIn();
     bus.emit('ws:open', { url });
     sendPcmFallbackIfPossible();
   };

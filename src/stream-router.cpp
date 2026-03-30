@@ -163,6 +163,9 @@ void StreamRouter::send_audio(int ch, const float* data, size_t frames,
     if (opus_reset_pending_.exchange(false, std::memory_order_acq_rel)) {
         reset_opus_state();
     }
+    if (opus_flush_pending_.exchange(false, std::memory_order_acq_rel)) {
+        for (auto& enc : opus_) enc.flush_pending = true;
+    }
 
     std::vector<ConnHandle> targets_opus;
     std::vector<ConnHandle> targets_pcm;
@@ -336,6 +339,10 @@ void StreamRouter::notify_apply_delay(int ch, double ms, const char* reason) {
         cs.last_applied_delay = ms;
         cs.last_applied_reason = use_reason;
     }
+    // 遅延変更 → Opus FIFO をフレーム境界でドレインしてからエンコーダ状態リセット
+    if (audio_codec_.load(std::memory_order_relaxed) == 0)
+        opus_flush_pending_.store(true, std::memory_order_release);
+
     char buf[160];
     snprintf(buf, sizeof(buf),
              "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
@@ -361,8 +368,10 @@ std::string StreamRouter::make_url(const std::string& host, int ch_1indexed) con
 
 void StreamRouter::set_audio_codec(int mode) {
     if (mode != 0 && mode != 1) mode = 0;
-    audio_codec_.store(mode, std::memory_order_relaxed);
-    opus_reset_pending_.store(true, std::memory_order_release);
+    int prev = audio_codec_.exchange(mode, std::memory_order_relaxed);
+    if (prev != mode) {
+        opus_reset_pending_.store(true, std::memory_order_release);
+    }
 }
 
 void StreamRouter::set_opus_bitrate_kbps(int bitrate_kbps) {
@@ -577,6 +586,16 @@ bool StreamRouter::encode_opus_packets(int ch, const float* data, size_t frames,
     if (!ensure_opus_encoder(ch, sample_rate, channels)) return false;
     OpusEnc& enc = opus_[ch];
     if (!enc.ctx || enc.disabled || !enc.fifo) return false;
+
+    // 遅延変更に伴うフラッシュ: 完全フレームを吐き切ってからエンコーダ状態リセット
+    if (enc.flush_pending) {
+        enc.flush_pending = false;
+        if (!enc.drain(MAGIC_OPUS, out)) {
+            enc.disabled = true;
+            return false;
+        }
+    }
+
     if (!enc.feed_fifo(data, frames)) {
         enc.disabled = true;
         return false;

@@ -19,10 +19,10 @@ export const state = {
   // AudioContext
   actx: null as AudioContext | null,
   gainNode: null as GainNode | null,
+  xfade: [null, null] as [GainNode | null, GainNode | null],
+  xfadeIdx: 0 as 0 | 1,
   nextTime: 0,
   muted: false,
-  activeSources: new Set<AudioBufferSourceNode>(),
-  nextBufferRampIn: false,
   playbackBuffer: PLAYBACK_BUFFER_DEFAULT,
 
   // CH範囲
