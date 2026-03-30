@@ -1,5 +1,6 @@
 import { state } from './state';
 import { NUM_BARS } from './constants';
+import { scheduleSustain } from './sustain';
 import {
   volSlider,
   dbDisplay,
@@ -107,12 +108,23 @@ export function ensureAudioContext(): boolean {
 export function playBuffer(abuf: AudioBuffer | null): void {
   if (!abuf || !state.actx || !state.gainNode) return;
   const dest = state.xfade[state.xfadeIdx] || state.gainNode;
+
+  const now = state.actx.currentTime;
+  // アンダーラン検出: nextTime が過去に落ちた場合、サステインで隙間を埋める
+  if (state.nextTime < now + 0.01) {
+    const gapStart = Math.max(state.nextTime, now);
+    const newNext = now + state.playbackBuffer;
+    const gapSec = newNext - gapStart;
+    if (gapSec > 0.005) {
+      scheduleSustain(dest, gapStart, gapSec);
+    }
+    state.nextTime = newNext;
+  }
+
+  state.lastBuffer = abuf;
   const src = state.actx.createBufferSource();
   src.buffer = abuf;
   src.connect(dest);
-
-  const now = state.actx.currentTime;
-  if (state.nextTime < now + 0.01) state.nextTime = now + state.playbackBuffer;
   src.start(state.nextTime);
   const bufMs = Math.round((state.nextTime - state.actx.currentTime) * 1000);
   state.nextTime += abuf.duration;

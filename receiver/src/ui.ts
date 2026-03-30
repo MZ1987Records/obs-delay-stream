@@ -33,6 +33,7 @@ import type {
   StatusClass,
 } from './types';
 import { isRecord, isConfigResponse, isMemoResponse } from './types';
+import { scheduleSustain } from './sustain';
 
 // ============================================================
 // ステータスバー
@@ -390,9 +391,11 @@ export function resync(): void {
   const newNextTime = now + state.playbackBuffer;
   state.nextTime = newNextTime;
 
-  // 旧バッファと新バッファが重なる場合はクロスフェード
-  const overlapSec = Math.max(0, oldNextTime - newNextTime);
+  const dest = state.xfade[state.xfadeIdx] || state.gainNode;
+  const overlapSec = oldNextTime - newNextTime;
+
   if (overlapSec > RESYNC_XFADE_MIN_SEC && state.xfade[0] && state.xfade[1]) {
+    // 旧バッファと新バッファが重なる → クロスフェード
     const oldIdx = state.xfadeIdx;
     const newIdx: 0 | 1 = oldIdx === 0 ? 1 : 0;
     state.xfadeIdx = newIdx;
@@ -408,6 +411,10 @@ export function resync(): void {
     newGain.cancelScheduledValues(now);
     newGain.setValueAtTime(0, now);
     newGain.linearRampToValueAtTime(1, fadeEnd);
+  } else if (overlapSec < -RESYNC_XFADE_MIN_SEC && dest) {
+    // 旧バッファが先に途切れる → サステインで隙間を埋める
+    const gapStart = Math.max(oldNextTime, now);
+    scheduleSustain(dest, gapStart, newNextTime - gapStart);
   }
 
   setStatus(t('status.resynced'), 'ok');

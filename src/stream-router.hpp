@@ -210,6 +210,8 @@ private:
     std::atomic<bool>  audio_mono_{true};
     std::atomic<int>   pcm_downsample_ratio_{4}; // 1: そのまま, 2: 1/2, 4: 1/4
     std::atomic<int>   playback_buffer_ms_{PLAYBACK_BUFFER_DEFAULT_MS};
+    std::atomic<uint64_t> pb_debounce_seq_{0};
+    std::atomic<bool>  pb_debounce_running_{false};
     std::vector<OpusEnc> opus_;
     int active_ch_max_ = MAX_SUB_CH;
 

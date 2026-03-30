@@ -37,6 +37,7 @@ import {
 } from './ui';
 import { connect, disconnect } from './connection';
 import { bus } from './bus';
+import { state } from './state';
 
 // ============================================================
 // 初期化
@@ -165,6 +166,32 @@ bus.on('ctrl:delay', ({ ms, reason }) => {
     showApplied(ms);
   }
 });
+
+// ============================================================
+// デバッグ: バッファオフセット調整 (?debug=1 で有効)
+// ============================================================
+
+if (new URLSearchParams(location.search).has('debug')) {
+  const target = document.getElementById('infoBuf')?.parentElement;
+  if (target) {
+    const wrap = document.createElement('div');
+    wrap.className = 'column is-full has-text-centered';
+    wrap.innerHTML = [
+      '<span class="tag is-dark is-small">Debug Playhead Shift</span> ',
+      '<button class="button is-small is-danger" id="dbgBack10">◀10</button> ',
+      '<button class="button is-small is-danger is-outlined" id="dbgBack1">◀1</button> ',
+      '<button class="button is-small is-success is-outlined" id="dbgFwd1">1▶</button> ',
+      '<button class="button is-small is-success" id="dbgFwd10">10▶</button>',
+    ].join('');
+    target.parentElement?.appendChild(wrap);
+
+    const shift = (ms: number) => { state.nextTime += ms / 1000; };
+    document.getElementById('dbgBack10')!.onclick = () => shift(-10);
+    document.getElementById('dbgBack1')!.onclick = () => shift(-1);
+    document.getElementById('dbgFwd1')!.onclick = () => shift(1);
+    document.getElementById('dbgFwd10')!.onclick = () => shift(10);
+  }
+}
 
 // ============================================================
 // グローバル公開 (HTML onclick 用)

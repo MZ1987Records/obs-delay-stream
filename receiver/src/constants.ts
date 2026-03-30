@@ -40,5 +40,11 @@ export const RESYNC_DISPLAY_MS = 500;
 /** 再同期クロスフェードを適用する最小重複時間 (秒) */
 export const RESYNC_XFADE_MIN_SEC = 0.005;
 
+/** サステイン用に保持する直近バッファの末尾長 (ms) */
+export const SUSTAIN_TAIL_MS = 30;
+
+/** サステインの最大持続時間 (ms) */
+export const SUSTAIN_MAX_MS = 500;
+
 /** デフォルト音量 (0–100 スライダー値) */
 export const DEFAULT_VOLUME = 84;

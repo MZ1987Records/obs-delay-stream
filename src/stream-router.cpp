@@ -414,20 +414,35 @@ void StreamRouter::set_playback_buffer_ms(int ms) {
     int prev = playback_buffer_ms_.exchange(ms, std::memory_order_relaxed);
     if (prev == ms) return;
 
-    std::string sid;
-    int active = 0;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        sid = stream_id_;
-        active = active_ch_max_;
-    }
-    if (sid.empty() || active <= 0) return;
+    // デバウンス: 値が安定するまで送信を遅延（スライダードラッグ中の連打を間引く）
+    pb_debounce_seq_.fetch_add(1, std::memory_order_relaxed);
+    bool expected = false;
+    if (!pb_debounce_running_.compare_exchange_strong(expected, true))
+        return; // 既にデバウンスタイマー稼働中
+    std::thread([this]() {
+        uint64_t snap = 0;
+        do {
+            snap = pb_debounce_seq_.load(std::memory_order_relaxed);
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        } while (snap != pb_debounce_seq_.load(std::memory_order_relaxed)
+                 && running_.load(std::memory_order_relaxed));
+        pb_debounce_running_.store(false, std::memory_order_relaxed);
+        if (!running_.load(std::memory_order_relaxed)) return;
 
-    const std::string msg =
-        "{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(ms) + "}";
-    for (int ch = 0; ch < active; ++ch) {
-        broadcast_text(sid, ch, msg);
-    }
+        int cur = playback_buffer_ms_.load(std::memory_order_relaxed);
+        std::string sid;
+        int active = 0;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            sid = stream_id_;
+            active = active_ch_max_;
+        }
+        if (sid.empty() || active <= 0) return;
+        const std::string msg =
+            "{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(cur) + "}";
+        for (int ch = 0; ch < active; ++ch)
+            broadcast_text(sid, ch, msg);
+    }).detach();
 }
 
 void StreamRouter::set_http_root_dir(std::string dir) {

@@ -21,6 +21,7 @@ export const state = {
   gainNode: null as GainNode | null,
   xfade: [null, null] as [GainNode | null, GainNode | null],
   xfadeIdx: 0 as 0 | 1,
+  lastBuffer: null as AudioBuffer | null,
   nextTime: 0,
   muted: false,
   playbackBuffer: PLAYBACK_BUFFER_DEFAULT,
