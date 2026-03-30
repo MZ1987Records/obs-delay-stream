@@ -3,17 +3,61 @@
 .meter-wrap {
   display: flex;
   gap: 3px;
-  height: 36px;
+  height: 42px;
   align-items: flex-end;
+  margin-top: 10px;
   position: relative;
   overflow: hidden;
 }
 
 .bar {
+  --level: 0;
   flex: 1;
+  height: 100%;
+  position: relative;
   border-radius: 2px 2px 0 0;
-  min-height: 2px;
-  transition: height .04s;
+  border: 1px solid #1f2937;
+  border-bottom: 0;
+  background: linear-gradient(
+    to top,
+    #16a34a 0 60%,
+    #eab308 60% 84%,
+    #ef4444 84% 100%
+  );
+  overflow: hidden;
+}
+
+.bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc((1 - var(--level)) * 100%);
+  background: #0b1220;
+  transition: height .04s linear;
+  z-index: 1;
+}
+
+.bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to top,
+    rgba(2, 6, 23, 0.66) 0 2px,
+    rgba(2, 6, 23, 0) 2px 4px
+  );
+  z-index: 2;
+}
+
+.meter-wrap.is-muted .bar {
+  background: linear-gradient(
+    to top,
+    #3f3f46 0 60%,
+    #52525b 60% 84%,
+    #71717a 84% 100%
+  );
 }
 
 .meter-wrap.is-offline::before {
@@ -182,12 +226,6 @@ body {
   padding-top: 0;
   padding-bottom: 0;
 }
-
-/* VUメーター */
-.meter-wrap { display: flex; gap: 3px; height: 36px;
-  align-items: flex-end; margin-top: 10px; }
-.bar { flex: 1; border-radius: 2px 2px 0 0;
-  min-height: 2px; transition: height .04s; }
 
 /* 計測パネル */
 .latency-card {

@@ -15,6 +15,16 @@ import { setCodecLabel } from './ui';
 import { t } from './i18n';
 import type { WindowWithWebkitAudioContext } from './types';
 
+const ANALYZER_FFT_SIZE = 512;
+const ANALYZER_SMOOTHING = 0.82;
+const METER_ANALYZER_SMOOTHING = 0;
+const ANALYZER_MIN_DB = -90;
+const ANALYZER_MAX_DB = -24;
+const ANALYZER_MIN_HZ = 60;
+const ANALYZER_MAX_HZ = 12000;
+const METER_UPDATE_INTERVAL_MS = 33;
+const METER_DIGITAL_STEPS = 24;
+
 // ============================================================
 // 音量
 // ============================================================
@@ -73,6 +83,8 @@ export function toggleMute(): void {
       ? 0
       : sliderToGain(parseInt(volSlider.value, 10));
   }
+  meterEl.classList.toggle('is-muted', state.muted);
+  lastMutedState = state.muted;
   const gain = sliderToGain(parseInt(volSlider.value, 10));
   updateVolumeDisplay(gain);
 }
@@ -90,7 +102,21 @@ export function ensureAudioContext(): boolean {
   state.actx = new AudioContextCtor();
   state.gainNode = state.actx.createGain();
   state.gainNode.gain.value = sliderToGain(parseInt(volSlider.value, 10));
-  state.gainNode.connect(state.actx.destination);
+  meterAnalyserNode = state.actx.createAnalyser();
+  meterAnalyserNode.fftSize = ANALYZER_FFT_SIZE;
+  meterAnalyserNode.smoothingTimeConstant = METER_ANALYZER_SMOOTHING;
+  meterAnalyserNode.minDecibels = ANALYZER_MIN_DB;
+  meterAnalyserNode.maxDecibels = ANALYZER_MAX_DB;
+  analyserNode = state.actx.createAnalyser();
+  analyserNode.fftSize = ANALYZER_FFT_SIZE;
+  analyserNode.smoothingTimeConstant = ANALYZER_SMOOTHING;
+  analyserNode.minDecibels = ANALYZER_MIN_DB;
+  analyserNode.maxDecibels = ANALYZER_MAX_DB;
+  state.gainNode.connect(meterAnalyserNode);
+  meterAnalyserNode.connect(analyserNode);
+  analyserNode.connect(state.actx.destination);
+  spectrumData = new Uint8Array(meterAnalyserNode.frequencyBinCount);
+  spectrumRanges = buildSpectrumRanges(state.actx.sampleRate, meterAnalyserNode.fftSize);
   // クロスフェード用ノード 2 本を gainNode の手前に配置
   state.xfade[0] = state.actx.createGain();
   state.xfade[1] = state.actx.createGain();
@@ -130,7 +156,7 @@ export function playBuffer(abuf: AudioBuffer | null): void {
   state.nextTime += abuf.duration;
 
   infoBuf.textContent = bufMs + ' ms';
-  updateMeter(abuf.getChannelData(0));
+  updateMeter();
 }
 
 // ============================================================
@@ -167,40 +193,91 @@ export function handlePcm16(
 }
 
 // ============================================================
-// VU メーター
+// スペクトラムメーター
 // ============================================================
 
 let bars: HTMLDivElement[] = [];
+let lastLevelSteps: number[] = [];
+let analyserNode: AnalyserNode | null = null;
+let meterAnalyserNode: AnalyserNode | null = null;
+let spectrumData = new Uint8Array(0);
+let spectrumRanges: Array<[number, number]> = [];
+let lastMeterUpdateAt = 0;
+let lastMutedState = false;
+
+function buildSpectrumRanges(
+  sampleRate: number,
+  fftSize: number,
+): Array<[number, number]> {
+  const binCount = Math.max(1, Math.floor(fftSize / 2));
+  const nyquist = sampleRate / 2;
+  const minHz = Math.max(20, Math.min(ANALYZER_MIN_HZ, nyquist));
+  const maxHz = Math.max(minHz, Math.min(ANALYZER_MAX_HZ, nyquist));
+  const hzPerBin = nyquist / binCount || 1;
+  const ranges: Array<[number, number]> = [];
+  let prevEnd = -1;
+
+  for (let i = 0; i < NUM_BARS; i++) {
+    const startHz =
+      minHz * Math.pow(maxHz / minHz, i / NUM_BARS);
+    const endHz =
+      minHz * Math.pow(maxHz / minHz, (i + 1) / NUM_BARS);
+    let start = Math.floor(startHz / hzPerBin);
+    let end = Math.floor(endHz / hzPerBin);
+
+    if (start <= prevEnd) start = prevEnd + 1;
+    if (start >= binCount) start = binCount - 1;
+    if (end < start) end = start;
+    if (end >= binCount) end = binCount - 1;
+
+    ranges.push([start, end]);
+    prevEnd = end;
+  }
+  return ranges;
+}
 
 export function initMeter(): void {
   bars = [];
+  lastLevelSteps = new Array(NUM_BARS).fill(-1);
+  lastMutedState = state.muted;
+  meterEl.classList.toggle('is-muted', state.muted);
+  meterEl.innerHTML = '';
   for (let i = 0; i < NUM_BARS; i++) {
     const b = document.createElement('div');
     b.className = 'bar';
-    b.style.height = '2px';
+    b.style.setProperty('--level', '0');
     meterEl.appendChild(b);
     bars.push(b);
   }
 }
 
-function updateMeter(samples: Float32Array): void {
-  const g = state.gainNode ? state.gainNode.gain.value : 1;
-  const step = Math.floor(samples.length / NUM_BARS) || 1;
-  for (let i = 0; i < NUM_BARS; i++) {
-    let rms = 0;
-    for (let j = 0; j < step; j++) {
-      const s = (samples[i * step + j] || 0) * g;
-      rms += s * s;
+function updateMeter(): void {
+  if (!meterAnalyserNode || spectrumData.length === 0 || bars.length === 0) return;
+  const now = performance.now();
+  if (now - lastMeterUpdateAt < METER_UPDATE_INTERVAL_MS) return;
+  lastMeterUpdateAt = now;
+  if (lastMutedState !== state.muted) {
+    meterEl.classList.toggle('is-muted', state.muted);
+    lastMutedState = state.muted;
+  }
+
+  meterAnalyserNode.getByteFrequencyData(spectrumData);
+  for (let i = 0; i < bars.length; i++) {
+    const range = spectrumRanges[i] || [0, 0];
+    const start = range[0];
+    const end = range[1];
+    let sum = 0;
+    for (let j = start; j <= end; j++) {
+      sum += spectrumData[j] || 0;
     }
-    rms = Math.sqrt(rms / step);
-    const h = Math.min(100, Math.round(rms * 500));
-    bars[i].style.height = Math.max(2, h) + '%';
-    bars[i].style.background = state.muted
-      ? '#333'
-      : h > 80
-        ? '#ef4444'
-        : h > 50
-          ? '#f59e0b'
-          : '#22c55e';
+    const avg = sum / (end - start + 1);
+    const normalized = avg / 255;
+    const level = Math.min(1, Math.max(0, normalized));
+    const levelStep = Math.round(level * METER_DIGITAL_STEPS);
+    if (lastLevelSteps[i] !== levelStep) {
+      const quantized = levelStep / METER_DIGITAL_STEPS;
+      bars[i].style.setProperty('--level', quantized.toFixed(3));
+      lastLevelSteps[i] = levelStep;
+    }
   }
 }
