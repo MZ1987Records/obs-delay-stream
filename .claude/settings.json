@@ -27,7 +27,30 @@
       "Bash(./node_modules/.bin/vite build:*)",
       "Bash(npx vite:*)",
       "Bash(node node_modules/vite/bin/vite.js build --logLevel warn)",
-      "Bash(node node_modules/typescript/bin/tsc --noEmit)"
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(cd * && git status:*)",
+      "Bash(cd * && git log:*)",
+      "Bash(cd * && git diff:*)",
+      "Bash(cd * && git show:*)",
+      "Bash(cd * && git branch:*)",
+      "Bash(cd * && ls:*)",
+      "Bash(cd * && grep:*)",
+      "Bash(cd * && wc:*)",
+      "Bash(cd * && cat:*)",
+      "Bash(cd * && head:*)",
+      "Bash(cd * && tail:*)",
+      "Bash(cd * && find:*)",
+      "Bash(cd * && which:*)",
+      "Bash(cd * && where:*)",
+      "Bash(cd * && test:*)",
+      "Bash(cd * && echo:*)",
+      "Bash(cd * && sort:*)",
+      "Bash(cd * && pwd)",
+      "Bash(cd * && npm run:*)",
+      "Bash(cd * && ./node_modules/.bin/vite build:*)",
+      "Bash(cd * && npx vite:*)",
+      "Bash(cd * && node node_modules/vite/bin/vite.js build --logLevel warn)",
+      "Bash(cd * && node node_modules/typescript/bin/tsc --noEmit)"
     ]
   }
 }
