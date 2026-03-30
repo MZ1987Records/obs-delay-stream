@@ -2,6 +2,12 @@
 
 **VRChat Dancer/音楽パフォーマー支援ツール[obs-delay-stream]**
 
+![Windows](https://img.shields.io/badge/platform-Windows-blue)
+![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue)
+![OSS: OBS Studio](https://img.shields.io/badge/OSS-OBS%20Studio-lightgrey)
+![OSS: WebSocket++](https://img.shields.io/badge/OSS-WebSocket++-lightgrey)
+![OSS: FFmpeg](https://img.shields.io/badge/OSS-FFmpeg-lightgrey)
+
 [BOOTH](https://mz1987records.booth.pm/items/8134637) | [バグ報告](https://github.com/MZ1987Records/obs-delay-stream/issues/new/choose) | [English](README-en.md)
 
 <p align="center">

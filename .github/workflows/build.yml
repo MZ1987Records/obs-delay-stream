@@ -108,6 +108,8 @@ jobs:
 
             $content = Get-Content $src -Raw
             $content = [regex]::Replace($content, '\s*\|\s*\[[^\]]+\]\(README[^)]*\.md\)', '')
+            $content = [regex]::Replace($content, '(?m)^\s*!\[[^\]]*\]\(https?://img\.shields\.io/[^)]+\)\s*\r?\n?', '')
+            $content = [regex]::Replace($content, '(?m)^\s*<img[^>]*\bsrc=(["''])https?://img\.shields\.io/[^"''>]+\1[^>]*>\s*\r?\n?', '')
             $content = [regex]::Replace($content, '!\[(?<label>[^\]]*)\]\((?<url>[^)]+)\)', {
               param($m)
               $newUrl = Resolve-GitHubUrl $m.Groups['url'].Value $true
