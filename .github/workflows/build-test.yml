@@ -179,7 +179,7 @@ jobs:
 
       - name: Restore OBS build cache
         id: obs-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             third_party/obs-studio/build_x64
@@ -231,7 +231,7 @@ jobs:
 
       - name: Save OBS build cache
         if: success() && steps.obs-build-check.outputs.skip != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: |
             third_party/obs-studio/build_x64
