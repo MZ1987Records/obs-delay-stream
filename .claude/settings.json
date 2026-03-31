@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "true"
+  },
   "permissions": {
     "allow": [
       "Read",
@@ -33,7 +36,8 @@
       "Bash(npx tsc *)",
       "Bash(./node_modules/.bin/vite build *)",
       "Bash(./node_modules/.bin/esbuild *)",
-      "Bash(./node_modules/.bin/tsc *)"
+      "Bash(./node_modules/.bin/tsc *)",
+      "Bash(node_modules/.bin/tsc --noEmit)"
     ],
     "deny": [
       "Bash(mkfs *)",

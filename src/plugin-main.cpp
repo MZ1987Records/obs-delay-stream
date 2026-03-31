@@ -47,6 +47,8 @@
 #include "rtmp-prober.hpp"
 #include "sync-flow.hpp"
 #include "tunnel-manager.hpp"
+#include "stepper-widget.hpp"
+#include "text-button-widget.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
@@ -549,8 +551,6 @@ struct DelayStreamData {
     bool          initialized = false;
     std::atomic<bool> create_done{false};    // set true after ds_create completes
     std::atomic<bool> in_get_props{false};   // true while ds_get_properties is running
-    std::atomic<uint64_t> adjust_debounce_seq{0}; // スライダー変更デバウンス用シーケンス
-    std::atomic<bool> adjust_debounce_running{false}; // デバウンスタイマースレッド実行中フラグ
     std::atomic<bool> sid_autofill_guard{false};
     std::atomic<bool> detail_mode{false};
     std::atomic<bool> rtmp_url_auto{true};
@@ -819,7 +819,6 @@ static void              setup_event_callbacks(DelayStreamData*);
 static void              clear_event_callbacks(DelayStreamData*);
 
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void*);
-static bool cb_sub_adjust_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_add(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_remove(obs_properties_t*, obs_property_t*, void*);
@@ -1180,8 +1179,12 @@ static void ds_update(void* data, obs_data_t* settings) {
     }
     d->master_delay_ms = (float)obs_data_get_double(settings, "master_delay_ms");
     d->master_buf.set_delay_ms(d->enabled.load() ? (uint32_t)d->master_delay_ms : 0);
+    const float prev_sub_offset = d->sub_offset_ms;
     d->sub_offset_ms = (float)obs_data_get_double(settings, "sub_offset_ms");
+    bool effective_delay_changed = false;
     for (int i = 0; i < MAX_SUB_CH; ++i) {
+        const float prev_delay = d->sub[i].delay_ms;
+        const float prev_adjust = d->sub[i].adjust_ms;
         char key[32]; snprintf(key, sizeof(key), "sub%d_delay_ms", i);
         d->sub[i].delay_ms = (float)obs_data_get_double(settings, key);
         char adjust_key[32]; snprintf(adjust_key, sizeof(adjust_key), "sub%d_adjust_ms", i);
@@ -1207,11 +1210,22 @@ static void ds_update(void* data, obs_data_t* settings) {
         }
         d->router.set_sub_code(i, code);
         apply_sub_delay_to_buffer(d, i);
+
+        float prev_effective = prev_delay + prev_adjust + prev_sub_offset;
+        if (prev_effective < 0.0f) prev_effective = 0.0f;
+        float new_effective = calc_effective_sub_delay_value_ms(
+            d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
+        if (std::fabs(prev_effective - new_effective) > 0.01f) {
+            d->router.notify_apply_delay(i, new_effective, "manual_adjust");
+            effective_delay_changed = true;
+        }
     }
     d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
     if (detail_changed) {
         // UI構造が変わるため、設定反映後にプロパティを再構築する。
         request_properties_refresh(d, "ds_update.detail_changed");
+    } else if (effective_delay_changed) {
+        request_properties_refresh(d, "ds_update.effective_changed");
     }
     d->prev_stream_id_has_user_value = obs_data_has_user_value(settings, "stream_id");
 }
@@ -1280,63 +1294,6 @@ static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
         ms.last_error.clear();
     }
     request_properties_refresh(d, "cb_sub_measure");
-    return false;
-}
-// 追加遅延スライダー変更を即時反映する。
-static bool cb_sub_adjust_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t* settings) {
-    auto* ctx = static_cast<ChCtx*>(priv);
-    if (!ctx || !ctx->d || !settings) return false;
-    auto* d = ctx->d;
-    int i = ctx->ch;
-    if (i < 0 || i >= MAX_SUB_CH) return false;
-
-    char key[32];
-    snprintf(key, sizeof(key), "sub%d_adjust_ms", i);
-    float adjust = (float)obs_data_get_double(settings, key);
-    if (adjust < SUB_ADJUST_MIN_MS) {
-        adjust = SUB_ADJUST_MIN_MS;
-        obs_data_set_double(settings, key, adjust);
-    } else if (adjust > SUB_ADJUST_MAX_MS) {
-        adjust = SUB_ADJUST_MAX_MS;
-        obs_data_set_double(settings, key, adjust);
-    }
-
-    // ds_update は visUpdateCb 経由で本コールバックより先に呼ばれるため、
-    // d->sub[i].adjust_ms は既に新値に更新されている。
-    // バッファ・ルーター通知は ds_update に含まれないためここで呼ぶ。
-    float effective = calc_effective_sub_delay_value_ms(
-        d, d->sub[i].delay_ms, adjust);
-    d->router.notify_apply_delay(i, effective, "manual_adjust");
-
-    // 表示中の適用遅延値と差分があればデバウンス付きリビルドを予約する。
-    // ドラッグ中はリビルドしない（スライダーウィジェットが破棄されドラッグが途切れるため）。
-    // 最後のスライダー変更から 200ms 経過後にリビルドすることで「ドラッグ終了」を近似する。
-    // タイマースレッドは同時に最大1本だけ走る。
-    if (std::fabs(d->sub[i].displayed_effective_ms - effective) > 0.01f) {
-        d->adjust_debounce_seq.fetch_add(1, std::memory_order_relaxed);
-        bool expected = false;
-        if (d->adjust_debounce_running.compare_exchange_strong(expected, true)) {
-            obs_source_t* ref = obs_source_get_ref(d->context);
-            if (ref) {
-                std::thread([d, ref]() {
-                    // seq が安定する（=ドラッグ終了）まで 200ms ごとに再チェック
-                    uint64_t prev = 0;
-                    do {
-                        prev = d->adjust_debounce_seq.load(std::memory_order_relaxed);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                    } while (prev != d->adjust_debounce_seq.load(std::memory_order_relaxed)
-                             && !d->destroying.load());
-                    d->adjust_debounce_running.store(false, std::memory_order_relaxed);
-                    if (!d->destroying.load()) {
-                        request_properties_refresh(d, "adjust_debounce");
-                    }
-                    obs_source_release(ref);
-                }).detach();
-            } else {
-                d->adjust_debounce_running.store(false, std::memory_order_relaxed);
-            }
-        }
-    }
     return false;
 }
 // 指定チャンネルの遅延を設定値と実バッファへ反映する。
@@ -1973,10 +1930,11 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     obs_property_list_add_int(pcm_ds_ratio_p, T_("PcmDownsampleRatioNone"), 1);
     obs_property_list_add_int(pcm_ds_ratio_p, "1/2", 2);
     obs_property_list_add_int(pcm_ds_ratio_p, "1/4", 4);
-    obs_property_t* pb_buf_p = obs_properties_add_int_slider(
-        grp, "playback_buffer_ms", T_("PlaybackBufferMs"),
-        PLAYBACK_BUFFER_MIN_MS, PLAYBACK_BUFFER_MAX_MS, 1);
-    obs_property_int_set_suffix(pb_buf_p, " ms");
+    obs_properties_add_stepper(
+        grp, "playback_buffer_ms_stepper", T_("PlaybackBufferMs"),
+        "playback_buffer_ms",
+        PLAYBACK_BUFFER_MIN_MS, PLAYBACK_BUFFER_MAX_MS,
+        PLAYBACK_BUFFER_DEFAULT_MS, 0, " ms", true);
 
     if (ws_running) {
         obs_property_set_enabled(codec_p, false);
@@ -2135,9 +2093,10 @@ static void add_flow_group(obs_properties_t* props, DelayStreamData* d) {
 static void add_master_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
-    obs_property_t* mp = obs_properties_add_float_slider(
-        grp, "master_delay_ms", T_("MasterDelay"), 0.0, MAX_DELAY_MS, 1.0);
-    obs_property_float_set_suffix(mp, " ms");
+    obs_properties_add_stepper(
+        grp, "master_delay_ms_stepper", T_("MasterDelay"),
+        "master_delay_ms",
+        0.0, MAX_DELAY_MS, 0.0, 0, " ms");
     bool auto_mode = true;
     {
         obs_data_t* s = obs_source_get_settings(d->context);
@@ -2185,10 +2144,10 @@ static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
             T_("GlobalOffsetInfoFmt"), d->sub_offset_ms);
         obs_properties_add_text(grp, "sub_offset_info", offset_info, OBS_TEXT_INFO);
     }
-    obs_property_t* op = obs_properties_add_float_slider(
-        grp, "sub_offset_ms",
-        T_("GlobalOffsetLabel"), -2000.0, 5000.0, 10.0);
-    obs_property_float_set_suffix(op, " ms");
+    obs_properties_add_stepper(
+        grp, "sub_offset_ms_stepper",
+        T_("GlobalOffsetLabel"), "sub_offset_ms",
+        -2000.0, 5000.0, 0.0, 0, " ms");
     obs_properties_add_group(props, "grp_offset",
         T_("GroupGlobalOffset"), OBS_GROUP_NORMAL, grp);
 }
@@ -2240,13 +2199,12 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     if (!grp || !d) return;
     d->btn_ctx[i] = { d, i };
 
-    char uk[32], mk[32], rk[32], nk[32], dk_rm[32], ajk[32], eik[32];
+    char uk[32], mk[32], rk[32], nk[32], ajk[32], eik[32];
     char ul[32], gk[32], gt[32];
     snprintf(uk, sizeof(uk), "sub%d_url", i);
     snprintf(mk, sizeof(mk), "sub%d_meas", i);
     snprintf(rk, sizeof(rk), "sub%d_result", i);
     snprintf(nk, sizeof(nk), "sub%d_memo", i);
-    snprintf(dk_rm, sizeof(dk_rm), "sub%d_remove", i);
     snprintf(ajk, sizeof(ajk), "sub%d_adjust_ms", i);
     snprintf(eik, sizeof(eik), "sub%d_effective_info", i);
     snprintf(ul, sizeof(ul), "URL");
@@ -2263,18 +2221,24 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
         us = std::string("<a href=\"") + url + "\">" + url + "</a>";
     }
 
-    obs_property_t* memo_p = obs_properties_add_text(ch_grp, nk, T_("SubMemo"), OBS_TEXT_DEFAULT);
-    if (d->router_running.load()) {
-        obs_property_set_enabled(memo_p, false);
-    }
+    char row_prop[40];
+    snprintf(row_prop, sizeof(row_prop), "sub%d_memo_remove_row_detail", i);
+    const bool input_enabled = !d->router_running.load();
+    const bool button_enabled = !(d->router_running.load() || sub_count <= 1);
+    obs_property_t* memo_remove_row = obs_properties_add_text_button(
+        ch_grp, row_prop, T_("SubMemo"), nk, T_("SubRemove"),
+        cb_sub_remove, &d->btn_ctx[i], input_enabled, button_enabled);
+    obs_property_set_long_description(memo_remove_row, T_("SubRemoveDesc"));
+
     obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
     obs_property_set_long_description(up, us.c_str());
     obs_property_text_set_info_word_wrap(up, false);
-    obs_property_t* sp = obs_properties_add_int_slider(
-        ch_grp, ajk, T_("SubAdjust"),
-        (int)SUB_ADJUST_MIN_MS, (int)SUB_ADJUST_MAX_MS, 1);
-    obs_property_int_set_suffix(sp, " ms");
-    obs_property_set_modified_callback2(sp, cb_sub_adjust_changed, &d->btn_ctx[i]);
+    {
+        char sn[32];
+        snprintf(sn, sizeof(sn), "sub%d_stepper", i);
+        obs_properties_add_stepper(ch_grp, sn, T_("SubAdjust"),
+            ajk, SUB_ADJUST_MIN_MS, SUB_ADJUST_MAX_MS, 0.0, 0, " ms");
+    }
     char ei[192];
     float effective = calc_effective_sub_delay_value_ms(
         d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
@@ -2284,15 +2248,6 @@ static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* 
     obs_properties_add_text(ch_grp, eik, ei, OBS_TEXT_INFO);
 
     add_sub_channel_measure_controls(ch_grp, d, i, nc, mk, rk);
-
-    char rm_label[32];
-    snprintf(rm_label, sizeof(rm_label), T_("SubRemoveFmt"), i + 1);
-    obs_property_t* rm = obs_properties_add_button2(ch_grp, dk_rm, rm_label,
-        cb_sub_remove, &d->btn_ctx[i]);
-    obs_property_set_long_description(rm, T_("SubRemoveDesc"));
-    if (d->router_running.load() || sub_count <= 1) {
-        obs_property_set_enabled(rm, false);
-    }
     obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
 }
 
@@ -2301,25 +2256,17 @@ static void add_sub_channel_item_simple(obs_properties_t* grp, DelayStreamData* 
     if (!grp || !d) return;
     d->btn_ctx[i] = { d, i };
 
-    char nk[32], dk_rm[32], lt[32];
+    char nk[32], lt[32];
     snprintf(nk, sizeof(nk), "sub%d_memo", i);
-    snprintf(dk_rm, sizeof(dk_rm), "sub%d_remove", i);
     snprintf(lt, sizeof(lt), "Ch.%d", i + 1);
 
-    // 簡易モードでは、メモ入力欄のラベル位置にチャンネル番号を表示する。
-    obs_property_t* memo_p = obs_properties_add_text(grp, nk, lt, OBS_TEXT_DEFAULT);
-    if (d->router_running.load()) {
-        obs_property_set_enabled(memo_p, false);
-    }
-
-    char rm_label[32];
-    snprintf(rm_label, sizeof(rm_label), T_("SubRemoveFmt"), i + 1);
-    obs_property_t* rm = obs_properties_add_button2(grp, dk_rm, rm_label,
-        cb_sub_remove, &d->btn_ctx[i]);
-    obs_property_set_long_description(rm, T_("SubRemoveDesc"));
-    if (d->router_running.load() || sub_count <= 1) {
-        obs_property_set_enabled(rm, false);
-    }
+    char row_prop[32];
+    snprintf(row_prop, sizeof(row_prop), "sub%d_memo_remove_row", i);
+    const bool input_enabled = !d->router_running.load();
+    const bool button_enabled = !(d->router_running.load() || sub_count <= 1);
+    obs_properties_add_text_button(
+        grp, row_prop, lt, nk, T_("SubRemove"),
+        cb_sub_remove, &d->btn_ctx[i], input_enabled, button_enabled);
 }
 
 // チャンネル 一覧グループを構築する（詳細/簡易モードで項目を切り替える）。
@@ -2381,6 +2328,12 @@ static obs_properties_t* ds_get_properties(void* data) {
     add_sub_offset_group(props, d);
 
     apply_detail_mode_visibility(props, d, detail_mode);
+
+    // ステッパー注入をスケジュール（UIスレッドでプレースホルダーを差し替え）
+    if (d->context) {
+        schedule_stepper_inject(d->context);
+        schedule_text_button_inject(d->context);
+    }
 
     d->in_get_props.store(false);
     return props;

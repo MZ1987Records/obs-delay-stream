@@ -39,9 +39,22 @@ find_package(SIMDe QUIET   HINTS "${OBS_DEPS_DIR}" "${OBS_DEPS_DIR}/lib/cmake")
 find_package(Threads REQUIRED)
 find_package(libobs REQUIRED HINTS "${OBS_DIR}/build_x64/libobs" "${OBS_DIR}/build_x64" "${OBS_DIR}/cmake")
 
+# ---- Qt (for custom stepper widget) ----
+file(GLOB _QT6_DEPS "${OBS_DIR}/.deps/obs-deps-qt6-*-x64")
+if(_QT6_DEPS)
+  list(GET _QT6_DEPS 0 _QT6_DEP_DIR)
+  list(APPEND CMAKE_PREFIX_PATH "${_QT6_DEP_DIR}")
+endif()
+find_package(Qt6 COMPONENTS Widgets QUIET)
+if(NOT Qt6_FOUND)
+  find_package(Qt5 5.15 COMPONENTS Widgets REQUIRED)
+endif()
+
 # ---- Plugin target ----
 add_library(obs-delay-stream MODULE
   src/plugin-main.cpp
+  src/stepper-widget.cpp
+  src/text-button-widget.cpp
   src/stream-router.cpp
   src/rtmp-prober.cpp
   src/tunnel-manager.cpp
@@ -155,6 +168,13 @@ target_compile_definitions(obs-delay-stream PRIVATE
   SIMDE_NO_NATIVE
   PLUGIN_VERSION="${PROJECT_VERSION}"
 )
+
+# ---- Qt stepper widget ----
+if(Qt6_FOUND)
+  target_link_libraries(obs-delay-stream Qt6::Widgets)
+else()
+  target_link_libraries(obs-delay-stream Qt5::Widgets)
+endif()
 
 # Force MSVC to treat source as UTF-8
 if(MSVC)
