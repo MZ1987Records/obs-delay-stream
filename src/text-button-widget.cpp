@@ -1,4 +1,5 @@
 #include "text-button-widget.hpp"
+#include "widget-inject-utils.hpp"
 
 #include <QApplication>
 #include <QEvent>
@@ -22,8 +23,8 @@
 namespace {
 
 constexpr char kTextButtonMagicPipe[] = "TEXTBTN|";
-constexpr int kTextButtonInjectRetryMax = 12;
-constexpr int kTextButtonInjectRetryMs = 25;
+constexpr int kTextButtonInjectRetryMax = 40;
+constexpr int kTextButtonInjectRetryMs = 5;
 
 std::unordered_map<std::string, obs_property_t *> g_text_button_action_props;
 std::mutex g_text_button_action_props_mutex;
@@ -253,6 +254,7 @@ void do_text_button_inject(void *param)
         QString text;
     };
     std::vector<Placeholder> found;
+    std::vector<widget_inject::ScrollSnapshot> scroll_snapshots;
 
     const auto all_widgets = QApplication::allWidgets();
     for (QWidget *w : all_widgets) {
@@ -260,9 +262,11 @@ void do_text_button_inject(void *param)
         if (!lbl)
             continue;
         const QString text = lbl->text();
-        if (text.startsWith(QLatin1String("TEXTBTN|")))
+        if (text.startsWith(QLatin1String(kTextButtonMagicPipe)))
             found.push_back({lbl, text});
     }
+    for (const auto &ph : found)
+        widget_inject::collect_ancestor_scroll_snapshot(ph.label, scroll_snapshots);
 
     int replaced_count = 0;
     for (auto &ph : found) {
@@ -314,6 +318,8 @@ void do_text_button_inject(void *param)
             form->insertRow(row, row_widget);
         ++replaced_count;
     }
+
+    widget_inject::restore_scroll_snapshots(scroll_snapshots);
 
     if ((found.empty() || replaced_count < static_cast<int>(found.size())) &&
         ctx->retries_left > 0) {

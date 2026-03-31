@@ -38,6 +38,12 @@
 #include <cctype>
 #include <memory>
 #include <random>
+#include <QApplication>
+#include <QAbstractScrollArea>
+#include <QPointer>
+#include <QScrollBar>
+#include <QTimer>
+#include <QWidget>
 #include <obs-module.h>
 #include <util/platform.h>
 #include "constants.hpp"
@@ -49,6 +55,7 @@
 #include "tunnel-manager.hpp"
 #include "stepper-widget.hpp"
 #include "text-button-widget.hpp"
+#include "color-buttons-widget.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
@@ -550,7 +557,8 @@ struct DelayStreamData {
     uint32_t      channels    = 2;
     bool          initialized = false;
     std::atomic<bool> create_done{false};    // set true after ds_create completes
-    std::atomic<bool> in_get_props{false};   // true while ds_get_properties is running
+    std::atomic<int> get_props_depth{0};     // ds_get_properties re-entry depth
+    std::atomic<int64_t> last_rendered_audio_sync_offset_ns{INT64_MIN}; // 直前のプロパティ描画時の同期オフセット値
     std::atomic<bool> sid_autofill_guard{false};
     std::atomic<bool> detail_mode{false};
     std::atomic<bool> rtmp_url_auto{true};
@@ -666,6 +674,76 @@ static std::mutex              g_props_refresh_pending_mtx;
 static std::set<obs_source_t*> g_props_refresh_pending_sources;
 static std::set<obs_source_t*> g_props_refresh_blocked_sources;
 
+struct UiScrollSnapshot {
+    QPointer<QScrollBar> bar;
+    int value = 0;
+};
+
+struct UiRefreshFreezeToken {
+    QPointer<QWidget> root;
+    bool was_updates_enabled = false;
+};
+
+static constexpr int kPropsRefreshUiFreezeMs = 40;
+
+static QWidget* find_properties_root_widget() {
+    QWidget* root = QApplication::activeModalWidget();
+    if (!root) root = QApplication::activeWindow();
+    if (!root) {
+        QWidget* focus = QApplication::focusWidget();
+        if (focus) root = focus->window();
+    }
+    return root;
+}
+
+static UiRefreshFreezeToken freeze_properties_ui_updates() {
+    UiRefreshFreezeToken token;
+    token.root = find_properties_root_widget();
+    if (!token.root) return token;
+    token.was_updates_enabled = token.root->updatesEnabled();
+    if (token.was_updates_enabled) {
+        token.root->setUpdatesEnabled(false);
+    }
+    return token;
+}
+
+static void unfreeze_properties_ui_updates(const UiRefreshFreezeToken& token) {
+    if (!token.root || !token.was_updates_enabled) return;
+    token.root->setUpdatesEnabled(true);
+    token.root->update();
+}
+
+static std::vector<UiScrollSnapshot> snapshot_vertical_scrollbars() {
+    std::vector<UiScrollSnapshot> snapshots;
+    QWidget* root = find_properties_root_widget();
+    if (!root) return snapshots;
+
+    std::set<QScrollBar*> unique_bars;
+
+    auto add_snapshot = [&](QAbstractScrollArea* area) {
+        if (!area) return;
+        QScrollBar* bar = area->verticalScrollBar();
+        if (!bar) return;
+        if (!unique_bars.insert(bar).second) return;
+        snapshots.push_back({QPointer<QScrollBar>(bar), bar->value()});
+    };
+
+    add_snapshot(qobject_cast<QAbstractScrollArea*>(root));
+    const auto areas = root->findChildren<QAbstractScrollArea*>();
+    snapshots.reserve(areas.size() + 1);
+    for (QAbstractScrollArea* area : areas) {
+        add_snapshot(area);
+    }
+    return snapshots;
+}
+
+static void restore_vertical_scrollbars(const std::vector<UiScrollSnapshot>& snapshots) {
+    for (const auto& snap : snapshots) {
+        if (!snap.bar) continue;
+        snap.bar->setValue(snap.value);
+    }
+}
+
 // UIスレッド側でプロパティ再構築を実行する。
 static void do_request_properties_refresh_ui(void* p) {
     auto* ctx = static_cast<PropsRefreshCtx*>(p);
@@ -688,7 +766,18 @@ static void do_request_properties_refresh_ui(void* p) {
     if (should_update) {
         blog(LOG_INFO, "[obs-delay-stream] props_refresh exec seq=%llu reason=%s",
              (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
+        const auto scroll_snapshots = snapshot_vertical_scrollbars();
+        const auto freeze_token = freeze_properties_ui_updates();
         obs_source_update_properties(ctx->source);
+        restore_vertical_scrollbars(scroll_snapshots);
+        QTimer::singleShot(0, qApp, [scroll_snapshots]() {
+            restore_vertical_scrollbars(scroll_snapshots);
+        });
+        QTimer::singleShot(kPropsRefreshUiFreezeMs, qApp,
+                           [scroll_snapshots, freeze_token]() {
+            restore_vertical_scrollbars(scroll_snapshots);
+            unfreeze_properties_ui_updates(freeze_token);
+        });
     } else {
         blog(LOG_INFO, "[obs-delay-stream] props_refresh skip seq=%llu reason=%s",
              (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
@@ -707,7 +796,7 @@ static void request_properties_refresh(DelayStreamData* d, const char* reason = 
     if (!d || !d->context || !d->create_done.load()) return;
     if (d->destroying.load(std::memory_order_acquire)) return;
     if (is_obs_source_removed(d->context)) return;
-    if (d->in_get_props.load()) return; // prevent re-entry
+    if (d->get_props_depth.load(std::memory_order_acquire) > 0) return;
 
     uint64_t seq = g_props_refresh_seq.fetch_add(1, std::memory_order_relaxed) + 1;
     auto* ctx = new PropsRefreshCtx();
@@ -817,6 +906,7 @@ static void              build_flow_panel(obs_properties_t*, DelayStreamData*);
 static void              apply_sub_delay(DelayStreamData*, int, double);
 static void              setup_event_callbacks(DelayStreamData*);
 static void              clear_event_callbacks(DelayStreamData*);
+static bool              try_get_parent_audio_sync_offset_ns(DelayStreamData*, int64_t&);
 
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void*);
 static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void*);
@@ -839,6 +929,28 @@ static bool cb_host_ip_changed(void*, obs_properties_t*, obs_property_t*, obs_da
 static bool cb_detail_mode_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void*);
 static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void*);
+
+// 音声同期オフセットを定期的に確認し、UIに表示している値と変化があればプロパティを再描画する。
+// QTimer::singleShot で自己再スケジュールする（低頻度: 3 秒ごと）。
+// life_token が無効になると再スケジュールを止め、自然に停止する。
+static void schedule_audio_sync_check(
+    DelayStreamData* d,
+    std::weak_ptr<std::atomic<bool>> life_token_weak)
+{
+    constexpr int kIntervalMs = 3000;
+    QTimer::singleShot(kIntervalMs, qApp, [d, life_token_weak]() {
+        auto token = life_token_weak.lock();
+        if (!token || !token->load(std::memory_order_acquire)) return;
+        int64_t current = INT64_MIN;
+        try_get_parent_audio_sync_offset_ns(d, current);
+        const int64_t last =
+            d->last_rendered_audio_sync_offset_ns.load(std::memory_order_relaxed);
+        if (current != last) {
+            request_properties_refresh(d, "audio_sync_offset_poll");
+        }
+        schedule_audio_sync_check(d, life_token_weak);
+    });
+}
 
 static struct obs_source_info delay_stream_filter;
 
@@ -995,6 +1107,10 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
 
     ds_update(d, settings);
     d->create_done.store(true);
+    // 音声同期オフセット変化の定期チェックを UI スレッドで開始する。
+    queue_ui_safe(d, [](DelayStreamData* dp) {
+        schedule_audio_sync_check(dp, std::weak_ptr<std::atomic<bool>>(dp->life_token));
+    });
     blog(LOG_INFO, "[obs-delay-stream] ds_create complete");
     return d;
 }
@@ -1953,14 +2069,29 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
         }
     }
 
-    if (ws_running) {
-        obs_properties_add_button2(grp, "ws_server_stop_btn",
-            T_("WsServerStop"), cb_ws_server_stop, d);
-    } else {
-        obs_property_t* start_p = obs_properties_add_button2(grp, "ws_server_start_btn",
-            T_("WsServerStart"), cb_ws_server_start, d);
-        obs_property_set_enabled(start_p, has_sid);
-    }
+    const ObsColorButtonSpec ws_buttons[] = {
+        {
+            "ws_server_start_btn",
+            T_("WsServerStartShort"),
+            cb_ws_server_start,
+            d,
+            (!ws_running && has_sid),
+            UI_COLOR_START_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+        {
+            "ws_server_stop_btn",
+            T_("WsServerStopShort"),
+            cb_ws_server_stop,
+            d,
+            (ws_running),
+            UI_COLOR_STOP_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+    };
+    obs_properties_add_color_button_row(
+        grp, "ws_server_controls_row", T_("WsServerControls"), ws_buttons,
+        sizeof(ws_buttons) / sizeof(ws_buttons[0]));
     char ws_firewall_note[160];
     snprintf(ws_firewall_note, sizeof(ws_firewall_note),
         T_("WsFirewallNoteFmt"), ws_port);
@@ -1996,26 +2127,41 @@ static void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
     bool show_tunnel_start_note = false;
     bool cloudflared_downloading =
         d->tunnel.cloudflared_downloading();
-    if (ts == TunnelState::Running) {
-        obs_properties_add_button2(grp, "tunnel_stop_btn",
-            T_("TunnelStop"), cb_tunnel_stop, d);
-    } else if (cloudflared_downloading) {
-        obs_property_t* dl_p =
-            obs_properties_add_button2(grp, "tunnel_downloading_btn",
-                T_("CloudflaredDownloading"), cb_tunnel_stop, d);
-        obs_property_set_enabled(dl_p, false);
+    bool ws_running = d->router_running.load();
+    bool tunnel_running = (ts == TunnelState::Running);
+    bool tunnel_busy = cloudflared_downloading || (ts == TunnelState::Starting);
+    const ObsColorButtonSpec tunnel_buttons[] = {
+        {
+            "tunnel_start_btn",
+            T_("TunnelStartShort"),
+            cb_tunnel_start,
+            d,
+            (!tunnel_running && !tunnel_busy && ws_running),
+            UI_COLOR_START_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+        {
+            "tunnel_stop_btn",
+            T_("TunnelStopShort"),
+            cb_tunnel_stop,
+            d,
+            tunnel_running,
+            UI_COLOR_STOP_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+    };
+    obs_properties_add_color_button_row(
+        grp, "tunnel_controls_row", T_("TunnelControls"), tunnel_buttons,
+        sizeof(tunnel_buttons) / sizeof(tunnel_buttons[0]));
+
+    if (cloudflared_downloading) {
+        obs_properties_add_text(grp, "tunnel_state_info",
+            T_("CloudflaredDownloading"), OBS_TEXT_INFO);
     } else if (ts == TunnelState::Starting) {
-        obs_property_t* starting_p =
-            obs_properties_add_button2(grp, "tunnel_starting_btn",
-                T_("TunnelStarting"), cb_tunnel_stop, d);
-        obs_property_set_enabled(starting_p, false);
-    } else {
-        obs_property_t* start_p =
-            obs_properties_add_button2(grp, "tunnel_start_btn", T_("TunnelStart"), cb_tunnel_start, d);
-        bool ws_running = d->router_running.load();
-        obs_property_set_enabled(start_p, ws_running);
-        show_tunnel_start_note = !ws_running;
+        obs_properties_add_text(grp, "tunnel_state_info",
+            T_("TunnelStarting"), OBS_TEXT_INFO);
     }
+    show_tunnel_start_note = (!ws_running && !tunnel_running && !tunnel_busy);
 
     std::string tunnel_domain = extract_host_from_url(turl);
     if (!tunnel_domain.empty()) {
@@ -2303,19 +2449,35 @@ static obs_properties_t* ds_get_properties(void* data) {
     obs_properties_t* props = obs_properties_create();
     if (!data) return props;
     auto* d = static_cast<DelayStreamData*>(data);
-    // 再入防止（OBSのUI更新タイミングで重複呼び出しされることがある）
-    if (d->in_get_props.exchange(true)) {
-        return props;
+    struct GetPropsDepthGuard {
+        DelayStreamData* d;
+        ~GetPropsDepthGuard() {
+            if (d) {
+                d->get_props_depth.fetch_sub(1, std::memory_order_acq_rel);
+            }
+        }
+    };
+    int prev_depth = d->get_props_depth.fetch_add(1, std::memory_order_acq_rel);
+    GetPropsDepthGuard depth_guard{d};
+    if (prev_depth > 0) {
+        blog(LOG_INFO, "[obs-delay-stream] ds_get_properties re-entry depth=%d",
+            prev_depth + 1);
     }
 
     bool has_sid = false;
     bool detail_mode = false;
     read_properties_view_state(d, has_sid, detail_mode);
 
+    // ポーリング差分検出のために描画時の同期オフセットを記録する。
+    {
+        int64_t sync_offset_ns = INT64_MIN;
+        try_get_parent_audio_sync_offset_ns(d, sync_offset_ns);
+        d->last_rendered_audio_sync_offset_ns.store(sync_offset_ns, std::memory_order_relaxed);
+    }
+
     // UIブロックを順に組み立てる
     add_plugin_group(props, d);
     if (d->is_duplicate_instance) {
-        d->in_get_props.store(false);
         return props;
     }
     add_sub_channels_group(props, d, detail_mode);
@@ -2333,9 +2495,9 @@ static obs_properties_t* ds_get_properties(void* data) {
     if (d->context) {
         schedule_stepper_inject(d->context);
         schedule_text_button_inject(d->context);
+        schedule_color_button_row_inject(d->context);
     }
 
-    d->in_get_props.store(false);
     return props;
 }
 

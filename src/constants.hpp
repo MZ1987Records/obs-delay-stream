@@ -28,3 +28,8 @@ static constexpr int   PONG_WAIT_MS    = 600;
 static constexpr int   CLOUDFLARED_URL_TIMEOUT_S  = 60;
 static constexpr int   CLOUDFLARED_POLL_INTV_MS   = 500;
 static constexpr int   TUNNEL_KILL_TIMEOUT_MS     = 2000;
+
+// UI色（操作ボタン）
+static constexpr const char* UI_COLOR_START_BUTTON_BG = "#1E7F34";
+static constexpr const char* UI_COLOR_STOP_BUTTON_BG  = "#8B1E1E";
+static constexpr const char* UI_COLOR_BUTTON_TEXT     = "#FFFFFF";
