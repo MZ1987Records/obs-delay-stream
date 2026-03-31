@@ -208,7 +208,7 @@ export function initI18n(): void {
     interpolation: { escapeValue: false },
     returnNull: false,
     returnEmptyString: false,
-    initImmediate: false
+    initAsync: false
   });
   document.documentElement.lang = activeLang;
 }
