@@ -329,7 +329,7 @@ jobs:
           Compress-Archive -Path "dist\\*" -DestinationPath $zip
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: obs-delay-stream
           path: obs-delay-stream-${{ github.ref_name }}.zip
