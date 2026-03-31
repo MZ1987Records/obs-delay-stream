@@ -14,7 +14,7 @@ jobs:
     env:
       OBS_STUDIO_REF: master
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Detect Windows SDK
         id: sdk
