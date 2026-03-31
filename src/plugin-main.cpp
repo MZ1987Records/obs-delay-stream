@@ -56,7 +56,7 @@
 #include "stepper-widget.hpp"
 #include "text-button-widget.hpp"
 #include "color-buttons-widget.hpp"
-#include "info-measure-widget.hpp"
+#include "delay-table-widget.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
@@ -560,7 +560,6 @@ struct DelayStreamData {
     std::atomic<int> get_props_depth{0};     // ds_get_properties re-entry depth
     std::atomic<int64_t> last_rendered_audio_sync_offset_ns{INT64_MIN}; // 直前のプロパティ描画時の同期オフセット値
     std::atomic<bool> sid_autofill_guard{false};
-    std::atomic<bool> detail_mode{false};
     std::atomic<bool> rtmp_url_auto{true};
     bool prev_stream_id_has_user_value = false;
     std::vector<float> work_buf;
@@ -926,7 +925,6 @@ static bool cb_enabled_changed(void*, obs_properties_t*, obs_property_t*, obs_da
 static bool cb_audio_codec_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_stream_id_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_host_ip_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
-static bool cb_detail_mode_changed(void*, obs_properties_t*, obs_property_t*, obs_data_t*);
 static bool cb_ws_server_start(obs_properties_t*, obs_property_t*, void*);
 static bool cb_ws_server_stop(obs_properties_t*, obs_property_t*, void*);
 
@@ -1167,7 +1165,6 @@ static void ds_update(void* data, obs_data_t* settings) {
     if (d->is_duplicate_instance) {
         d->enabled.store(false, std::memory_order_relaxed);
         d->ws_send_enabled.store(false, std::memory_order_relaxed);
-        d->detail_mode.store(false, std::memory_order_relaxed);
         d->prev_stream_id_has_user_value = obs_data_has_user_value(settings, "stream_id");
         return;
     }
@@ -1190,9 +1187,6 @@ static void ds_update(void* data, obs_data_t* settings) {
         }
     }
 
-    bool detail_new = obs_data_get_bool(settings, "detail_mode");
-    bool detail_old = d->detail_mode.exchange(detail_new, std::memory_order_relaxed);
-    bool detail_changed = (detail_old != detail_new);
     bool delay_disable = obs_data_get_bool(settings, "delay_disable");
     d->enabled.store(!delay_disable);
     bool paused = obs_data_get_bool(settings, "ws_send_paused");
@@ -1327,20 +1321,21 @@ static void ds_update(void* data, obs_data_t* settings) {
         d->router.set_sub_code(i, code);
         apply_sub_delay_to_buffer(d, i);
 
-        float prev_effective = prev_delay + prev_adjust + prev_sub_offset;
-        if (prev_effective < 0.0f) prev_effective = 0.0f;
-        float new_effective = calc_effective_sub_delay_value_ms(
-            d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
+        const float prev_raw = prev_delay + prev_adjust + prev_sub_offset;
+        const float new_raw  = d->sub[i].delay_ms + d->sub[i].adjust_ms + d->sub_offset_ms;
+        const float prev_effective = prev_raw < 0.0f ? 0.0f : prev_raw;
+        const float new_effective  = new_raw  < 0.0f ? 0.0f : new_raw;
         if (std::fabs(prev_effective - new_effective) > 0.01f) {
             d->router.notify_apply_delay(i, new_effective, "manual_adjust");
+            effective_delay_changed = true;
+        } else if (std::fabs(prev_raw - new_raw) > 0.01f) {
+            // 生の合計値が変化した場合（両方負で実効値は0のまま）も
+            // テーブル表示を更新するためにリフレッシュを要求する。
             effective_delay_changed = true;
         }
     }
     d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
-    if (detail_changed) {
-        // UI構造が変わるため、設定反映後にプロパティを再構築する。
-        request_properties_refresh(d, "ds_update.detail_changed");
-    } else if (effective_delay_changed) {
+    if (effective_delay_changed) {
         request_properties_refresh(d, "ds_update.effective_changed");
     }
     d->prev_stream_id_has_user_value = obs_data_has_user_value(settings, "stream_id");
@@ -1786,9 +1781,8 @@ static bool cb_stream_id_changed(void* priv, obs_properties_t* props, obs_proper
 static void apply_codec_option_visibility(obs_properties_t* props, obs_data_t* settings) {
     if (!props || !settings) return;
     int codec = (int)obs_data_get_int(settings, "audio_codec");
-    bool detail = obs_data_get_bool(settings, "detail_mode");
     bool is_opus = (codec == 0);
-    bool show_opus_options = is_opus && detail;
+    bool show_opus_options = is_opus;
     bool show_pcm_options = !is_opus;
     if (auto* p = obs_properties_get(props, "opus_bitrate_kbps")) {
         obs_property_set_visible(p, show_opus_options);
@@ -1811,8 +1805,25 @@ static void apply_codec_option_visibility(obs_properties_t* props, obs_data_t* s
 }
 
 static bool cb_audio_codec_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
-    (void)priv;
+    auto* d = static_cast<DelayStreamData*>(priv);
     apply_codec_option_visibility(props, settings);
+    // OBSはtrueを返すとパネルを再描画する。ちらつき抑制のためフリーズし、
+    // スクロール位置を保存・復元しつつカスタムウィジェットを再注入する。
+    const auto scroll_snapshots = snapshot_vertical_scrollbars();
+    const auto freeze_token = freeze_properties_ui_updates();
+    if (d && d->context) {
+        schedule_stepper_inject(d->context);
+        schedule_text_button_inject(d->context);
+        schedule_color_button_row_inject(d->context);
+        schedule_delay_table_inject(d->context);
+    }
+    QTimer::singleShot(0, qApp, [scroll_snapshots]() {
+        restore_vertical_scrollbars(scroll_snapshots);
+    });
+    QTimer::singleShot(kPropsRefreshUiFreezeMs, qApp, [scroll_snapshots, freeze_token]() {
+        restore_vertical_scrollbars(scroll_snapshots);
+        unfreeze_properties_ui_updates(freeze_token);
+    });
     return true;
 }
 
@@ -1820,29 +1831,6 @@ static bool cb_audio_codec_changed(void* priv, obs_properties_t* props, obs_prop
 static bool cb_host_ip_changed(void* priv, obs_properties_t*, obs_property_t*, obs_data_t*) {
     (void)priv; return false;
 }
-// 詳細表示モードに応じて各詳細項目の可視性を切り替える。
-// 注: 遅延一覧グループ (grp_delay_summary) はここでは扱わない。
-//     detail_mode の切り替えは ds_update 経由で UI 全体を再構築するため、
-//     遅延一覧は ds_get_properties 内の if (detail_mode) で構造的に制御される。
-static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamData* d, bool detail) {
-    if (!props || !d) return;
-    if (auto* p = obs_properties_get(props, "host_ip_manual")) {
-        obs_property_set_visible(p, detail);
-    }
-    if (auto* p = obs_properties_get(props, "ws_port")) {
-        obs_property_set_visible(p, detail);
-    }
-}
-// 詳細表示モード切り替え時に内部状態だけを更新するコールバック。
-static bool cb_detail_mode_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
-    auto* d = static_cast<DelayStreamData*>(priv);
-    if (!props || !settings || !d) return false;
-    bool detail = obs_data_get_bool(settings, "detail_mode");
-    d->detail_mode.store(detail, std::memory_order_relaxed);
-    // UI構造の切り替えは ds_update 側の再構築要求で行う。
-    return false;
-}
-
 // Sync Flowの現在フェーズに応じたUIを構築する。
 static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
@@ -1961,13 +1949,11 @@ static void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
     }
 }
 
-// プロパティ表示に必要な最小状態（配信ID有無/詳細モード）を取得する。
-static void read_properties_view_state(DelayStreamData* d, bool& has_sid, bool& detail_mode) {
+// プロパティ表示に必要な最小状態（配信ID有無）を取得する。
+static void read_properties_view_state(DelayStreamData* d, bool& has_sid) {
     has_sid = false;
-    detail_mode = false;
     if (!d) return;
     has_sid = !d->get_stream_id().empty();
-    detail_mode = d->detail_mode.load(std::memory_order_relaxed);
 }
 
 // このフィルタが付いているオーディオソースの同期オフセット(ns)を取得する。
@@ -1982,7 +1968,7 @@ static bool try_get_parent_audio_sync_offset_ns(DelayStreamData* d, int64_t& out
     return true;
 }
 
-// プラグイン情報と詳細モードをまとめた先頭グループを追加する。
+// プラグイン情報をまとめた先頭グループを追加する。
 static void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
@@ -2001,10 +1987,6 @@ static void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
             "複数の obs-delay-stream フィルタを使用することはできません。",
             OBS_TEXT_INFO);
     } else {
-        obs_property_t* detail_p =
-            obs_properties_add_bool(grp, "detail_mode", T_("DetailMode"));
-        obs_property_set_modified_callback2(detail_p, cb_detail_mode_changed, d);
-
         int64_t sync_offset_ns = 0;
         if (try_get_parent_audio_sync_offset_ns(d, sync_offset_ns) &&
             sync_offset_ns != REQUIRED_AUDIO_SYNC_OFFSET_NS) {
@@ -2354,9 +2336,11 @@ static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
     obs_properties_t* grp = obs_properties_create();
     {
         char offset_info[256];
-        snprintf(offset_info, sizeof(offset_info),
-            T_("GlobalOffsetInfoFmt"), d->sub_offset_ms);
-        obs_properties_add_text(grp, "sub_offset_info", offset_info, OBS_TEXT_INFO);
+        snprintf(offset_info, sizeof(offset_info), "%s",
+            T_("GlobalOffsetInfoFmt"));
+        obs_property_t* offset_info_p =
+            obs_properties_add_text(grp, "sub_offset_info", offset_info, OBS_TEXT_INFO);
+        obs_property_text_set_info_word_wrap(offset_info_p, false);
     }
     obs_properties_add_stepper(
         grp, "sub_offset_ms_stepper",
@@ -2366,82 +2350,51 @@ static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
         T_("GroupGlobalOffset"), OBS_GROUP_NORMAL, grp);
 }
 
-// 遅延一覧グループを構築する（詳細モード時のみ）。
+// 遅延一覧グループを構築する。
+// 全チャンネルの遅延値をテーブルで表示し、選択行の追加遅延をエディタで操作できる。
 static void add_delay_summary_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
-    int sub_count = d->sub_ch_count;
+    const int sub_count = d->sub_ch_count;
 
-    obs_data_t* settings = nullptr;
-    if (d->context) {
-        settings = obs_source_get_settings(d->context);
+    // 選択チャンネルを設定から読む（UI再構築後も選択を維持するため）。
+    int selected_ch = 0;
+    obs_data_t* settings = d->context ? obs_source_get_settings(d->context) : nullptr;
+    if (settings) {
+        selected_ch = static_cast<int>(obs_data_get_int(settings, "delay_table_selected_ch"));
+        if (selected_ch < 0 || selected_ch >= sub_count)
+            selected_ch = 0;
     }
 
+    // チャンネルごとの遅延情報を収集する。
+    std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
     for (int i = 0; i < sub_count; ++i) {
-        obs_properties_t* ch_grp = obs_properties_create();
-        const size_t nc = d->router.client_count(i);
-
-        char sn[32], ajk[32];
-        snprintf(sn, sizeof(sn), "dsum%d_stepper", i);
-        snprintf(ajk, sizeof(ajk), "sub%d_adjust_ms", i);
-        obs_properties_add_stepper(ch_grp, sn, T_("SubAdjust"),
-            ajk, SUB_ADJUST_MIN_MS, SUB_ADJUST_MAX_MS, 0.0, 0, " ms");
-
-        char info[192];
-        const float raw_effective = d->sub[i].delay_ms + d->sub[i].adjust_ms + d->sub_offset_ms;
-        const float effective = calc_effective_sub_delay_value_ms(
-            d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
-        snprintf(info, sizeof(info), T_("SubDelayEffectiveInfoFmt"),
-                 d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms, effective);
-
-        char btn_label[64] = "";
-        char result_text[128] = "";
-        bool btn_enabled = true;
-        MeasureState& ms = d->sub[i].measure;
-        {
-            std::lock_guard<std::mutex> lk(ms.mtx);
-            if (nc == 0) {
-                snprintf(btn_label, sizeof(btn_label), "%s", T_("SubMeasureDisconnected"));
-                btn_enabled = false;
-            } else if (ms.measuring) {
-                snprintf(btn_label, sizeof(btn_label), "%s", T_("Measuring"));
-                btn_enabled = false;
-            } else if (ms.result.valid) {
-                snprintf(btn_label, sizeof(btn_label), T_("SubRemeasureFmt"), nc);
-                snprintf(result_text, sizeof(result_text), T_("SubResultFmt"),
-                         ms.result.avg_rtt_ms, ms.result.avg_one_way);
-            } else {
-                snprintf(btn_label, sizeof(btn_label), T_("SubMeasureFmt"), nc);
-                if (!ms.last_error.empty()) {
-                    snprintf(result_text, sizeof(result_text), "%s", ms.last_error.c_str());
-                }
-            }
-        }
-
-        char imk[32];
-        snprintf(imk, sizeof(imk), "dsum%d_info_meas", i);
-        obs_properties_add_info_measure(
-            ch_grp, imk, "",
-            info, result_text, btn_label,
-            cb_sub_measure, &d->btn_ctx[i], btn_enabled,
-            raw_effective < 0.0f, i);
-
-        char gk[32], gt[128];
-        snprintf(gk, sizeof(gk), "dsum%d_group", i);
         char memo_key[32];
         snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         const char* memo = settings ? obs_data_get_string(settings, memo_key) : "";
-        if (memo && *memo) {
-            snprintf(gt, sizeof(gt), "Ch.%d %s", i + 1, memo);
-        } else {
-            snprintf(gt, sizeof(gt), "Ch.%d", i + 1);
-        }
-        obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
+        channels[i].name     = (memo && *memo) ? memo : "";
+        channels[i].base_ms  = d->sub[i].delay_ms;
+        channels[i].adjust_ms= d->sub[i].adjust_ms;
+        channels[i].global_ms= d->sub_offset_ms;
+        const float raw = d->sub[i].delay_ms + d->sub[i].adjust_ms + d->sub_offset_ms;
+        channels[i].warn     = raw < 0.0f;
+        channels[i].total_ms = raw < 0.0f ? 0.0f : raw;
     }
 
-    if (settings) {
+    if (settings)
         obs_data_release(settings);
-    }
+
+    DelayTableLabels labels;
+    labels.hdr_ch     = T_("DelayTableColCh");
+    labels.hdr_name   = T_("DelayTableColName");
+    labels.hdr_base   = T_("DelayTableColBase");
+    labels.hdr_adjust = T_("DelayTableColAdjust");
+    labels.hdr_global = T_("DelayTableColGlobal");
+    labels.hdr_total  = T_("DelayTableColTotal");
+    labels.lbl_editor = T_("DelayTableAdjustLabel");
+    obs_properties_add_delay_table(
+        grp, "delay_table", selected_ch, sub_count, channels.data(), labels);
+
     obs_properties_add_group(
         props, "grp_delay_summary", T_("GroupDelaySummary"), OBS_GROUP_NORMAL, grp);
 }
@@ -2510,8 +2463,7 @@ static obs_properties_t* ds_get_properties(void* data) {
     }
 
     bool has_sid = false;
-    bool detail_mode = false;
-    read_properties_view_state(d, has_sid, detail_mode);
+    read_properties_view_state(d, has_sid);
 
     // ポーリング差分検出のために描画時の同期オフセットを記録する。
     {
@@ -2533,20 +2485,14 @@ static obs_properties_t* ds_get_properties(void* data) {
     add_flow_group(props, d);
     add_master_group(props, d);
     add_sub_offset_group(props, d);
-    if (detail_mode) {
-        add_delay_summary_group(props, d);
-    }
-
-    apply_detail_mode_visibility(props, d, detail_mode);
+    add_delay_summary_group(props, d);
 
     // ステッパー注入をスケジュール（UIスレッドでプレースホルダーを差し替え）
     if (d->context) {
         schedule_stepper_inject(d->context);
         schedule_text_button_inject(d->context);
         schedule_color_button_row_inject(d->context);
-        if (detail_mode) {
-            schedule_info_measure_inject(d->context);
-        }
+        schedule_delay_table_inject(d->context);
     }
 
     return props;
@@ -2555,7 +2501,6 @@ static obs_properties_t* ds_get_properties(void* data) {
 // 各設定項目のデフォルト値を定義する。
 static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_bool  (settings, "delay_disable",         false);
-    obs_data_set_default_bool  (settings, "detail_mode",           false);
     obs_data_set_default_bool  (settings, "ws_send_paused",        false);
     obs_data_set_default_int   (settings, "sub_ch_count",          1);
     // Ch.1 既定名を A にするため、次の自動払い出しは B から開始する。
@@ -2572,6 +2517,7 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_string(settings, "host_ip_manual",        "");
     obs_data_set_default_double(settings, "master_delay_ms",       0.0);
     obs_data_set_default_double(settings, "sub_offset_ms",         0.0);
+    obs_data_set_default_int   (settings, "delay_table_selected_ch", 0);
     obs_data_set_default_bool  (settings, "rtmp_url_auto",         true);
     obs_data_set_default_string(settings, "rtmp_url",              "");
     obs_data_set_default_string(settings, "cloudflared_exe_path",  "auto");
