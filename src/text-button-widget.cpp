@@ -1,4 +1,6 @@
 #include "text-button-widget.hpp"
+#include "widget-inject-utils.hpp"
+#include "widget-payload-utils.hpp"
 
 #include <QApplication>
 #include <QEvent>
@@ -22,8 +24,8 @@
 namespace {
 
 constexpr char kTextButtonMagicPipe[] = "TEXTBTN|";
-constexpr int kTextButtonInjectRetryMax = 12;
-constexpr int kTextButtonInjectRetryMs = 25;
+constexpr int kTextButtonInjectRetryMax = 40;
+constexpr int kTextButtonInjectRetryMs = 5;
 
 std::unordered_map<std::string, obs_property_t *> g_text_button_action_props;
 std::mutex g_text_button_action_props_mutex;
@@ -46,47 +48,8 @@ std::string make_text_button_binding_id(const std::string &action_name)
     return action_name + suffix;
 }
 
-std::string escape_payload_field(const char *src)
-{
-    std::string out;
-    if (!src)
-        return out;
-    while (*src) {
-        const char c = *src++;
-        if (c == '\\' || c == '|')
-            out.push_back('\\');
-        out.push_back(c);
-    }
-    return out;
-}
-
-bool split_escaped_pipe_fields(const QString &text, QStringList &fields)
-{
-    fields.clear();
-    QString cur;
-    bool escaped = false;
-    for (QChar ch : text) {
-        if (escaped) {
-            cur.append(ch);
-            escaped = false;
-            continue;
-        }
-        if (ch == QChar('\\')) {
-            escaped = true;
-            continue;
-        }
-        if (ch == QChar('|')) {
-            fields.push_back(cur);
-            cur.clear();
-            continue;
-        }
-        cur.append(ch);
-    }
-    if (escaped)
-        cur.append(QChar('\\'));
-    fields.push_back(cur);
-    return true;
-}
+using widget_payload::escape_field;
+using widget_payload::split_escaped_pipe_fields;
 
 class TextButtonRow : public QWidget {
 public:
@@ -253,6 +216,7 @@ void do_text_button_inject(void *param)
         QString text;
     };
     std::vector<Placeholder> found;
+    std::vector<widget_inject::ScrollSnapshot> scroll_snapshots;
 
     const auto all_widgets = QApplication::allWidgets();
     for (QWidget *w : all_widgets) {
@@ -260,9 +224,11 @@ void do_text_button_inject(void *param)
         if (!lbl)
             continue;
         const QString text = lbl->text();
-        if (text.startsWith(QLatin1String("TEXTBTN|")))
+        if (text.startsWith(QLatin1String(kTextButtonMagicPipe)))
             found.push_back({lbl, text});
     }
+    for (const auto &ph : found)
+        widget_inject::collect_ancestor_scroll_snapshot(ph.label, scroll_snapshots);
 
     int replaced_count = 0;
     for (auto &ph : found) {
@@ -315,6 +281,8 @@ void do_text_button_inject(void *param)
         ++replaced_count;
     }
 
+    widget_inject::restore_scroll_snapshots(scroll_snapshots);
+
     if ((found.empty() || replaced_count < static_cast<int>(found.size())) &&
         ctx->retries_left > 0) {
         --ctx->retries_left;
@@ -363,12 +331,12 @@ obs_property_t *obs_properties_add_text_button(obs_properties_t *props,
 
     const std::string payload =
         std::string("TEXTBTN|") +
-        escape_payload_field(setting_key) + "|" +
-        escape_payload_field(binding_id.c_str()) + "|" +
-        escape_payload_field(button_label) + "|" +
+        escape_field(setting_key) + "|" +
+        escape_field(binding_id.c_str()) + "|" +
+        escape_field(button_label) + "|" +
         (input_enabled ? "1" : "0") + std::string("|") +
         (button_enabled ? "1" : "0") + "|" +
-        escape_payload_field(label ? label : "");
+        escape_field(label ? label : "");
     return obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
 }
 

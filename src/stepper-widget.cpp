@@ -1,4 +1,5 @@
 #include "stepper-widget.hpp"
+#include "widget-inject-utils.hpp"
 
 #include <QApplication>
 #include <QDoubleSpinBox>
@@ -22,8 +23,8 @@ namespace {
 
 constexpr char kStepperMagic[] = "STEPPER\x1F";  // legacy format
 constexpr char kStepperMagicPipe[] = "STEPPER|";  // current format
-constexpr int kStepperInjectRetryMax = 12;
-constexpr int kStepperInjectRetryMs = 25;
+constexpr int kStepperInjectRetryMax = 40;
+constexpr int kStepperInjectRetryMs = 5;
 
 class StepperRow : public QWidget {
 public:
@@ -215,6 +216,7 @@ void do_stepper_inject(void *param)
         QString text;
     };
     std::vector<Placeholder> found;
+    std::vector<widget_inject::ScrollSnapshot> scroll_snapshots;
 
     const auto all_widgets = QApplication::allWidgets();
     for (QWidget *w : all_widgets) {
@@ -225,6 +227,8 @@ void do_stepper_inject(void *param)
         if (text.startsWith(QLatin1String("STEPPER")))
             found.push_back({lbl, text});
     }
+    for (const auto &ph : found)
+        widget_inject::collect_ancestor_scroll_snapshot(ph.label, scroll_snapshots);
 
     int replaced_count = 0;
     for (auto &ph : found) {
@@ -268,6 +272,8 @@ void do_stepper_inject(void *param)
             form->insertRow(row, stepper);
         ++replaced_count;
     }
+
+    widget_inject::restore_scroll_snapshots(scroll_snapshots);
 
     if ((found.empty() || replaced_count < static_cast<int>(found.size())) &&
         ctx->retries_left > 0) {

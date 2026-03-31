@@ -199,6 +199,29 @@ body {
   background-color: #363636;
 }
 
+/* Bulma 1.0ではinvert-lが常にほぼ黒(6%)になったため、colored buttonのテキストを白に戻す */
+.button.is-primary,
+.button.is-success,
+.button.is-danger,
+.button.is-info,
+.button.is-warning,
+.button.is-link {
+  --bulma-button-color-l: 100%;
+}
+
+/* Bulma 1.0ではinvert-lが常にほぼ黒になるため、notificationのテキストを白に戻す */
+.notification.is-success,
+.notification.is-danger,
+.notification.is-dark,
+.notification.is-info {
+  --bulma-notification-color-l: 95%;
+}
+
+/* Bulma 1.0ではinfo-lが70%(明るい水色)に変更されたため背景を暗く戻す */
+.notification.is-info {
+  --bulma-notification-background-l: 30%;
+}
+
 .notification.is-warning {
   color: #111;
 }
