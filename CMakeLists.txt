@@ -56,6 +56,7 @@ add_library(obs-delay-stream MODULE
   src/stepper-widget.cpp
   src/text-button-widget.cpp
   src/color-buttons-widget.cpp
+  src/info-measure-widget.cpp
   src/stream-router.cpp
   src/rtmp-prober.cpp
   src/tunnel-manager.cpp

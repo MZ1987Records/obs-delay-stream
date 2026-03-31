@@ -1,5 +1,6 @@
 #include "color-buttons-widget.hpp"
 #include "widget-inject-utils.hpp"
+#include "widget-payload-utils.hpp"
 
 #include <QApplication>
 #include <QEvent>
@@ -56,47 +57,8 @@ QString make_button_style_sheet(const QString& bg_color,
     return styles.join(QStringLiteral(" "));
 }
 
-std::string escape_payload_field(const char* src)
-{
-    std::string out;
-    if (!src)
-        return out;
-    while (*src) {
-        const char c = *src++;
-        if (c == '\\' || c == '|')
-            out.push_back('\\');
-        out.push_back(c);
-    }
-    return out;
-}
-
-bool split_escaped_pipe_fields(const QString& text, QStringList& fields)
-{
-    fields.clear();
-    QString cur;
-    bool escaped = false;
-    for (QChar ch : text) {
-        if (escaped) {
-            cur.append(ch);
-            escaped = false;
-            continue;
-        }
-        if (ch == QChar('\\')) {
-            escaped = true;
-            continue;
-        }
-        if (ch == QChar('|')) {
-            fields.push_back(cur);
-            cur.clear();
-            continue;
-        }
-        cur.append(ch);
-    }
-    if (escaped)
-        cur.append(QChar('\\'));
-    fields.push_back(cur);
-    return true;
-}
+using widget_payload::escape_field;
+using widget_payload::split_escaped_pipe_fields;
 
 std::string make_color_button_binding_id(const char* prop_name)
 {
@@ -379,22 +341,22 @@ obs_property_t* obs_properties_add_color_button_row(
     const std::string binding_id = make_color_button_binding_id(prop_name);
 
     std::string payload = "CBTNROW|";
-    payload += escape_payload_field(binding_id.c_str());
+    payload += escape_field(binding_id.c_str());
     payload += "|";
-    payload += escape_payload_field(label ? label : "");
+    payload += escape_field(label ? label : "");
     payload += "|";
     payload += std::to_string(button_count);
 
     for (size_t i = 0; i < button_count; ++i) {
         const auto& spec = buttons[i];
         payload += "|";
-        payload += escape_payload_field(spec.button_label);
+        payload += escape_field(spec.button_label);
         payload += "|";
         payload += (spec.enabled ? "1" : "0");
         payload += "|";
-        payload += escape_payload_field(spec.bg_color ? spec.bg_color : "");
+        payload += escape_field(spec.bg_color ? spec.bg_color : "");
         payload += "|";
-        payload += escape_payload_field(spec.text_color ? spec.text_color : "");
+        payload += escape_field(spec.text_color ? spec.text_color : "");
     }
 
     obs_property_t* placeholder =

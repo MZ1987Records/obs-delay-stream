@@ -56,6 +56,7 @@
 #include "stepper-widget.hpp"
 #include "text-button-widget.hpp"
 #include "color-buttons-widget.hpp"
+#include "info-measure-widget.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
@@ -546,7 +547,6 @@ struct DelayStreamData {
     struct SubChannel {
         float        delay_ms = 0.0f;
         float        adjust_ms = 0.0f;
-        float        displayed_effective_ms = -1.0f; // UI上に最後に表示した適用遅延値
         DelayBuffer  buf;
         MeasureState measure;
     };
@@ -1426,30 +1426,106 @@ static void apply_sub_delay(DelayStreamData* d, int i, double ms) {
         d->sub[i].delay_ms,
         "auto_measure");
 }
-// 全チャンネルのURLと名前の一覧をMarkdown箇条書き形式でクリップボードへコピーする。
-static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
-    auto* d = static_cast<DelayStreamData*>(priv);
-    if (!d) return false;
-    obs_data_t* s = obs_source_get_settings(d->context);
+
+// チャンネルURL一覧の1行テキストを全チャンネル分収集する。
+static std::vector<std::string> collect_sub_url_lines(DelayStreamData* d, obs_data_t* s) {
+    std::vector<std::string> lines;
+    if (!d || !s) return lines;
+    int sub_count = d->sub_ch_count;
+    lines.reserve(sub_count);
+    for (int i = 0; i < sub_count; ++i) {
+        std::string url = make_sub_url(d, i);
+        char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
+        const char* memo = obs_data_get_string(s, memo_key);
+        std::string line = "Ch.";
+        line += std::to_string(i + 1);
+        if (memo && *memo) { line += " "; line += memo; }
+        line += " ";
+        line += url.empty() ? T_("NotConfigured") : url;
+        lines.emplace_back(std::move(line));
+    }
+    return lines;
+}
+
+// クリップボードへコピーするURL配布文面を生成する。
+static std::string build_url_share_copy_text(DelayStreamData* d, obs_data_t* s) {
     std::string out;
     out.reserve(512);
     out += "演者は各自、以下のURLをChromeで開いて音声ストリームを再生してください。\r\n"
         "Each performer should open the following URL in Chrome and play the audio stream.\r\n"
         "\r\n";
-    int sub_count = d->sub_ch_count;
+    for (const auto& line : collect_sub_url_lines(d, s)) {
+        out += "- ";
+        out += line;
+        out += "\r\n";
+    }
+    return out;
+}
+
+// HTML表示用に文字列をエスケープする。
+static std::string escape_html_text(const std::string& text) {
+    std::string out;
+    out.reserve(text.size() + 16);
+    for (char c : text) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        case '\'': out += "&#39;"; break;
+        default: out.push_back(c); break;
+        }
+    }
+    return out;
+}
+
+// UI上で確認するためのURL一覧HTMLを生成する。
+static std::string build_url_confirm_html_text(DelayStreamData* d, obs_data_t* s) {
+    std::string html;
+    html.reserve(1536);
+    html += "<table style=\"border-collapse:collapse; border:1px solid #999;\">";
+    html += "<tr>"
+            "<th style=\"border:1px solid #999; padding:2px 6px;\">Ch.</th>"
+            "<th style=\"border:1px solid #999; padding:2px 6px;\">Name</th>"
+            "<th style=\"border:1px solid #999; padding:2px 6px;\">URL</th>"
+            "</tr>";
+    int sub_count = d ? d->sub_ch_count : 0;
     for (int i = 0; i < sub_count; ++i) {
         std::string url = make_sub_url(d, i);
         char memo_key[32]; snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
         const char* memo = obs_data_get_string(s, memo_key);
-        const char* url_show = url.empty() ? T_("NotConfigured") : url.c_str();
-        out += "- Ch.";
-        out += std::to_string(i + 1);
-        out += " ";
-        if (memo && *memo) out += memo;
-        out += " ";
-        out += url_show;
-        out += "\r\n";
+        html += "<tr><td style=\"border:1px solid #999; padding:2px 6px; text-align:right;\">";
+        html += std::to_string(i + 1);
+        html += "</td><td style=\"border:1px solid #999; padding:2px 6px;\">";
+        if (memo && *memo) {
+            html += escape_html_text(memo);
+        } else {
+            html += "-";
+        }
+        html += "</td><td style=\"border:1px solid #999; padding:2px 6px;\">";
+        if (url.empty()) {
+            html += escape_html_text(T_("NotConfigured"));
+        } else {
+            std::string escaped_url = escape_html_text(url);
+            html += "<a href=\"";
+            html += escaped_url;
+            html += "\">";
+            html += escaped_url;
+            html += "</a>";
+        }
+        html += "</td></tr>";
     }
+    html += "</table>";
+    return html;
+}
+
+// 全チャンネルのURLと名前の一覧をMarkdown箇条書き形式でクリップボードへコピーする。
+static bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
+    auto* d = static_cast<DelayStreamData*>(priv);
+    if (!d) return false;
+    obs_data_t* s = obs_source_get_settings(d->context);
+    if (!s) return false;
+    std::string out = build_url_share_copy_text(d, s);
     obs_data_release(s);
     if (!out.empty()) copy_to_clipboard(out);
     return false;
@@ -1745,6 +1821,9 @@ static bool cb_host_ip_changed(void* priv, obs_properties_t*, obs_property_t*, o
     (void)priv; return false;
 }
 // 詳細表示モードに応じて各詳細項目の可視性を切り替える。
+// 注: 遅延一覧グループ (grp_delay_summary) はここでは扱わない。
+//     detail_mode の切り替えは ds_update 経由で UI 全体を再構築するため、
+//     遅延一覧は ds_get_properties 内の if (detail_mode) で構造的に制御される。
 static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamData* d, bool detail) {
     if (!props || !d) return;
     if (auto* p = obs_properties_get(props, "host_ip_manual")) {
@@ -1752,27 +1831,6 @@ static void apply_detail_mode_visibility(obs_properties_t* props, DelayStreamDat
     }
     if (auto* p = obs_properties_get(props, "ws_port")) {
         obs_property_set_visible(p, detail);
-    }
-    int sub_count = d->sub_ch_count;
-    for (int i = 0; i < sub_count; ++i) {
-        char uk[32], aj[32], mk[32];
-        snprintf(uk, sizeof(uk), "sub%d_url", i);
-        snprintf(aj, sizeof(aj), "sub%d_adjust_ms", i);
-        snprintf(mk, sizeof(mk), "sub%d_meas", i);
-        if (auto* p = obs_properties_get(props, uk)) {
-            obs_property_set_visible(p, detail);
-        }
-        char ei[32];
-        snprintf(ei, sizeof(ei), "sub%d_effective_info", i);
-        if (auto* p = obs_properties_get(props, ei)) {
-            obs_property_set_visible(p, detail);
-        }
-        if (auto* p = obs_properties_get(props, aj)) {
-            obs_property_set_visible(p, detail);
-        }
-        if (auto* p = obs_properties_get(props, mk)) {
-            obs_property_set_visible(p, detail);
-        }
     }
 }
 // 詳細表示モード切り替え時に内部状態だけを更新するコールバック。
@@ -2194,6 +2252,16 @@ static void add_url_share_group(obs_properties_t* props, DelayStreamData* d) {
     obs_properties_t* grp = obs_properties_create();
     TunnelState ts = d->tunnel.state();
     bool via_tunnel = !d->tunnel.url().empty();
+    {
+        obs_data_t* s = obs_source_get_settings(d->context);
+        if (s) {
+            std::string list_html = build_url_confirm_html_text(d, s);
+            obs_data_release(s);
+            obs_property_t* list_info_p = obs_properties_add_text(
+                grp, "url_confirm_list_html", list_html.c_str(), OBS_TEXT_INFO);
+            obs_property_text_set_info_word_wrap(list_info_p, false);
+        }
+    }
     const char* suffix = via_tunnel
         ? T_("UrlShareTunnelSuffix")
         : T_("UrlShareDirectSuffix");
@@ -2298,107 +2366,88 @@ static void add_sub_offset_group(obs_properties_t* props, DelayStreamData* d) {
         T_("GroupGlobalOffset"), OBS_GROUP_NORMAL, grp);
 }
 
-// チャンネルの測定状態に応じてボタン/結果表示を切り替える。
-static void add_sub_channel_measure_controls(obs_properties_t* ch_grp,
-                                             DelayStreamData* d,
-                                             int i,
-                                             size_t nc,
-                                             const char* mk,
-                                             const char* rk) {
-    if (nc > 0) {
-        MeasureState& ms = d->sub[i].measure;
-        std::lock_guard<std::mutex> lk(ms.mtx);
-        if (ms.measuring) {
-            obs_property_t* mp = obs_properties_add_button2(
-                ch_grp, mk, T_("Measuring"),
-                cb_sub_measure, &d->btn_ctx[i]);
-            obs_property_set_enabled(mp, false);
-        } else if (ms.result.valid) {
-            char rs[128];
-            snprintf(rs, sizeof(rs), T_("SubResultFmt"),
-                     ms.result.avg_rtt_ms, ms.result.avg_one_way);
-            obs_properties_add_text(ch_grp, rk, rs, OBS_TEXT_INFO);
-            char ml[64];
-            snprintf(ml, sizeof(ml), T_("SubRemeasureFmt"), nc);
-            obs_properties_add_button2(ch_grp, mk, ml,
-                cb_sub_measure, &d->btn_ctx[i]);
-        } else {
-            if (!ms.last_error.empty()) {
-                obs_properties_add_text(ch_grp, rk, ms.last_error.c_str(), OBS_TEXT_INFO);
-            }
-            char ml[64];
-            snprintf(ml, sizeof(ml), T_("SubMeasureFmt"), nc);
-            obs_properties_add_button2(ch_grp, mk, ml,
-                cb_sub_measure, &d->btn_ctx[i]);
-        }
-        return;
+// 遅延一覧グループを構築する（詳細モード時のみ）。
+static void add_delay_summary_group(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+    obs_properties_t* grp = obs_properties_create();
+    int sub_count = d->sub_ch_count;
+
+    obs_data_t* settings = nullptr;
+    if (d->context) {
+        settings = obs_source_get_settings(d->context);
     }
 
-    obs_property_t* mp = obs_properties_add_button2(
-        ch_grp, mk, T_("SubMeasureDisconnected"),
-        cb_sub_measure, &d->btn_ctx[i]);
-    obs_property_set_enabled(mp, false);
-}
+    for (int i = 0; i < sub_count; ++i) {
+        obs_properties_t* ch_grp = obs_properties_create();
+        const size_t nc = d->router.client_count(i);
 
-// チャンネル 1件分のUIを構築する（詳細モード）。
-static void add_sub_channel_item_detail(obs_properties_t* grp, DelayStreamData* d, int i, int sub_count) {
-    if (!grp || !d) return;
-    d->btn_ctx[i] = { d, i };
-
-    char uk[32], mk[32], rk[32], nk[32], ajk[32], eik[32];
-    char ul[32], gk[32], gt[32];
-    snprintf(uk, sizeof(uk), "sub%d_url", i);
-    snprintf(mk, sizeof(mk), "sub%d_meas", i);
-    snprintf(rk, sizeof(rk), "sub%d_result", i);
-    snprintf(nk, sizeof(nk), "sub%d_memo", i);
-    snprintf(ajk, sizeof(ajk), "sub%d_adjust_ms", i);
-    snprintf(eik, sizeof(eik), "sub%d_effective_info", i);
-    snprintf(ul, sizeof(ul), "URL");
-    snprintf(gk, sizeof(gk), "sub%d_group", i);
-    snprintf(gt, sizeof(gt), "Ch.%d", i + 1);
-
-    obs_properties_t* ch_grp = obs_properties_create();
-    std::string url = make_sub_url(d, i);
-    size_t nc = d->router.client_count(i);
-    std::string us;
-    if (url.empty()) {
-        us = T_("NotConfigured");
-    } else {
-        us = std::string("<a href=\"") + url + "\">" + url + "</a>";
-    }
-
-    char row_prop[40];
-    snprintf(row_prop, sizeof(row_prop), "sub%d_memo_remove_row_detail", i);
-    const bool input_enabled = !d->router_running.load();
-    const bool button_enabled = !(d->router_running.load() || sub_count <= 1);
-    obs_property_t* memo_remove_row = obs_properties_add_text_button(
-        ch_grp, row_prop, T_("SubMemo"), nk, T_("SubRemove"),
-        cb_sub_remove, &d->btn_ctx[i], input_enabled, button_enabled);
-    obs_property_set_long_description(memo_remove_row, T_("SubRemoveDesc"));
-
-    obs_property_t* up = obs_properties_add_text(ch_grp, uk, ul, OBS_TEXT_INFO);
-    obs_property_set_long_description(up, us.c_str());
-    obs_property_text_set_info_word_wrap(up, false);
-    {
-        char sn[32];
-        snprintf(sn, sizeof(sn), "sub%d_stepper", i);
+        char sn[32], ajk[32];
+        snprintf(sn, sizeof(sn), "dsum%d_stepper", i);
+        snprintf(ajk, sizeof(ajk), "sub%d_adjust_ms", i);
         obs_properties_add_stepper(ch_grp, sn, T_("SubAdjust"),
             ajk, SUB_ADJUST_MIN_MS, SUB_ADJUST_MAX_MS, 0.0, 0, " ms");
-    }
-    char ei[192];
-    float effective = calc_effective_sub_delay_value_ms(
-        d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
-    d->sub[i].displayed_effective_ms = effective;
-    snprintf(ei, sizeof(ei), T_("SubDelayEffectiveInfoFmt"),
-             effective, d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms);
-    obs_properties_add_text(ch_grp, eik, ei, OBS_TEXT_INFO);
 
-    add_sub_channel_measure_controls(ch_grp, d, i, nc, mk, rk);
-    obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
+        char info[192];
+        const float raw_effective = d->sub[i].delay_ms + d->sub[i].adjust_ms + d->sub_offset_ms;
+        const float effective = calc_effective_sub_delay_value_ms(
+            d, d->sub[i].delay_ms, d->sub[i].adjust_ms);
+        snprintf(info, sizeof(info), T_("SubDelayEffectiveInfoFmt"),
+                 d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms, effective);
+
+        char btn_label[64] = "";
+        char result_text[128] = "";
+        bool btn_enabled = true;
+        MeasureState& ms = d->sub[i].measure;
+        {
+            std::lock_guard<std::mutex> lk(ms.mtx);
+            if (nc == 0) {
+                snprintf(btn_label, sizeof(btn_label), "%s", T_("SubMeasureDisconnected"));
+                btn_enabled = false;
+            } else if (ms.measuring) {
+                snprintf(btn_label, sizeof(btn_label), "%s", T_("Measuring"));
+                btn_enabled = false;
+            } else if (ms.result.valid) {
+                snprintf(btn_label, sizeof(btn_label), T_("SubRemeasureFmt"), nc);
+                snprintf(result_text, sizeof(result_text), T_("SubResultFmt"),
+                         ms.result.avg_rtt_ms, ms.result.avg_one_way);
+            } else {
+                snprintf(btn_label, sizeof(btn_label), T_("SubMeasureFmt"), nc);
+                if (!ms.last_error.empty()) {
+                    snprintf(result_text, sizeof(result_text), "%s", ms.last_error.c_str());
+                }
+            }
+        }
+
+        char imk[32];
+        snprintf(imk, sizeof(imk), "dsum%d_info_meas", i);
+        obs_properties_add_info_measure(
+            ch_grp, imk, "",
+            info, result_text, btn_label,
+            cb_sub_measure, &d->btn_ctx[i], btn_enabled,
+            raw_effective < 0.0f, i);
+
+        char gk[32], gt[128];
+        snprintf(gk, sizeof(gk), "dsum%d_group", i);
+        char memo_key[32];
+        snprintf(memo_key, sizeof(memo_key), "sub%d_memo", i);
+        const char* memo = settings ? obs_data_get_string(settings, memo_key) : "";
+        if (memo && *memo) {
+            snprintf(gt, sizeof(gt), "Ch.%d %s", i + 1, memo);
+        } else {
+            snprintf(gt, sizeof(gt), "Ch.%d", i + 1);
+        }
+        obs_properties_add_group(grp, gk, gt, OBS_GROUP_NORMAL, ch_grp);
+    }
+
+    if (settings) {
+        obs_data_release(settings);
+    }
+    obs_properties_add_group(
+        props, "grp_delay_summary", T_("GroupDelaySummary"), OBS_GROUP_NORMAL, grp);
 }
 
-// チャンネル 1件分のUIを構築する（簡易モード）。
-static void add_sub_channel_item_simple(obs_properties_t* grp, DelayStreamData* d, int i, int sub_count) {
+// チャンネル 1件分のUIを構築する。
+static void add_sub_channel_item(obs_properties_t* grp, DelayStreamData* d, int i, int sub_count) {
     if (!grp || !d) return;
     d->btn_ctx[i] = { d, i };
 
@@ -2415,17 +2464,13 @@ static void add_sub_channel_item_simple(obs_properties_t* grp, DelayStreamData* 
         cb_sub_remove, &d->btn_ctx[i], input_enabled, button_enabled);
 }
 
-// チャンネル 一覧グループを構築する（詳細/簡易モードで項目を切り替える）。
-static void add_sub_channels_group(obs_properties_t* props, DelayStreamData* d, bool detail_mode) {
+// チャンネル 一覧グループを構築する。
+static void add_sub_channels_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
     int sub_count = d->sub_ch_count;
     for (int i = 0; i < sub_count; ++i) {
-        if (detail_mode) {
-            add_sub_channel_item_detail(grp, d, i, sub_count);
-        } else {
-            add_sub_channel_item_simple(grp, d, i, sub_count);
-        }
+        add_sub_channel_item(grp, d, i, sub_count);
     }
     obs_property_t* spc_bottom = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
     obs_property_set_long_description(spc_bottom, " ");
@@ -2480,7 +2525,7 @@ static obs_properties_t* ds_get_properties(void* data) {
     if (d->is_duplicate_instance) {
         return props;
     }
-    add_sub_channels_group(props, d, detail_mode);
+    add_sub_channels_group(props, d);
     add_stream_group(props, d);
     add_ws_group(props, d, has_sid);
     add_tunnel_group(props, d);
@@ -2488,6 +2533,9 @@ static obs_properties_t* ds_get_properties(void* data) {
     add_flow_group(props, d);
     add_master_group(props, d);
     add_sub_offset_group(props, d);
+    if (detail_mode) {
+        add_delay_summary_group(props, d);
+    }
 
     apply_detail_mode_visibility(props, d, detail_mode);
 
@@ -2496,6 +2544,9 @@ static obs_properties_t* ds_get_properties(void* data) {
         schedule_stepper_inject(d->context);
         schedule_text_button_inject(d->context);
         schedule_color_button_row_inject(d->context);
+        if (detail_mode) {
+            schedule_info_measure_inject(d->context);
+        }
     }
 
     return props;
