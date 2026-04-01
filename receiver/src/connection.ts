@@ -6,6 +6,7 @@ import {
   PLAYBACK_BUFFER_MIN_MS,
   PLAYBACK_BUFFER_MAX_MS,
   CONNECT_TIMEOUT_MS,
+  DEFAULT_PING_COUNT,
 } from './constants';
 import { isRecord, isLatencyResultMessage, safeParseJson } from './types';
 import type { JsonRecord } from './types';
@@ -61,6 +62,7 @@ function handleControl(text: string): void {
         if (typeof msg.seq === 'number') payload.seq = msg.seq;
         state.ws.send(JSON.stringify(payload));
       }
+      if (typeof msg.total === 'number' && msg.total > 0) state.pingTotal = msg.total;
       bus.emit('ctrl:ping', { count: ++state.pingCount });
       break;
 
@@ -74,6 +76,7 @@ function handleControl(text: string): void {
         });
       }
       state.pingCount = 0;
+      state.pingTotal = DEFAULT_PING_COUNT;
       break;
 
     case 'apply_delay':

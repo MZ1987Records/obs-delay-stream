@@ -146,7 +146,6 @@ inline const char* guess_content_type(const std::string& path) {
 
 inline bool is_valid_opus_sample_rate(int sample_rate) {
     switch (sample_rate) {
-    case 0: // auto (same as input sample rate)
     case 8000:
     case 12000:
     case 16000:

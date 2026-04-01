@@ -16,8 +16,8 @@ export const MIN_CH = 1;
 /** デフォルト最大CH番号 */
 export const DEFAULT_MAX_CH = 20;
 
-/** 遅延計測のping回数 */
-export const PING_SAMPLES = 10;
+/** 遅延計測のデフォルトping回数 */
+export const DEFAULT_PING_COUNT = 30;
 
 /** WebSocket接続タイムアウト (ms) */
 export const CONNECT_TIMEOUT_MS = 7000;

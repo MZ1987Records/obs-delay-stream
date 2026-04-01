@@ -76,9 +76,9 @@ struct OpusEnc {
             return false;
         }
 
-        int output_sr = (is_valid_opus_sample_rate(target_sr) && target_sr > 0)
+        int output_sr = is_valid_opus_sample_rate(target_sr)
             ? target_sr
-            : input_sr;
+            : 48000;
         if (bitrate < 6) bitrate = 6;
         if (bitrate > 510) bitrate = 510;
 

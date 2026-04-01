@@ -1,7 +1,6 @@
 import { state } from './state';
 import {
   MIN_CH,
-  PING_SAMPLES,
   WS_PORT,
   RESYNC_DISPLAY_MS,
   RESYNC_XFADE_MIN_SEC,
@@ -268,13 +267,13 @@ export function setDisconnectedUi(): void {
 export function showMeasuring(n: number): void {
   const statusMsg = tr(
     'status.measuring',
-    { current: n, total: PING_SAMPLES },
+    { current: n, total: state.pingTotal },
     '遅延計測中... ({{current}}/{{total}})',
     'Measuring latency... ({{current}}/{{total}})',
   );
   const measuringText = tr(
     'latency.measuring',
-    { current: n, total: PING_SAMPLES },
+    { current: n, total: state.pingTotal },
     '計測中 ({{current}} / {{total}} ping)',
     'Measuring ({{current}} / {{total}} ping)',
   );
@@ -290,7 +289,7 @@ export function showMeasuring(n: number): void {
         class: 'progress is-small is-warning',
         style: 'margin-top:6px',
         value: String(n),
-        max: String(PING_SAMPLES),
+        max: String(state.pingTotal),
       }, String(n)),
     ),
   );
@@ -439,9 +438,11 @@ export function resync(): void {
     newGain.linearRampToValueAtTime(1, newNextTime + xfadeSec);
   }
 
-  setStatus(t('status.resynced'), 'ok');
+  if (state.pingCount === 0) {
+    setStatus(t('status.resynced'), 'ok');
+  }
   setTimeout(() => {
-    if (state.ws && state.ws.readyState === WebSocket.OPEN)
+    if (state.ws && state.ws.readyState === WebSocket.OPEN && state.pingCount === 0)
       setStatus(t('status.receiving'), 'ok');
   }, RESYNC_DISPLAY_MS);
 }

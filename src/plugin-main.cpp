@@ -63,7 +63,11 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
 #define T_(s) obs_module_text(s)
 
 // OBSプロセス内では本フィルタを1インスタンスだけ許可する。
-static std::atomic<bool> g_delay_stream_filter_exists{false};
+// bool フラグではなくソースポインタ＋世代カウンタで管理することで、
+// OBS が destroy 前に create を呼ぶ "recreate パターン" を正しく扱う。
+static std::mutex        g_singleton_mtx;
+static obs_source_t*     g_singleton_owner      = nullptr;
+static uint64_t          g_singleton_generation = 0;
 static constexpr float   SUB_ADJUST_MIN_MS = -500.0f;
 static constexpr float   SUB_ADJUST_MAX_MS = 500.0f;
 static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
@@ -303,7 +307,6 @@ static int clamp_sub_ch_count(int v) {
 
 static int normalize_opus_sample_rate(int v) {
     switch (v) {
-    case 0:
     case 8000:
     case 12000:
     case 16000:
@@ -311,7 +314,7 @@ static int normalize_opus_sample_rate(int v) {
     case 48000:
         return v;
     default:
-        return 0;
+        return 48000;
     }
 }
 
@@ -525,6 +528,7 @@ struct DelayStreamData {
     obs_source_t* context      = nullptr;
     bool is_duplicate_instance = false;
     bool owns_singleton_slot   = false;
+    uint64_t singleton_generation = 0;  // 同世代の destroy のみスロットを解放する
     std::atomic<bool> destroying{false};
     std::atomic<bool> enabled{true};
     std::atomic<bool> ws_send_enabled{true};
@@ -535,6 +539,7 @@ struct DelayStreamData {
     std::string   host_ip;
     std::string   auto_ip;
     std::atomic<int> ws_port{WS_PORT};
+    std::atomic<int> ping_count_setting{DEFAULT_PING_COUNT};
     int           playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS;
     float         master_delay_ms = 0.0f;
     float         sub_offset_ms   = 0.0f; // global offset added to all channel after Sync Flow
@@ -1064,14 +1069,30 @@ static void clear_event_callbacks(DelayStreamData* d) {
 
 // フィルタインスタンスを生成して各コンポーネントを初期化する。
 static void* ds_create(obs_data_t* settings, obs_source_t* source) {
-    bool already_exists =
-        g_delay_stream_filter_exists.exchange(true, std::memory_order_acq_rel);
-    blog(LOG_INFO, "[obs-delay-stream] ds_create START");
+    blog(LOG_INFO, "[obs-delay-stream] ds_create START source=%s",
+         obs_source_get_name(source));
     auto* d = new DelayStreamData();
     blog(LOG_INFO, "[obs-delay-stream] ds_create: DelayStreamData allocated at %p", (void*)d);
-    d->is_duplicate_instance = already_exists;
-    d->owns_singleton_slot   = !already_exists;
     d->context  = source;
+    // 同一ソースの recreate（destroy 前に create が呼ばれる OBS のパターン）は
+    // duplicate 扱いしない。世代カウンタで古い destroy がスロットを誤解放しないよう守る。
+    {
+        std::lock_guard<std::mutex> lk(g_singleton_mtx);
+        if (g_singleton_owner == nullptr || g_singleton_owner == source) {
+            g_singleton_owner         = source;
+            d->singleton_generation   = ++g_singleton_generation;
+            d->is_duplicate_instance  = false;
+            d->owns_singleton_slot    = true;
+        } else {
+            blog(LOG_WARNING,
+                 "[obs-delay-stream] ds_create: slot already owned by source=%s; "
+                 "marking new instance (source=%s) as duplicate",
+                 obs_source_get_name(g_singleton_owner),
+                 obs_source_get_name(source));
+            d->is_duplicate_instance = true;
+            d->owns_singleton_slot   = false;
+        }
+    }
     {
         std::lock_guard<std::mutex> lk(g_props_refresh_pending_mtx);
         g_props_refresh_blocked_sources.erase(source);
@@ -1127,7 +1148,9 @@ static void ds_destroy(void* data) {
         g_props_refresh_blocked_sources.insert(d->context);
         g_props_refresh_pending_sources.erase(d->context);
     }
-    bool release_singleton_slot = d->owns_singleton_slot;
+    bool        release_singleton_slot = d->owns_singleton_slot;
+    obs_source_t* my_source            = d->context;
+    uint64_t      my_gen               = d->singleton_generation;
     // 1. 各コンポーネントの停止（内部スレッドの join を含む）
     if (!d->is_duplicate_instance) {
         d->flow.reset();
@@ -1141,7 +1164,13 @@ static void ds_destroy(void* data) {
 
     delete d;
     if (release_singleton_slot) {
-        g_delay_stream_filter_exists.store(false, std::memory_order_release);
+        // 世代が一致するときだけ解放する。
+        // recreate パターンで新インスタンスがすでにスロットを引き継いでいる場合は
+        // 世代が進んでいるため、古いインスタンスの destroy がスロットを誤解放しない。
+        std::lock_guard<std::mutex> lk(g_singleton_mtx);
+        if (g_singleton_owner == my_source && g_singleton_generation == my_gen) {
+            g_singleton_owner = nullptr;
+        }
     }
 }
 
@@ -1335,6 +1364,15 @@ static void ds_update(void* data, obs_data_t* settings) {
         }
     }
     d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
+    {
+        int pc = (int)obs_data_get_int(settings, "ping_count");
+        if (pc != 10 && pc != 20 && pc != 30 && pc != 40 && pc != 50) {
+            pc = DEFAULT_PING_COUNT;
+            obs_data_set_int(settings, "ping_count", pc);
+        }
+        d->ping_count_setting.store(pc, std::memory_order_relaxed);
+        d->flow.set_ping_count(pc);
+    }
     if (effective_delay_changed) {
         request_properties_refresh(d, "ds_update.effective_changed");
     }
@@ -1396,7 +1434,7 @@ static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = ctx->d; int i = ctx->ch;
     if (d->get_stream_id().empty() || d->sub[i].measure.measuring) return false;
     if (d->router.client_count(i) == 0) return false;
-    bool ok = d->router.start_measurement(i, PING_COUNT, PING_INTV_MS);
+    bool ok = d->router.start_measurement(i, d->ping_count_setting.load(std::memory_order_relaxed), PING_INTV_MS);
     if (ok) {
         auto& ms = d->sub[i].measure;
         std::lock_guard<std::mutex> lk(ms.mtx);
@@ -1987,6 +2025,14 @@ static void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
             "複数の obs-delay-stream フィルタを使用することはできません。",
             OBS_TEXT_INFO);
     } else {
+        if ((obs_get_version() >> 24) < 32) {
+            obs_property_t* ver_warn_p = obs_properties_add_text(
+                grp,
+                "obs_version_warning_top",
+                T_("ObsVersionWarning"),
+                OBS_TEXT_INFO);
+            obs_property_text_set_info_word_wrap(ver_warn_p, true);
+        }
         int64_t sync_offset_ns = 0;
         if (try_get_parent_audio_sync_offset_ns(d, sync_offset_ns) &&
             sync_offset_ns != REQUIRED_AUDIO_SYNC_OFFSET_NS) {
@@ -2061,7 +2107,6 @@ static void add_ws_group(obs_properties_t* props, DelayStreamData* d, bool has_s
     obs_property_t* opus_sample_rate_p = obs_properties_add_list(
         grp, "opus_sample_rate", T_("OpusSampleRate"),
         OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-    obs_property_list_add_int(opus_sample_rate_p, T_("OpusSampleRateAuto"), 0);
     obs_property_list_add_int(opus_sample_rate_p, "8000", 8000);
     obs_property_list_add_int(opus_sample_rate_p, "12000", 12000);
     obs_property_list_add_int(opus_sample_rate_p, "16000", 16000);
@@ -2261,7 +2306,28 @@ static void add_url_share_group(obs_properties_t* props, DelayStreamData* d) {
 static void add_flow_group(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_t* grp = obs_properties_create();
+    {
+        obs_property_t* ping_count_p = obs_properties_add_list(
+            grp, "ping_count", T_("PingCount"),
+            OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+        obs_property_list_add_int(ping_count_p, "10", 10);
+        obs_property_list_add_int(ping_count_p, "20", 20);
+        obs_property_list_add_int(ping_count_p, "30", 30);
+        obs_property_list_add_int(ping_count_p, "40", 40);
+        obs_property_list_add_int(ping_count_p, "50", 50);
+        if (d->flow.busy()) {
+            obs_property_set_enabled(ping_count_p, false);
+        }
+    }
     build_flow_panel(grp, d);
+    if ((obs_get_version() >> 24) < 32) {
+        obs_property_t* ver_warn_p = obs_properties_add_text(
+            grp,
+            "obs_version_warning",
+            T_("ObsVersionWarning"),
+            OBS_TEXT_INFO);
+        obs_property_text_set_info_word_wrap(ver_warn_p, true);
+    }
     int64_t sync_offset_ns = 0;
     if (try_get_parent_audio_sync_offset_ns(d, sync_offset_ns) &&
         sync_offset_ns != REQUIRED_AUDIO_SYNC_OFFSET_NS) {
@@ -2507,12 +2573,13 @@ static void ds_get_defaults(obs_data_t* settings) {
     obs_data_set_default_int   (settings, "sub_memo_auto_counter", 1);
     obs_data_set_default_int   (settings, "audio_codec",           0);
     obs_data_set_default_int   (settings, "opus_bitrate_kbps",     96);
-    obs_data_set_default_int   (settings, "opus_sample_rate",      0);
+    obs_data_set_default_int   (settings, "opus_sample_rate",      48000);
     obs_data_set_default_int   (settings, "quantization_bits",     8);
     obs_data_set_default_bool  (settings, "audio_mono",            true);
     obs_data_set_default_int   (settings, "pcm_downsample_ratio",  4);
     obs_data_set_default_int   (settings, "playback_buffer_ms",        PLAYBACK_BUFFER_DEFAULT_MS);
     obs_data_set_default_int   (settings, "ws_port",               WS_PORT);
+    obs_data_set_default_int   (settings, "ping_count",            DEFAULT_PING_COUNT);
     obs_data_set_default_string(settings, "stream_id",             "");
     obs_data_set_default_string(settings, "host_ip_manual",        "");
     obs_data_set_default_double(settings, "master_delay_ms",       0.0);

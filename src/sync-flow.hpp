@@ -5,7 +5,7 @@
  *
  * 3ステップ同期フローを管理するクラス
  *
- * Step1: 接続中の全CHを並列計測（PING_COUNT回ping）
+ * Step1: 接続中の全CHを並列計測（デフォルト DEFAULT_PING_COUNT 回 ping、UI で変更可）
  * Step2: （廃止）
  * Step3: RTMP遅延計測 → マスター遅延 = パフォーマー基準 + RTMP片道遅延 を算出・確認表示
  *
@@ -81,6 +81,7 @@ public:
     SyncFlow();
 
     void set_active_channels(int n);
+    void set_ping_count(int n);
 
     FlowPhase  phase()  const;
     FlowResult result() const;
@@ -99,6 +100,7 @@ private:
     mutable std::mutex mtx_;
     FlowPhase          phase_         = FlowPhase::Idle;
     int                active_ch_     = MAX_SUB_CH;
+    int                ping_count_    = DEFAULT_PING_COUNT;
     std::atomic<int>   pending_count_{0};
     FlowResult         result_;
     RtmpProber         prober_;

@@ -132,6 +132,7 @@ bus.on('ws:close', ({ code, reason, cause }) => {
   } else {
     setStatus(t('status.disconnected'), '');
   }
+  state.pingCount = 0;
   setDisconnectedUi();
 });
 

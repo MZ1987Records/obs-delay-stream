@@ -20,6 +20,12 @@ void SyncFlow::set_active_channels(int n) {
     active_ch_ = n;
 }
 
+void SyncFlow::set_ping_count(int n) {
+    if (n < 1) n = 1;
+    std::lock_guard<std::mutex> lk(mtx_);
+    ping_count_ = n;
+}
+
 FlowPhase SyncFlow::phase() const {
     std::lock_guard<std::mutex> lk(mtx_);
     return phase_;
@@ -67,7 +73,7 @@ bool SyncFlow::start_step1(StreamRouter& router, const std::string& stream_id) {
             [this, i](const std::string&, int, LatencyResult r) {
                 on_ch_result(i, r);
             });
-        router.start_measurement(i, PING_COUNT, PING_INTV_MS);
+        router.start_measurement(i, ping_count_, PING_INTV_MS);
     }
     if (on_update) on_update();
     return true;
@@ -99,7 +105,7 @@ bool SyncFlow::retry_failed_step1(StreamRouter& router) {
             [this, i](const std::string&, int, LatencyResult r) {
                 on_ch_result(i, r);
             });
-        router.start_measurement(i, PING_COUNT, PING_INTV_MS);
+        router.start_measurement(i, ping_count_, PING_INTV_MS);
     }
     if (on_update) on_update();
     return true;

@@ -599,10 +599,8 @@ bool StreamRouter::ensure_opus_encoder(int ch, uint32_t sample_rate, uint32_t ch
     if (enc.disabled) return false;
     int bitrate = opus_bitrate_kbps_.load(std::memory_order_relaxed);
     int target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
-    if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 0;
-    int output_sample_rate = target_sample_rate > 0
-        ? target_sample_rate
-        : (int)sample_rate;
+    if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 48000;
+    int output_sample_rate = target_sample_rate;
     if (enc.ctx &&
         enc.input_sample_rate  == (int)sample_rate &&
         enc.output_sample_rate == output_sample_rate &&
@@ -1070,7 +1068,7 @@ void StreamRouter::measure_loop(const std::string& sid, int ch,
             cs->ping_times[seq] = Clock::now();
             char buf[128];
             snprintf(buf, sizeof(buf),
-                "{\"type\":\"ping\",\"seq\":%d,\"t\":%.3f}", seq, t_now);
+                "{\"type\":\"ping\",\"seq\":%d,\"t\":%.3f,\"total\":%d}", seq, t_now, num_pings);
             for (auto& hdl : cs->conns) {
                 try { srv->send(hdl, std::string(buf), websocketpp::frame::opcode::text); }
                 catch (...) {}
@@ -1100,13 +1098,47 @@ void StreamRouter::finalize_result(const std::string& sid, int ch) {
             r.valid   = true;
             r.samples = (int)s.size();
             r.min_rtt_ms = r.max_rtt_ms = s[0];
-            double sum = 0;
             for (double v : s) {
-                sum += v;
                 if (v < r.min_rtt_ms) r.min_rtt_ms = v;
                 if (v > r.max_rtt_ms) r.max_rtt_ms = v;
             }
-            r.avg_rtt_ms  = sum / r.samples;
+
+            // サンプル数に応じて統計手法を切り替える
+            std::vector<double> sorted = s;
+            std::sort(sorted.begin(), sorted.end());
+            const int n = (int)sorted.size();
+
+            if (n <= 15) {
+                // 中央値
+                r.method = "median";
+                double median = (n % 2 == 0)
+                    ? (sorted[n/2 - 1] + sorted[n/2]) / 2.0
+                    : sorted[n/2];
+                r.avg_rtt_ms  = median;
+                r.used_samples = 1;
+            } else if (n < 30) {
+                // トリム平均: 上下1サンプル除外
+                r.method = "trimmed";
+                double sum = 0;
+                for (int i = 1; i < n - 1; ++i) sum += sorted[i];
+                r.used_samples = n - 2;
+                r.avg_rtt_ms  = sum / r.used_samples;
+            } else {
+                // IQR除外後の平均
+                r.method = "iqr";
+                double q1 = sorted[n / 4];
+                double q3 = sorted[n * 3 / 4];
+                double iqr = q3 - q1;
+                double lo  = q1 - 1.5 * iqr;
+                double hi  = q3 + 1.5 * iqr;
+                double sum = 0;
+                int cnt = 0;
+                for (double v : sorted) {
+                    if (v >= lo && v <= hi) { sum += v; ++cnt; }
+                }
+                r.used_samples = cnt;
+                r.avg_rtt_ms   = (cnt > 0) ? sum / cnt : sorted[n/2];
+            }
             r.avg_one_way = r.avg_rtt_ms / 2.0;
         } else {
             no_samples = true;
@@ -1130,21 +1162,23 @@ void StreamRouter::finalize_result(const std::string& sid, int ch) {
              sid.c_str(), ch + 1);
     } else {
         blog(LOG_INFO,
-             "[obs-delay-stream] latency measure done: sid=%s ch=%d samples=%d avg=%.1fms",
-             sid.c_str(), ch + 1, r.samples, r.avg_rtt_ms);
+             "[obs-delay-stream] latency measure done: sid=%s ch=%d samples=%d/%d method=%s rtt=%.1fms",
+             sid.c_str(), ch + 1, r.used_samples, r.samples, r.method, r.avg_rtt_ms);
     }
     if (cb)     cb(sid, ch, r);
     if (cb_any) cb_any(sid, ch, r);
 }
 
 std::string StreamRouter::format_latency_result_json(const LatencyResult& r) {
-    char buf[256];
+    char buf[300];
     snprintf(buf, sizeof(buf),
         "{\"type\":\"latency_result\","
         "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
-        "\"min\":%.1f,\"max\":%.1f,\"samples\":%d}",
+        "\"min\":%.1f,\"max\":%.1f,"
+        "\"samples\":%d,\"used_samples\":%d,\"method\":\"%s\"}",
         r.avg_rtt_ms, r.avg_one_way,
-        r.min_rtt_ms, r.max_rtt_ms, r.samples);
+        r.min_rtt_ms, r.max_rtt_ms,
+        r.samples, r.used_samples, r.method);
     return buf;
 }
 

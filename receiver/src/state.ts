@@ -4,7 +4,7 @@ import type {
   OpusDecoderInstance,
   OpusPacket,
 } from './types';
-import { PLAYBACK_BUFFER_DEFAULT, DEFAULT_MAX_CH } from './constants';
+import { PLAYBACK_BUFFER_DEFAULT, DEFAULT_MAX_CH, DEFAULT_PING_COUNT } from './constants';
 
 export type OpusMode = 'auto' | 'webcodecs' | 'wasm';
 export type OpusDecoderState = 'idle' | 'pending' | 'ready' | 'failed';
@@ -36,6 +36,7 @@ export const state = {
   // 同期
   syncAvailable: false,
   pingCount: 0,
+  pingTotal: DEFAULT_PING_COUNT,
   syncCountdown: 0,
   syncTickTimer: null as ReturnType<typeof setInterval> | null,
   currentSyncInterval: 0,
