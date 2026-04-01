@@ -62,10 +62,35 @@ UiRefreshFreezeToken freeze_properties_ui_updates() {
     return token;
 }
 
+void request_properties_root_repaint(QWidget* root) {
+    if (!root) return;
+    root->update();
+    root->repaint();
+
+    auto repaint_area = [](QAbstractScrollArea* area) {
+        if (!area) return;
+        area->update();
+        if (QWidget* vp = area->viewport()) {
+            vp->update();
+            vp->repaint();
+        }
+    };
+
+    repaint_area(qobject_cast<QAbstractScrollArea*>(root));
+    const auto areas = root->findChildren<QAbstractScrollArea*>();
+    for (QAbstractScrollArea* area : areas) {
+        repaint_area(area);
+    }
+}
+
 void unfreeze_properties_ui_updates(const UiRefreshFreezeToken& token) {
     if (!token.root || !token.was_updates_enabled) return;
-    token.root->setUpdatesEnabled(true);
-    token.root->update();
+    QPointer<QWidget> root = token.root;
+    root->setUpdatesEnabled(true);
+    request_properties_root_repaint(root.data());
+    QTimer::singleShot(0, root.data(), [root]() {
+        request_properties_root_repaint(root.data());
+    });
 }
 
 std::vector<UiScrollSnapshot> snapshot_vertical_scrollbars() {
