@@ -1,6 +1,4 @@
 #pragma once
-#ifndef OBS_COLOR_BUTTONS_WIDGET_HPP_
-#define OBS_COLOR_BUTTONS_WIDGET_HPP_
 
 #include <cstddef>
 #include <obs-module.h>
@@ -23,5 +21,3 @@ obs_property_t* obs_properties_add_color_button_row(
     size_t button_count);
 
 void schedule_color_button_row_inject(obs_source_t* source);
-
-#endif // OBS_COLOR_BUTTONS_WIDGET_HPP_

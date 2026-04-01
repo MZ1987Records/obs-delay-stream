@@ -1,6 +1,4 @@
 #pragma once
-#ifndef OBS_DELAY_TABLE_WIDGET_HPP_
-#define OBS_DELAY_TABLE_WIDGET_HPP_
 
 #include <obs-module.h>
 
@@ -37,5 +35,3 @@ obs_property_t* obs_properties_add_delay_table(
     const DelayTableLabels&      labels);
 
 void schedule_delay_table_inject(obs_source_t* source);
-
-#endif // OBS_DELAY_TABLE_WIDGET_HPP_

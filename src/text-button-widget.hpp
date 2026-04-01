@@ -1,6 +1,4 @@
 #pragma once
-#ifndef OBS_TEXT_BUTTON_WIDGET_HPP_
-#define OBS_TEXT_BUTTON_WIDGET_HPP_
 
 #include <obs-module.h>
 
@@ -16,5 +14,3 @@ obs_property_t* obs_properties_add_text_button(
     bool button_enabled = true);
 
 void schedule_text_button_inject(obs_source_t* source);
-
-#endif // OBS_TEXT_BUTTON_WIDGET_HPP_

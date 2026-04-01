@@ -53,6 +53,20 @@ endif()
 # ---- Plugin target ----
 add_library(obs-delay-stream MODULE
   src/plugin-main.cpp
+  src/plugin-main-utils.cpp
+  src/plugin-main-obs-services.cpp
+  src/plugin-main-receiver-assets.cpp
+  src/plugin-main-props-refresh.cpp
+  src/plugin-main-config.cpp
+  src/plugin-main-audio-processing.cpp
+  src/plugin-main-update.cpp
+  src/plugin-main-settings-helpers.cpp
+  src/plugin-main-sub-settings.cpp
+  src/plugin-main-url-share-renderer.cpp
+  src/plugin-main-url-share-ui.cpp
+  src/plugin-main-sub-channels-ui.cpp
+  src/plugin-main-delay-ui.cpp
+  src/plugin-main-properties-ui.cpp
   src/stepper-widget.cpp
   src/text-button-widget.cpp
   src/color-buttons-widget.cpp
@@ -158,6 +172,7 @@ target_link_libraries(obs-delay-stream
   ws2_32
   mswsock
   iphlpapi
+  psapi
 )
 
 

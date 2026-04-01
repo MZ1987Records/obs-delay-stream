@@ -1,6 +1,4 @@
 #pragma once
-#ifndef OBS_WIDGET_PAYLOAD_UTILS_HPP_
-#define OBS_WIDGET_PAYLOAD_UTILS_HPP_
 
 #include <QString>
 #include <QStringList>
@@ -52,5 +50,3 @@ inline bool split_escaped_pipe_fields(const QString &text, QStringList &fields)
 }
 
 } // namespace widget_payload
-
-#endif // OBS_WIDGET_PAYLOAD_UTILS_HPP_
