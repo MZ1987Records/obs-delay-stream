@@ -48,7 +48,7 @@ public:
     DelayTableWidget(obs_source_t* source,
                      int selected_ch,
                      const std::vector<ParsedChannel>& channels,
-                     const QStringList& labels,  // hdr_ch,name,base,adjust,global,total,lbl_editor
+                     const QStringList& labels,  // hdr_ch,name,measured,base,adjust,global,total,lbl_editor
                      QWidget* parent = nullptr)
         : QWidget(parent)
         , source_(source ? obs_source_get_ref(source) : nullptr)
@@ -144,7 +144,7 @@ public:
         hlay->setContentsMargins(0, 0, 0, 0);
         hlay->setSpacing(4);
 
-        auto* adj_label = new QLabel(labels.value(6), this);
+        auto* adj_label = new QLabel(labels.value(7), this);
         adj_label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         hlay->addWidget(adj_label);
 
