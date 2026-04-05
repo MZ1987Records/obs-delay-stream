@@ -38,37 +38,6 @@ void request_properties_refresh(DelayStreamData* d, const char* reason = nullptr
         reason);
 }
 
-void write_master_delay(DelayStreamData* d, double ms) {
-    if (!d || !d->context) return;
-    obs_data_t* s = obs_source_get_settings(d->context);
-    if (!s) return;
-    obs_data_set_double(s, "master_delay_ms", ms);
-    d->master_delay_ms = (float)ms;
-    if (d->enabled.load()) d->master_buf.set_delay_ms((uint32_t)ms);
-    obs_data_release(s);
-}
-
-bool cb_rtmp_measure(obs_properties_t*, obs_property_t*, void* priv) {
-    auto* d = static_cast<DelayStreamData*>(priv);
-    if (!d || d->rtmp.prober.is_running()) return false;
-    std::string url = plugin_main_settings_helpers::resolve_rtmp_url_from_source(d->context);
-    if (url.empty()) return false;
-    { std::lock_guard<std::mutex> lk(d->rtmp.mtx); d->rtmp.cached_url = url; }
-    d->rtmp.prober.start(url, RTMP_PROBE_CNT, RTMP_PROBE_INTV);
-    return false;
-}
-
-bool cb_rtmp_apply(obs_properties_t*, obs_property_t*, void* priv) {
-    auto* d = static_cast<DelayStreamData*>(priv);
-    if (!d) return false;
-    RtmpProbeResult r;
-    { std::lock_guard<std::mutex> lk(d->rtmp.mtx); r = d->rtmp.result; }
-    if (!r.valid) return false;
-    write_master_delay(d, r.avg_one_way);
-    request_properties_refresh(d, "cb_rtmp_apply");
-    return false;
-}
-
 bool cb_rtmp_url_auto_changed(void* priv, obs_properties_t* props, obs_property_t*, obs_data_t* settings) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d || !settings) return false;
@@ -154,13 +123,6 @@ bool cb_flow_start_step3(obs_properties_t*, obs_property_t*, void* priv) {
     return false;
 }
 
-bool cb_flow_apply_step3(obs_properties_t*, obs_property_t*, void* priv) {
-    auto* d = static_cast<DelayStreamData*>(priv);
-    if (!d) return false;
-    d->flow.apply_step3();
-    return false;
-}
-
 bool cb_flow_reset(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
@@ -197,71 +159,158 @@ bool cb_audio_codec_changed(void* priv, obs_properties_t* props, obs_property_t*
     return true;
 }
 
+void add_flow_rtmp_measure_section(obs_properties_t* props, DelayStreamData* d) {
+    if (!props || !d) return;
+
+    FlowPhase phase = d->flow.phase();
+    FlowResult res  = d->flow.result();
+    const bool is_complete        = (phase == FlowPhase::Complete);
+    const bool is_step1_done      = (phase == FlowPhase::Step1_Done);
+    const bool is_step3_measuring = (phase == FlowPhase::Step3_Measuring);
+    const bool is_step3_done      = (phase == FlowPhase::Step3_Done);
+    const bool can_start_step3 =
+        is_step1_done || is_step3_done || is_complete;
+
+    const ObsColorButtonSpec flow_rtmp_measure_buttons[] = {
+        {
+            "flow_rtmp_measure_start_btn",
+            T_("FlowMeasureStartShort"),
+            cb_flow_start_step3,
+            d,
+            (!is_step3_measuring && can_start_step3),
+            UI_COLOR_START_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+        {
+            "flow_rtmp_measure_stop_btn",
+            T_("FlowMeasureStopShort"),
+            cb_flow_reset,
+            d,
+            is_step3_measuring,
+            UI_COLOR_STOP_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+    };
+    obs_properties_add_color_button_row(
+        props, "flow_rtmp_measure_controls_row", T_("FlowRtmpMeasureLabel"), flow_rtmp_measure_buttons,
+        sizeof(flow_rtmp_measure_buttons) / sizeof(flow_rtmp_measure_buttons[0]));
+
+    const char* step3_progress_text = is_step3_measuring
+        ? T_("FlowRtmpMeasureProgress")
+        : T_("FlowNone");
+    obs_properties_add_text(props, "flow_s3_prog", step3_progress_text, OBS_TEXT_INFO);
+
+    char step3_result[512];
+    if ((is_step3_done || is_complete) && res.rtmp_valid) {
+        snprintf(step3_result, sizeof(step3_result), T_("FlowRtmpMeasureResultFmt"),
+                 res.rtmp_one_way_ms, res.max_one_way_ms, res.master_delay_ms);
+    } else {
+        snprintf(step3_result, sizeof(step3_result), "%s", T_("FlowNone"));
+    }
+    obs_properties_add_text(props, "flow_s3_result", step3_result, OBS_TEXT_INFO);
+
+    char step3_error[512];
+    if (is_step3_done && !res.rtmp_valid) {
+        snprintf(step3_error, sizeof(step3_error), T_("FlowRtmpFailedFmt"), res.rtmp_error.c_str());
+    } else {
+        snprintf(step3_error, sizeof(step3_error), "%s", T_("FlowNone"));
+    }
+    obs_properties_add_text(props, "flow_s3_err", step3_error, OBS_TEXT_INFO);
+}
+
 void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
     if (!props || !d) return;
     obs_properties_add_text(props, "flow_desc",
         T_("FlowDesc"),
         OBS_TEXT_INFO);
+
     FlowPhase phase = d->flow.phase();
     FlowResult res  = d->flow.result();
     int sub_count = d->sub_ch_count;
-    switch (phase) {
-    case FlowPhase::Idle:
-    case FlowPhase::Complete: {
-        if (phase == FlowPhase::Complete)
-            obs_properties_add_text(props, "flow_complete", T_("FlowComplete"), OBS_TEXT_INFO);
 
-        obs_data_t* s = obs_source_get_settings(d->context);
-        auto format_sub_name = [s](int ch) -> std::string {
-            if (!s) return "Ch." + std::to_string(ch + 1);
-            const auto memo_key = make_sub_memo_key(ch);
-            const char* memo = obs_data_get_string(s, memo_key.data());
-            if (memo && *memo) return std::string(memo);
-            return "Ch." + std::to_string(ch + 1);
-        };
+    const bool is_idle            = (phase == FlowPhase::Idle);
+    const bool is_complete        = (phase == FlowPhase::Complete);
+    const bool is_step1_measuring = (phase == FlowPhase::Step1_Measuring);
+    const bool is_step1_done      = (phase == FlowPhase::Step1_Done);
+    const bool is_step3_measuring = (phase == FlowPhase::Step3_Measuring);
+    const bool is_step3_done      = (phase == FlowPhase::Step3_Done);
+    const bool is_step1_done_or_later =
+        is_step1_done || is_step3_measuring || is_step3_done || is_complete;
 
-        std::string connected_names;
-        std::string disconnected_names;
-        int nc = 0;
-        int nd = 0;
-        for (int i = 0; i < sub_count; ++i) {
-            std::string name = format_sub_name(i);
-            if (d->router.client_count(i) > 0) {
-                if (!connected_names.empty()) connected_names += " ";
-                connected_names += name;
-                ++nc;
-            } else {
-                if (!disconnected_names.empty()) disconnected_names += " ";
-                disconnected_names += name;
-                ++nd;
-            }
+    obs_data_t* s = obs_source_get_settings(d->context);
+    auto format_sub_name = [s](int ch) -> std::string {
+        if (!s) return "Ch." + std::to_string(ch + 1);
+        const auto memo_key = make_sub_memo_key(ch);
+        const char* memo = obs_data_get_string(s, memo_key.data());
+        if (memo && *memo) return std::string(memo);
+        return "Ch." + std::to_string(ch + 1);
+    };
+
+    std::string connected_names;
+    std::string disconnected_names;
+    int connected_count = 0;
+    int disconnected_count = 0;
+    for (int i = 0; i < sub_count; ++i) {
+        std::string name = format_sub_name(i);
+        if (d->router.client_count(i) > 0) {
+            if (!connected_names.empty()) connected_names += " ";
+            connected_names += name;
+            ++connected_count;
+        } else {
+            if (!disconnected_names.empty()) disconnected_names += " ";
+            disconnected_names += name;
+            ++disconnected_count;
         }
-        if (s) obs_data_release(s);
-
-        if (nc == 0) connected_names = T_("FlowNone");
-        if (nd == 0) disconnected_names = T_("FlowNone");
-
-        std::string status_text = std::string(T_("FlowConnected")) + connected_names +
-                                  "\n" + T_("FlowDisconnected") + disconnected_names;
-        obs_properties_add_text(props, "flow_connected", status_text.c_str(), OBS_TEXT_INFO);
-        if (nc > 0)
-            obs_properties_add_button2(props, "flow_start_btn",
-                T_("FlowStart"), cb_flow_start, d);
-        if (phase == FlowPhase::Complete)
-            obs_properties_add_button2(props, "flow_reset_btn", T_("Reset"), cb_flow_reset, d);
-        break;
     }
-    case FlowPhase::Step1_Measuring: {
-        char buf[512];
-        snprintf(buf, sizeof(buf), T_("FlowStep1ProgressFmt"),
+
+    if (connected_count == 0) connected_names = T_("FlowNone");
+    if (disconnected_count == 0) disconnected_names = T_("FlowNone");
+
+    std::string complete_text = is_complete ? T_("FlowComplete") : T_("FlowNone");
+    obs_properties_add_text(props, "flow_complete", complete_text.c_str(), OBS_TEXT_INFO);
+
+    std::string status_text = std::string(T_("FlowConnected")) + connected_names +
+                              "\n" + T_("FlowDisconnected") + disconnected_names;
+    obs_properties_add_text(props, "flow_connected", status_text.c_str(), OBS_TEXT_INFO);
+
+    const bool flow_measuring = d->flow.busy();
+    const ObsColorButtonSpec flow_measure_buttons[] = {
+        {
+            "flow_measure_start_btn",
+            T_("FlowMeasureStartShort"),
+            cb_flow_start,
+            d,
+            (!flow_measuring && is_idle && connected_count > 0),
+            UI_COLOR_START_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+        {
+            "flow_measure_stop_btn",
+            T_("FlowMeasureStopShort"),
+            cb_flow_reset,
+            d,
+            flow_measuring,
+            UI_COLOR_STOP_BUTTON_BG,
+            UI_COLOR_BUTTON_TEXT,
+        },
+    };
+    obs_properties_add_color_button_row(
+        props, "flow_measure_controls_row", T_("FlowMeasureLabel"), flow_measure_buttons,
+        sizeof(flow_measure_buttons) / sizeof(flow_measure_buttons[0]));
+
+    char step1_progress[256];
+    if (is_step1_measuring) {
+        snprintf(step1_progress, sizeof(step1_progress), T_("FlowMeasureProgressFmt"),
                  res.measured_count, res.connected_count);
-        obs_properties_add_text(props, "flow_s1_prog", buf, OBS_TEXT_INFO);
-        obs_properties_add_button2(props, "flow_cancel_s1m", T_("Cancel"), cb_flow_reset, d);
-        break;
+    } else {
+        snprintf(step1_progress, sizeof(step1_progress), T_("FlowMeasureProgressFmt"),
+                 0, 0);
     }
-    case FlowPhase::Step1_Done: {
-        std::string buf = T_("FlowStep1DoneApplied");
-        obs_data_t* s = obs_source_get_settings(d->context);
+    obs_properties_add_text(props, "flow_s1_prog", step1_progress, OBS_TEXT_INFO);
+
+    std::string step1_result_text = T_("FlowNone");
+    if (is_step1_done_or_later) {
+        step1_result_text = T_("FlowMeasureDoneApplied");
         for (int i = 0; i < sub_count; ++i) {
             if (!res.channels[i].connected) continue;
             const auto memo_key = make_sub_memo_key(i);
@@ -271,44 +320,21 @@ void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
                 char line[192];
                 snprintf(line, sizeof(line), "\n  Ch.%d %s : %.1f ms",
                          i + 1, name.c_str(), d->sub[i].delay_ms);
-                buf += line;
+                step1_result_text += line;
             } else {
-                buf += "\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
+                step1_result_text +=
+                    "\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
             }
         }
-        if (s) obs_data_release(s);
-        obs_properties_add_text(props, "flow_s1_result", buf.c_str(), OBS_TEXT_INFO);
-        if (res.measured_count < res.connected_count)
-            obs_properties_add_button2(props, "flow_retry_btn",
-                T_("FlowRetryFailed"), cb_flow_retry_failed, d);
-        obs_properties_add_button2(props, "flow_s3_btn",
-            T_("FlowStep2Start"), cb_flow_start_step3, d);
-        obs_properties_add_button2(props, "flow_cancel_s1d", T_("Cancel"), cb_flow_reset, d);
-        break;
     }
-    case FlowPhase::Step3_Measuring:
-        obs_properties_add_text(props, "flow_s3_prog", T_("FlowStep2Measuring"), OBS_TEXT_INFO);
-        obs_properties_add_button2(props, "flow_cancel_s3m", T_("Cancel"), cb_flow_reset, d);
-        break;
-    case FlowPhase::Step3_Done: {
-        char buf[512];
-        if (res.rtmp_valid) {
-            snprintf(buf, sizeof(buf),
-                T_("FlowStep2ResultFmt"),
-                res.rtmp_one_way_ms, res.max_one_way_ms, res.master_delay_ms);
-            obs_properties_add_text(props, "flow_s3_result", buf, OBS_TEXT_INFO);
-            char al[80];
-            snprintf(al, sizeof(al), T_("FlowApplyMasterFmt"), res.master_delay_ms);
-            obs_properties_add_button2(props, "flow_apply3_btn", al, cb_flow_apply_step3, d);
-        } else {
-            snprintf(buf, sizeof(buf), T_("FlowRtmpFailedFmt"), res.rtmp_error.c_str());
-            obs_properties_add_text(props, "flow_s3_err", buf, OBS_TEXT_INFO);
-            obs_properties_add_button2(props, "flow_retry3_btn", T_("FlowRetry"), cb_flow_start_step3, d);
-        }
-        obs_properties_add_button2(props, "flow_cancel_s3d", T_("Cancel"), cb_flow_reset, d);
-        break;
-    }
-    }
+    obs_properties_add_text(props, "flow_s1_result", step1_result_text.c_str(), OBS_TEXT_INFO);
+
+    auto* retry_failed_btn = obs_properties_add_button2(
+        props, "flow_retry_btn", T_("FlowRetryFailed"), cb_flow_retry_failed, d);
+    obs_property_set_enabled(retry_failed_btn,
+        is_step1_done && (res.measured_count < res.connected_count));
+
+    if (s) obs_data_release(s);
 }
 
 } // namespace
@@ -598,7 +624,7 @@ void add_flow_group(obs_properties_t* props, DelayStreamData* d) {
         obs_property_list_add_int(ping_count_p, "30", 30);
         obs_property_list_add_int(ping_count_p, "40", 40);
         obs_property_list_add_int(ping_count_p, "50", 50);
-        if (d->flow.busy()) {
+        if (d->flow.phase() != FlowPhase::Idle) {
             obs_property_set_enabled(ping_count_p, false);
         }
     }
@@ -654,27 +680,7 @@ void add_master_group(obs_properties_t* props, DelayStreamData* d) {
     obs_property_t* url_p =
         obs_properties_add_text(grp, "rtmp_url", T_("RtmpUrl"), OBS_TEXT_DEFAULT);
     obs_property_set_enabled(url_p, !auto_mode);
-    obs_property_t* rtmp_p = obs_properties_add_button2(
-        grp, "rtmp_measure_btn",
-        d->rtmp.prober.is_running() ? T_("Measuring") : T_("RtmpMeasure"),
-        cb_rtmp_measure, d);
-    if (!d->router_running.load()) {
-        obs_property_set_enabled(rtmp_p, false);
-    }
-    {
-        std::lock_guard<std::mutex> lk(d->rtmp.mtx);
-        if (d->rtmp.result.valid) {
-            char res[128];
-            snprintf(res, sizeof(res), T_("RtmpResultFmt"),
-                     d->rtmp.result.avg_rtt_ms, d->rtmp.result.avg_one_way);
-            obs_properties_add_text(grp, "rtmp_result", res, OBS_TEXT_INFO);
-            char al[64];
-            snprintf(al, sizeof(al), T_("ApplyFmt"), d->rtmp.result.avg_one_way);
-            obs_properties_add_button2(grp, "rtmp_apply_btn", al, cb_rtmp_apply, d);
-        } else {
-            obs_properties_add_text(grp, "rtmp_no_result", T_("RtmpNoResult"), OBS_TEXT_INFO);
-        }
-    }
+    add_flow_rtmp_measure_section(grp, d);
     obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
 }
 

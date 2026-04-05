@@ -114,24 +114,33 @@ bool SyncFlow::retry_failed_step1(StreamRouter& router) {
 bool SyncFlow::start_step3(const std::string& rtmp_url) {
     {
         std::lock_guard<std::mutex> lk(mtx_);
-        if (phase_ != FlowPhase::Step1_Done) return false;
+        const bool can_restart_from_current_phase =
+            phase_ == FlowPhase::Step1_Done ||
+            phase_ == FlowPhase::Step3_Done ||
+            phase_ == FlowPhase::Complete;
+        if (!can_restart_from_current_phase) return false;
         if (rtmp_url.empty()) return false;
         phase_ = FlowPhase::Step3_Measuring;
     }
     if (on_update) on_update();
 
     prober_.on_result = [this](RtmpProbeResult r) {
+        bool should_auto_apply = false;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             if (r.valid) {
                 result_.rtmp_valid      = true;
                 result_.rtmp_one_way_ms = r.avg_one_way;
                 result_.master_delay_ms = result_.max_one_way_ms + r.avg_one_way;
+                should_auto_apply = true;
             } else {
                 result_.rtmp_valid = false;
                 result_.rtmp_error = r.error_msg;
             }
             phase_ = FlowPhase::Step3_Done;
+        }
+        if (should_auto_apply && apply_step3()) {
+            return;
         }
         if (on_update) on_update();
     };
