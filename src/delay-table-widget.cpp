@@ -32,6 +32,7 @@ constexpr int  kDelayTableInjectRetryMs  = 5;
 // ペイロードをパースしたチャンネル情報。
 struct ParsedChannel {
     QString name;
+    double  measured_ms;  // -1 if not measured
     double  base_ms;
     double  adjust_ms;
     double  global_ms;
@@ -60,7 +61,7 @@ public:
         vlay->setSpacing(6);
 
         // ─── テーブル ──────────────────────────────────────────────────────
-        table_ = new QTableWidget(ch_count_, 6, this);
+        table_ = new QTableWidget(ch_count_, 7, this);
         table_->setHorizontalHeaderLabels({
             labels.value(0),
             labels.value(1),
@@ -68,6 +69,7 @@ public:
             labels.value(3),
             labels.value(4),
             labels.value(5),
+            labels.value(6),
         });
         table_->setSelectionBehavior(QAbstractItemView::SelectRows);
         table_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -83,10 +85,11 @@ public:
             auto* hdr = table_->horizontalHeader();
             hdr->setSectionResizeMode(0, QHeaderView::ResizeToContents); // Ch
             hdr->setSectionResizeMode(1, QHeaderView::Stretch);          // 名前
-            hdr->setSectionResizeMode(2, QHeaderView::ResizeToContents); // 基準
-            hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents); // 追加
-            hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents); // 全体
-            hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents); // 合計
+            hdr->setSectionResizeMode(2, QHeaderView::ResizeToContents); // 計測
+            hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents); // 基準
+            hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents); // 追加
+            hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents); // 全体
+            hdr->setSectionResizeMode(6, QHeaderView::ResizeToContents); // 合計
         }
 
         for (int i = 0; i < ch_count_; ++i) {
@@ -103,9 +106,13 @@ public:
             table_->setItem(i, 1, makeItem(
                 ch.name.isEmpty() ? QStringLiteral("—") : ch.name,
                 Qt::AlignLeft | Qt::AlignVCenter));
-            table_->setItem(i, 2, makeItem(QString::number(ch.base_ms,   'f', 1)));
-            table_->setItem(i, 3, makeItem(QString::number(ch.adjust_ms, 'f', 0)));
-            table_->setItem(i, 4, makeItem(QString::number(ch.global_ms, 'f', 0)));
+            table_->setItem(i, 2, makeItem(
+                ch.measured_ms < 0.0
+                    ? QStringLiteral("—")
+                    : QString::number(ch.measured_ms, 'f', 1)));
+            table_->setItem(i, 3, makeItem(QString::number(ch.base_ms,   'f', 1)));
+            table_->setItem(i, 4, makeItem(QString::number(ch.adjust_ms, 'f', 0)));
+            table_->setItem(i, 5, makeItem(QString::number(ch.global_ms, 'f', 0)));
 
             auto* total_item = makeItem(QString::number(ch.total_ms, 'f', 1));
             if (ch.warn) {
@@ -114,7 +121,7 @@ public:
                 f.setBold(true);
                 total_item->setFont(f);
             }
-            table_->setItem(i, 5, total_item);
+            table_->setItem(i, 6, total_item);
         }
 
         // 行の上下パディングを詰めて固定する。
@@ -285,8 +292,8 @@ struct DelayTableInjectCtx {
 };
 
 // ペイロード文字列をパースしてラベル・チャンネルリストを返す。
-// 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_base|hdr_adjust|hdr_global|hdr_total|lbl_editor
-//            |ch0_name|ch0_base|ch0_adjust|ch0_global|ch0_total|ch0_warn|...
+// 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_measured|hdr_base|hdr_adjust|hdr_global|hdr_total|lbl_editor
+//            |ch0_name|ch0_measured|ch0_base|ch0_adjust|ch0_global|ch0_total|ch0_warn|...
 bool parse_delay_table_payload(const QString&              text,
                                 int&                        selected_ch,
                                 QStringList&                labels,
@@ -308,23 +315,24 @@ bool parse_delay_table_payload(const QString&              text,
     const int n = fields[2].toInt(&ok);
     if (!ok || n <= 0) return false;
 
-    // [3..9] = 7 label fields, [10..] = n*6 channel fields
-    if (static_cast<int>(fields.size()) < 10 + n * 6)
+    // [3..10] = 8 label fields, [11..] = n*7 channel fields
+    if (static_cast<int>(fields.size()) < 11 + n * 7)
         return false;
 
-    labels = fields.mid(3, 7);
+    labels = fields.mid(3, 8);
 
     channels.clear();
     channels.reserve(static_cast<size_t>(n));
-    int idx = 10;
+    int idx = 11;
     for (int i = 0; i < n; ++i) {
         ParsedChannel ch;
-        ch.name      = fields[idx++];
-        ch.base_ms   = fields[idx++].toDouble();
-        ch.adjust_ms = fields[idx++].toDouble();
-        ch.global_ms = fields[idx++].toDouble();
-        ch.total_ms  = fields[idx++].toDouble();
-        ch.warn      = (fields[idx++] == QLatin1String("1"));
+        ch.name        = fields[idx++];
+        ch.measured_ms = fields[idx++].toDouble();
+        ch.base_ms     = fields[idx++].toDouble();
+        ch.adjust_ms   = fields[idx++].toDouble();
+        ch.global_ms   = fields[idx++].toDouble();
+        ch.total_ms    = fields[idx++].toDouble();
+        ch.warn        = (fields[idx++] == QLatin1String("1"));
         channels.push_back(ch);
     }
     return true;
@@ -410,17 +418,17 @@ obs_property_t* obs_properties_add_delay_table(
     if (!props || !prop_name || !*prop_name || ch_count <= 0 || !channels)
         return nullptr;
 
-    // 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_base|hdr_adjust|hdr_global|hdr_total|lbl_editor
-    //            |ch0_name|ch0_base|...
+    // 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_measured|hdr_base|hdr_adjust|hdr_global|hdr_total|lbl_editor
+    //            |ch0_name|ch0_measured|ch0_base|ch0_adjust|ch0_global|ch0_total|ch0_warn|...
     std::string payload = "DTABLE";
     {
         char buf[16];
         std::snprintf(buf, sizeof(buf), "|%d|%d", selected_ch, ch_count);
         payload += buf;
     }
-    // 7 label fields
-    for (const char* s : {labels.hdr_ch, labels.hdr_name, labels.hdr_base,
-                           labels.hdr_adjust, labels.hdr_global,
+    // 8 label fields
+    for (const char* s : {labels.hdr_ch, labels.hdr_name, labels.hdr_measured,
+                           labels.hdr_base, labels.hdr_adjust, labels.hdr_global,
                            labels.hdr_total, labels.lbl_editor}) {
         payload += '|';
         payload += escape_field(s ? s : "");
@@ -428,17 +436,19 @@ obs_property_t* obs_properties_add_delay_table(
     // per-channel fields
     for (int i = 0; i < ch_count; ++i) {
         const auto& ch = channels[i];
-        char nums[4][32];
-        std::snprintf(nums[0], sizeof(nums[0]), "%.6g", static_cast<double>(ch.base_ms));
-        std::snprintf(nums[1], sizeof(nums[1]), "%.6g", static_cast<double>(ch.adjust_ms));
-        std::snprintf(nums[2], sizeof(nums[2]), "%.6g", static_cast<double>(ch.global_ms));
-        std::snprintf(nums[3], sizeof(nums[3]), "%.6g", static_cast<double>(ch.total_ms));
+        char nums[5][32];
+        std::snprintf(nums[0], sizeof(nums[0]), "%.6g", static_cast<double>(ch.measured_ms));
+        std::snprintf(nums[1], sizeof(nums[1]), "%.6g", static_cast<double>(ch.base_ms));
+        std::snprintf(nums[2], sizeof(nums[2]), "%.6g", static_cast<double>(ch.adjust_ms));
+        std::snprintf(nums[3], sizeof(nums[3]), "%.6g", static_cast<double>(ch.global_ms));
+        std::snprintf(nums[4], sizeof(nums[4]), "%.6g", static_cast<double>(ch.total_ms));
         payload += '|';
         payload += escape_field(ch.name ? ch.name : "");
         payload += '|'; payload += nums[0];
         payload += '|'; payload += nums[1];
         payload += '|'; payload += nums[2];
         payload += '|'; payload += nums[3];
+        payload += '|'; payload += nums[4];
         payload += '|'; payload += (ch.warn ? "1" : "0");
     }
 

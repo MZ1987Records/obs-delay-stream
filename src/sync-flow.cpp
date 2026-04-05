@@ -175,6 +175,8 @@ void SyncFlow::reset() {
 // ============================================================
 
 void SyncFlow::on_ch_result(int i, LatencyResult r) {
+    bool all_done = false;
+    FlowResult result_snapshot;
     {
         std::lock_guard<std::mutex> lk(mtx_);
         if (i < 0 || i >= active_ch_) return;
@@ -186,8 +188,11 @@ void SyncFlow::on_ch_result(int i, LatencyResult r) {
         if (--pending_count_ == 0) {
             compute_proposals();
             phase_ = FlowPhase::Step1_Done;
+            all_done = true;
+            result_snapshot = result_;
         }
     }
+    if (all_done && on_apply_sub_delays) on_apply_sub_delays(result_snapshot);
     if (on_ch_measured) on_ch_measured(i, r);
     if (on_update) on_update();
 }

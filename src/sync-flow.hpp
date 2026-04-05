@@ -77,6 +77,8 @@ public:
     std::function<void(int ch, LatencyResult)> on_ch_measured;
     // マスター遅延書き込み要求
     std::function<void(double master_ms)>      on_apply_master;
+    // 全CH分の proposed_delay 書き込み要求（Step1完了時）
+    std::function<void(const FlowResult&)>     on_apply_sub_delays;
 
     SyncFlow();
 

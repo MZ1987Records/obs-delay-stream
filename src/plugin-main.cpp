@@ -179,6 +179,16 @@ static void setup_event_callbacks(DelayStreamData* d) {
             request_properties_refresh(d, "flow.on_apply_master");
         });
     };
+    d->flow.on_apply_sub_delays = [d](const FlowResult& res) {
+        queue_ui_safe(d, [res](DelayStreamData* d) {
+            for (int i = 0; i < MAX_SUB_CH; ++i) {
+                const auto& ch = res.channels[i];
+                if (!ch.measured) continue;
+                apply_sub_delay(d, i, ch.proposed_delay);
+            }
+            request_properties_refresh(d, "flow.on_apply_sub_delays");
+        });
+    };
     d->rtmp.prober.on_result = [d](RtmpProbeResult r) {
         { std::lock_guard<std::mutex> lk(d->rtmp.mtx);
           d->rtmp.result = r; d->rtmp.applied = false; }
@@ -213,6 +223,8 @@ static void setup_event_callbacks(DelayStreamData* d) {
     d->router.on_any_latency_result = [d](const std::string& sid, int ch, LatencyResult r) {
         if (sid != d->get_stream_id()) return;
         if (ch < 0 || ch >= MAX_SUB_CH) return;
+        // SyncFlow 実行中または完了後は proposed_delay が権威。raw latency で上書きしない。
+        if (d->flow.phase() != FlowPhase::Idle) return;
         auto& ms = d->sub[ch].measure;
         bool should_apply = r.valid;
         {
@@ -236,9 +248,10 @@ static void setup_event_callbacks(DelayStreamData* d) {
 // 全コンポーネントのイベントコールバックを解除する。
 // コンポーネント停止後に呼ぶこと（競合なし）。
 static void clear_event_callbacks(DelayStreamData* d) {
-    d->flow.on_update        = nullptr;
-    d->flow.on_ch_measured   = nullptr;
-    d->flow.on_apply_master  = nullptr;
+    d->flow.on_update          = nullptr;
+    d->flow.on_ch_measured     = nullptr;
+    d->flow.on_apply_master    = nullptr;
+    d->flow.on_apply_sub_delays = nullptr;
     d->rtmp.prober.on_result = nullptr;
     d->tunnel.on_url_ready   = nullptr;
     d->tunnel.on_error       = nullptr;

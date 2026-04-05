@@ -44,14 +44,18 @@ void add_delay_summary_group(obs_properties_t* props, DelayStreamData* d) {
             selected_ch = 0;
     }
 
+    const FlowResult flow_res = d->flow.result();
     std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
     for (int i = 0; i < sub_count; ++i) {
         const auto memo_key = plugin_main_sub_settings::make_sub_memo_key(i);
         const char* memo = settings ? obs_data_get_string(settings, memo_key.data()) : "";
-        channels[i].name     = (memo && *memo) ? memo : "";
-        channels[i].base_ms  = d->sub[i].delay_ms;
-        channels[i].adjust_ms= d->sub[i].adjust_ms;
-        channels[i].global_ms= d->sub_offset_ms;
+        channels[i].name        = (memo && *memo) ? memo : "";
+        channels[i].measured_ms = flow_res.channels[i].measured
+                                    ? (float)flow_res.channels[i].one_way_ms
+                                    : -1.0f;
+        channels[i].base_ms     = d->sub[i].delay_ms;
+        channels[i].adjust_ms   = d->sub[i].adjust_ms;
+        channels[i].global_ms   = d->sub_offset_ms;
         const float raw = plugin_main_sub_settings::calc_sub_delay_raw_value_ms(
             d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms);
         channels[i].warn     = raw < 0.0f;
@@ -63,13 +67,14 @@ void add_delay_summary_group(obs_properties_t* props, DelayStreamData* d) {
         obs_data_release(settings);
 
     DelayTableLabels labels;
-    labels.hdr_ch     = T_("DelayTableColCh");
-    labels.hdr_name   = T_("DelayTableColName");
-    labels.hdr_base   = T_("DelayTableColBase");
-    labels.hdr_adjust = T_("DelayTableColAdjust");
-    labels.hdr_global = T_("DelayTableColGlobal");
-    labels.hdr_total  = T_("DelayTableColTotal");
-    labels.lbl_editor = T_("DelayTableAdjustLabel");
+    labels.hdr_ch       = T_("DelayTableColCh");
+    labels.hdr_name     = T_("DelayTableColName");
+    labels.hdr_measured = T_("DelayTableColMeasured");
+    labels.hdr_base     = T_("DelayTableColBase");
+    labels.hdr_adjust   = T_("DelayTableColAdjust");
+    labels.hdr_global   = T_("DelayTableColGlobal");
+    labels.hdr_total    = T_("DelayTableColTotal");
+    labels.lbl_editor   = T_("DelayTableAdjustLabel");
     obs_properties_add_delay_table(
         grp, "delay_table", selected_ch, sub_count, channels.data(), labels);
 
