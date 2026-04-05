@@ -59,7 +59,12 @@ void add_delay_summary_group(obs_properties_t* props, DelayStreamData* d) {
         const float raw = plugin_main_sub_settings::calc_sub_delay_raw_value_ms(
             d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms);
         channels[i].warn     = raw < 0.0f;
-        channels[i].total_ms = plugin_main_sub_settings::calc_effective_sub_delay_value_ms(
+        // 合計 = レイテンシ + バッファ遅延。全演者で max_latency + adjust + global に揃う。
+        // 実際に音声に加わるバッファ遅延には latency を含めない（calc_effective が担当）。
+        const float latency = flow_res.channels[i].measured
+                                ? (float)flow_res.channels[i].one_way_latency_ms
+                                : 0.0f;
+        channels[i].total_ms = latency + plugin_main_sub_settings::calc_effective_sub_delay_value_ms(
             d->sub[i].delay_ms, d->sub[i].adjust_ms, d->sub_offset_ms);
     }
 
