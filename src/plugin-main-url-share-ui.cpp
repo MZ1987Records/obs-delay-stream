@@ -1,5 +1,10 @@
 #include "plugin-main-url-share-ui.hpp"
 
+#include <QApplication>
+#include <QColor>
+#include <QPalette>
+
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -13,6 +18,16 @@
 namespace plugin_main_url_share_ui {
 
 namespace {
+
+QColor pick_alt_row_color(const QColor& base, const QColor& alt_candidate) {
+    // テーマによっては AlternateBase が Base と逆極性になるため、
+    // 差が大きすぎる場合は Base を採用して見た目の反転を防ぐ。
+    const double diff = std::abs(base.lightnessF() - alt_candidate.lightnessF());
+    if (diff > 0.18) {
+        return base;
+    }
+    return alt_candidate;
+}
 
 std::string make_sub_url(DelayStreamData* d, int ch0) {
     if (!d) return "";
@@ -79,17 +94,39 @@ void add_url_share_group(obs_properties_t* props, DelayStreamData* d) {
         obs_data_t* s = obs_source_get_settings(d->context);
         if (s) {
             auto rows = collect_sub_url_rows(d, s);
+            const QPalette pal = QApplication::palette();
+            const QColor base_color = pal.color(QPalette::Base);
+            const QColor alt_row_color = pick_alt_row_color(
+                base_color, pal.color(QPalette::AlternateBase));
+            plugin_main_url_share_renderer::UrlConfirmThemeColors theme_colors;
+            theme_colors.table_bg =
+                pal.color(QPalette::Window).name(QColor::HexRgb).toStdString();
+            theme_colors.header_bg =
+                pal.color(QPalette::Button).name(QColor::HexRgb).toStdString();
+            theme_colors.header_text =
+                pal.color(QPalette::ButtonText).name(QColor::HexRgb).toStdString();
+            theme_colors.row_bg =
+                base_color.name(QColor::HexRgb).toStdString();
+            theme_colors.alt_row_bg =
+                alt_row_color.name(QColor::HexRgb).toStdString();
+            theme_colors.text =
+                pal.color(QPalette::Text).name(QColor::HexRgb).toStdString();
+            theme_colors.border =
+                pal.color(QPalette::Mid).name(QColor::HexRgb).toStdString();
+            theme_colors.link =
+                pal.color(QPalette::Link).name(QColor::HexRgb).toStdString();
+            const bool linkify_urls = (ts != TunnelState::Starting);
             std::string list_html = plugin_main_url_share_renderer::build_url_confirm_html_text(
-                rows, T_("NotConfigured"));
+                rows, T_("NotConfigured"), &theme_colors, linkify_urls);
             obs_data_release(s);
             obs_property_t* list_info_p = obs_properties_add_text(
                 grp, "url_confirm_list_html", list_html.c_str(), OBS_TEXT_INFO);
             obs_property_text_set_info_word_wrap(list_info_p, false);
         }
     }
-    const char* suffix = via_tunnel
-        ? T_("UrlShareTunnelSuffix")
-        : T_("UrlShareDirectSuffix");
+    const char* suffix = (ts == TunnelState::Starting)
+        ? T_("UrlShareStartingSuffix")
+        : (via_tunnel ? T_("UrlShareTunnelSuffix") : T_("UrlShareDirectSuffix"));
     char copy_label[192];
     snprintf(copy_label, sizeof(copy_label), "%s%s", T_("UrlShareCopyAll"), suffix);
     obs_property_t* copy_p =
