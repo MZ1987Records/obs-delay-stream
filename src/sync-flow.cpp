@@ -45,7 +45,12 @@ bool SyncFlow::start_step1(StreamRouter& router, const std::string& stream_id) {
     int active = MAX_SUB_CH;
     {
         std::lock_guard<std::mutex> lk(mtx_);
-        if (phase_ != FlowPhase::Idle) return false;
+        const bool can_restart_from_current_phase =
+            phase_ == FlowPhase::Idle ||
+            phase_ == FlowPhase::Step1_Done ||
+            phase_ == FlowPhase::Step3_Done ||
+            phase_ == FlowPhase::Complete;
+        if (!can_restart_from_current_phase) return false;
         active = active_ch_;
     }
     reset();
@@ -94,6 +99,8 @@ bool SyncFlow::retry_failed_step1(StreamRouter& router) {
         }
         if (retry_count == 0) return false;
 
+        // 進捗表示は「成功済み + 今回の再計測完了数」で更新する。
+        result_.completed_count = result_.measured_count;
         phase_ = FlowPhase::Step1_Measuring;
     }
 
@@ -183,6 +190,7 @@ void SyncFlow::on_ch_result(int i, LatencyResult r) {
         auto& ch = result_.channels[i];
         ch.measured   = r.valid;
         ch.one_way_latency_ms = r.valid ? r.avg_latency_ms : 0.0;
+        ++result_.completed_count;
         if (r.valid) ++result_.measured_count;
 
         if (--pending_count_ == 0) {

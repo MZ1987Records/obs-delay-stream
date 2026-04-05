@@ -56,6 +56,7 @@ struct FlowResult {
     // Step1
     std::array<ChSummary, MAX_SUB_CH> channels{};
     int    connected_count  = 0;
+    int    completed_count  = 0; // 成功/失敗を問わず計測処理が完了した件数
     int    measured_count   = 0;
     double max_latency_ms   = 0.0; // 基準(最大片道レイテンシ)
 
