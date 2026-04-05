@@ -7,10 +7,10 @@
  *
  * Step1: 接続中の全CHを並列計測（デフォルト DEFAULT_PING_COUNT 回 ping、UI で変更可）
  * Step2: （廃止）
- * Step3: RTMP遅延計測 → マスター遅延 = パフォーマー基準 + RTMP片道遅延 を算出・確認表示
+ * Step3: RTMPレイテンシ計測 → マスター遅延 = パフォーマー最大レイテンシ + RTMP片道レイテンシ を算出・確認表示
  *
  * マスター遅延の設計:
- *   マスター遅延 = max_one_way + rtmp_one_way (パフォーマー基準 + 配信遅延)
+ *   マスター遅延 = max_latency + rtmp_latency (パフォーマー最大レイテンシ + 配信レイテンシ)
  */
 
 #include <array>
@@ -45,7 +45,7 @@ struct ChSummary {
     int    ch;             // 0-indexed
     bool   connected;      // 接続中か
     bool   measured;       // 計測成功か
-    double one_way_ms;     // 片道遅延推定値
+    double one_way_latency_ms;     // 片道レイテンシ推定値
     double proposed_delay; // 提案する遅延設定値
 };
 
@@ -57,11 +57,11 @@ struct FlowResult {
     std::array<ChSummary, MAX_SUB_CH> channels{};
     int    connected_count  = 0;
     int    measured_count   = 0;
-    double max_one_way_ms   = 0.0; // 基準(最大片道遅延)
+    double max_latency_ms   = 0.0; // 基準(最大片道レイテンシ)
 
     // Step3
-    double rtmp_one_way_ms  = 0.0;
-    double master_delay_ms  = 0.0; // = max_one_way + rtmp_one_way
+    double rtmp_latency_ms  = 0.0;
+    double master_delay_ms  = 0.0; // = max_latency + rtmp_latency
     bool   rtmp_valid       = false;
     std::string rtmp_error;
 };

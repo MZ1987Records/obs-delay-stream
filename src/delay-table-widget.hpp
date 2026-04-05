@@ -5,7 +5,7 @@
 // 遅延テーブルウィジェットに渡す1チャンネル分の情報。
 struct DelayTableChannelInfo {
     const char* name;         // メモ名 (空文字列可)
-    float measured_ms;        // 計測値・片道遅延。未計測は -1.0f
+    float measured_ms;        // 計測値・片道レイテンシ。未計測は -1.0f
     float base_ms;            // 基準遅延 (proposed_delay)
     float adjust_ms;          // 追加遅延 (adjust_ms)
     float global_ms;          // 全体オフセット (sub_offset_ms)

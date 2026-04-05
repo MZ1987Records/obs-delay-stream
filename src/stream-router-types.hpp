@@ -24,7 +24,7 @@ inline constexpr uint32_t MAGIC_OPUS = 0x4F505553u; // "OPUS"
 struct LatencyResult {
     bool   valid        = false;
     double avg_rtt_ms   = 0.0;
-    double avg_one_way  = 0.0;
+    double avg_latency_ms = 0.0;
     double min_rtt_ms   = 0.0;
     double max_rtt_ms   = 0.0;
     int    samples      = 0;  // 受信できたサンプル数（外れ値除外前）

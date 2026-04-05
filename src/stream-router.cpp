@@ -1139,7 +1139,7 @@ void StreamRouter::finalize_result(const std::string& sid, int ch) {
                 r.used_samples = cnt;
                 r.avg_rtt_ms   = (cnt > 0) ? sum / cnt : sorted[n/2];
             }
-            r.avg_one_way = r.avg_rtt_ms / 2.0;
+            r.avg_latency_ms = r.avg_rtt_ms / 2.0;
         } else {
             no_samples = true;
         }
@@ -1176,7 +1176,7 @@ std::string StreamRouter::format_latency_result_json(const LatencyResult& r) {
         "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
         "\"min\":%.1f,\"max\":%.1f,"
         "\"samples\":%d,\"used_samples\":%d,\"method\":\"%s\"}",
-        r.avg_rtt_ms, r.avg_one_way,
+        r.avg_rtt_ms, r.avg_latency_ms,
         r.min_rtt_ms, r.max_rtt_ms,
         r.samples, r.used_samples, r.method);
     return buf;

@@ -235,7 +235,7 @@ static void setup_event_callbacks(DelayStreamData* d) {
             ms.last_error = r.valid ? "" : T_("MeasureFailed");
         }
         if (should_apply) {
-            queue_ui_safe(d, [ch, ms_val = r.avg_one_way](DelayStreamData* d) {
+            queue_ui_safe(d, [ch, ms_val = r.avg_latency_ms](DelayStreamData* d) {
                 apply_sub_delay(d, ch, ms_val);
                 request_properties_refresh(d, "router.on_any_latency_result.apply");
             });
@@ -372,7 +372,7 @@ static obs_audio_data* ds_filter_audio(void* data, obs_audio_data* audio) {
 }
 
 // Button callbacks
-// 選択されたチャンネルの往復遅延測定を開始する。
+// 選択されたチャンネルの往復レイテンシ計測を開始する。
 static bool cb_sub_measure(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     auto* d = ctx->d; int i = ctx->ch;

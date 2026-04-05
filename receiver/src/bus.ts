@@ -27,7 +27,7 @@ export type AppEvents = {
   'ctrl:memo': { memo: unknown };
   /** ping 受信 — 計測進行 */
   'ctrl:ping': { count: number };
-  /** 遅延計測結果 */
+  /** レイテンシ計測結果 */
   'ctrl:latency': LatencyResultMessage;
   /** 遅延適用通知 */
   'ctrl:delay': { ms: number | string; reason: string };

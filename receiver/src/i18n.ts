@@ -23,7 +23,7 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         channel: 'CH',
         buffer: 'Buffer',
         codec: 'Codec',
-        latencyMeasure: '遅延計測'
+        latencyMeasure: 'レイテンシ計測'
       },
       button: {
         connect: '接続',
@@ -56,13 +56,13 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         disconnected: '切断されました',
         disconnectedByUser: '切断しました',
         resynced: '再同期しました',
-        measuring: '遅延計測中... ({{current}}/{{total}})'
+        measuring: 'レイテンシ計測中... ({{current}}/{{total}})'
       },
       latency: {
-        initialHint: '接続後、OBS側で遅延計測が開始されると、ここに結果が表示されます。',
+        initialHint: '接続後、OBS側でレイテンシ計測が開始されると、ここに結果が表示されます。',
         measuring: '計測中 ({{current}} / {{total}} ping)',
-        estimatedOneWay: '推定片道遅延 (RTT÷2)',
-        averageRoundTrip: '平均往復遅延 ({{label}})',
+        estimatedOneWay: '推定片道レイテンシ (RTT÷2)',
+        averageRoundTrip: '平均往復レイテンシ ({{label}})',
         minRtt: '最小RTT',
         maxRtt: '最大RTT',
         waitingApply: 'OBSが遅延設定を反映するまでお待ちください。',

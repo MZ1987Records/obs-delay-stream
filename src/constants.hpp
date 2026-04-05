@@ -10,7 +10,7 @@ static constexpr int   PLAYBACK_BUFFER_MIN_MS = 20;
 static constexpr int   PLAYBACK_BUFFER_MAX_MS = 500;
 static constexpr int   PLAYBACK_BUFFER_DEFAULT_MS = 120;
 
-// WebSocket遅延計測パラメータ
+// WebSocketレイテンシ計測パラメータ
 static constexpr int   DEFAULT_PING_COUNT = 30;
 static constexpr int   PING_INTV_MS    = 150;
 

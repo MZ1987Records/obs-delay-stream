@@ -51,7 +51,7 @@ void add_delay_summary_group(obs_properties_t* props, DelayStreamData* d) {
         const char* memo = settings ? obs_data_get_string(settings, memo_key.data()) : "";
         channels[i].name        = (memo && *memo) ? memo : "";
         channels[i].measured_ms = flow_res.channels[i].measured
-                                    ? (float)flow_res.channels[i].one_way_ms
+                                    ? (float)flow_res.channels[i].one_way_latency_ms
                                     : -1.0f;
         channels[i].base_ms     = d->sub[i].delay_ms;
         channels[i].adjust_ms   = d->sub[i].adjust_ms;

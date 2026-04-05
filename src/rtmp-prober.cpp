@@ -4,8 +4,8 @@
  * 計測ステップ:
  *   1. TCP SYN → SYN-ACK (TCP RTT)
  *   2. RTMP C0+C1 送信 → S0+S1 受信 (RTMP handshake RTT)
- *   3. 両者の平均を「ネットワーク往復遅延」とする
- *   4. ÷2 で片道遅延を推定
+ *   3. 両者の平均を「ネットワーク往復レイテンシ」とする
+ *   4. ÷2 で片道レイテンシを推定
  *   5. これを N回繰り返して平均・最大・最小を算出
  *
  * Windows (Winsock2) のみ対応。
@@ -230,7 +230,7 @@ void RtmpProber::probe_loop() {
         r.max_rtt_ms  = *std::max_element(samples.begin(), samples.end());
         r.avg_rtt_ms  = std::accumulate(samples.begin(), samples.end(), 0.0)
                         / r.samples;
-        r.avg_one_way = r.avg_rtt_ms / 2.0;
+        r.avg_latency_ms = r.avg_rtt_ms / 2.0;
 
         // ジッター (標準偏差)
         double sq_sum = 0;

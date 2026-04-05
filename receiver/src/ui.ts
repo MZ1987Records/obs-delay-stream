@@ -261,14 +261,14 @@ export function setDisconnectedUi(): void {
 }
 
 // ============================================================
-// 遅延計測UI
+// レイテンシ計測UI
 // ============================================================
 
 export function showMeasuring(n: number): void {
   const statusMsg = tr(
     'status.measuring',
     { current: n, total: state.pingTotal },
-    '遅延計測中... ({{current}}/{{total}})',
+    'レイテンシ計測中... ({{current}}/{{total}})',
     'Measuring latency... ({{current}}/{{total}})',
   );
   const measuringText = tr(
@@ -312,13 +312,13 @@ export function showLatencyResult(r: LatencyResultMessage): void {
   const estimatedOneWay = tr(
     'latency.estimatedOneWay',
     {},
-    '推定片道遅延 (RTT÷2)',
+    '推定片道レイテンシ (RTT÷2)',
     'Estimated one-way latency (RTT/2)',
   );
   const avgRoundTrip = tr(
     'latency.averageRoundTrip',
     { label: lbl },
-    '平均往復遅延 ({{label}})',
+    '平均往復レイテンシ ({{label}})',
     'Average round-trip latency ({{label}})',
   );
   const minRtt = tr('latency.minRtt', {}, '最小RTT', 'Min RTT');

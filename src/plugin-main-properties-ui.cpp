@@ -203,7 +203,7 @@ void add_flow_rtmp_measure_section(obs_properties_t* props, DelayStreamData* d) 
     char step3_result[512];
     if ((is_step3_done || is_complete) && res.rtmp_valid) {
         snprintf(step3_result, sizeof(step3_result), T_("FlowRtmpMeasureResultFmt"),
-                 res.rtmp_one_way_ms, res.max_one_way_ms, res.master_delay_ms);
+                 res.rtmp_latency_ms, res.max_latency_ms, res.master_delay_ms);
     } else {
         snprintf(step3_result, sizeof(step3_result), "%s", T_("FlowNone"));
     }

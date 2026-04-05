@@ -130,8 +130,8 @@ bool SyncFlow::start_step3(const std::string& rtmp_url) {
             std::lock_guard<std::mutex> lk(mtx_);
             if (r.valid) {
                 result_.rtmp_valid      = true;
-                result_.rtmp_one_way_ms = r.avg_one_way;
-                result_.master_delay_ms = result_.max_one_way_ms + r.avg_one_way;
+                result_.rtmp_latency_ms = r.avg_latency_ms;
+                result_.master_delay_ms = result_.max_latency_ms + r.avg_latency_ms;
                 should_auto_apply = true;
             } else {
                 result_.rtmp_valid = false;
@@ -182,7 +182,7 @@ void SyncFlow::on_ch_result(int i, LatencyResult r) {
         if (i < 0 || i >= active_ch_) return;
         auto& ch = result_.channels[i];
         ch.measured   = r.valid;
-        ch.one_way_ms = r.valid ? r.avg_one_way : 0.0;
+        ch.one_way_latency_ms = r.valid ? r.avg_latency_ms : 0.0;
         if (r.valid) ++result_.measured_count;
 
         if (--pending_count_ == 0) {
@@ -201,13 +201,13 @@ void SyncFlow::compute_proposals() {
     double max_ow = 0.0;
     for (int i = 0; i < active_ch_; ++i) {
         auto& ch = result_.channels[i];
-        if (ch.measured && ch.one_way_ms > max_ow)
-            max_ow = ch.one_way_ms;
+        if (ch.measured && ch.one_way_latency_ms > max_ow)
+            max_ow = ch.one_way_latency_ms;
     }
-    result_.max_one_way_ms = max_ow;
+    result_.max_latency_ms = max_ow;
 
     for (int i = 0; i < active_ch_; ++i) {
         auto& ch = result_.channels[i];
-        ch.proposed_delay = ch.measured ? (max_ow - ch.one_way_ms) : 0.0;
+        ch.proposed_delay = ch.measured ? (max_ow - ch.one_way_latency_ms) : 0.0;
     }
 }

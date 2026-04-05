@@ -5,7 +5,7 @@
  *
  * RTMPサーバーへの「計測専用」TCP接続を張り、
  * ハンドシェイク(C0+C1 → S0+S1+S2)のRTTから
- * ネットワーク片道遅延を推定する。
+ * ネットワーク片道レイテンシを推定する。
  *
  * 実際の配信接続には一切干渉しない。
  */
@@ -22,7 +22,7 @@
 struct RtmpProbeResult {
     bool   valid        = false;
     double avg_rtt_ms   = 0.0;   // 平均RTT (ms)
-    double avg_one_way  = 0.0;   // 推定片道遅延 = RTT/2
+    double avg_latency_ms = 0.0;  // 推定片道レイテンシ = RTT/2
     double min_rtt_ms   = 0.0;
     double max_rtt_ms   = 0.0;
     double jitter_ms    = 0.0;   // RTT標準偏差

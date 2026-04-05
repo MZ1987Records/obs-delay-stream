@@ -28,7 +28,7 @@ export const infoBuf = getRequiredElement<HTMLElement>('infoBuf');
 export const infoSR = getRequiredElement<HTMLElement>('infoSR');
 export const infoCH = getRequiredElement<HTMLElement>('infoCH');
 
-// 遅延計測
+// レイテンシ計測
 export const latencyCard = getRequiredElement<HTMLElement>('latencyCard');
 export const latencyContent = getRequiredElement<HTMLElement>('latencyContent');
 
