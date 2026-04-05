@@ -60,7 +60,7 @@ jobs:
       - name: Clone OBS Studio
         shell: pwsh
         run: |
-          if (-Not (Test-Path "third_party/obs-studio")) {
+          if (-Not (Test-Path "third_party/obs-studio/.git")) {
             git clone --filter=blob:none https://github.com/obsproject/obs-studio.git third_party/obs-studio
           }
           Set-Location third_party/obs-studio
