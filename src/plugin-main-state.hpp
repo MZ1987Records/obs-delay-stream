@@ -36,6 +36,14 @@ struct RtmpMeasureState {
 struct DelayStreamData;
 struct ChCtx { DelayStreamData* d; int ch; };
 
+enum class UpdateCheckStatus : int {
+    Unknown = 0,
+    Checking,
+    UpToDate,
+    UpdateAvailable,
+    Error,
+};
+
 struct DelayStreamData {
     obs_source_t* context      = nullptr;
     bool is_duplicate_instance = false;
@@ -76,6 +84,12 @@ struct DelayStreamData {
     std::atomic<bool> create_done{false};
     std::atomic<int> get_props_depth{0};
     std::atomic<int64_t> last_rendered_audio_sync_offset_ns{INT64_MIN};
+    std::atomic<int> update_check_status{(int)UpdateCheckStatus::Unknown};
+    std::atomic<bool> update_check_inflight{false};
+    std::mutex update_check_mtx;
+    std::string latest_release_version;
+    std::string latest_release_url;
+    std::string update_check_error;
     std::atomic<bool> sid_autofill_guard{false};
     std::atomic<bool> rtmp_url_auto{true};
     bool prev_stream_id_has_user_value = false;

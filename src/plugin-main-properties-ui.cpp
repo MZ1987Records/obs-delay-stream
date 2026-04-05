@@ -261,14 +261,18 @@ void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
                               "\n" + T_("FlowDisconnected") + disconnected_names;
     obs_properties_add_text(props, "flow_connected", status_text.c_str(), OBS_TEXT_INFO);
 
-    const bool flow_measuring = d->flow.busy();
+    const bool can_start_step1 =
+        (phase == FlowPhase::Idle) ||
+        (phase == FlowPhase::Step1_Done) ||
+        (phase == FlowPhase::Step3_Done) ||
+        (phase == FlowPhase::Complete);
     const ObsColorButtonSpec flow_measure_buttons[] = {
         {
             "flow_measure_start_btn",
             T_("FlowMeasureStartShort"),
             cb_flow_start,
             d,
-            (!flow_measuring && connected_count > 0),
+            (can_start_step1 && connected_count > 0),
             nullptr,
             nullptr,
         },
@@ -277,7 +281,7 @@ void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
             T_("FlowMeasureStopShort"),
             cb_flow_reset,
             d,
-            flow_measuring,
+            is_step1_measuring,
             nullptr,
             nullptr,
         },
@@ -348,6 +352,27 @@ void add_plugin_group(obs_properties_t* props, DelayStreamData* d) {
         "<a href=\"https://github.com/MZ1987Records/obs-delay-stream\">GitHub</a> | "
         "<a href=\"https://mz1987records.booth.pm/items/8134637\">Booth</a>");
     obs_property_text_set_info_word_wrap(about_p, false);
+
+    if (d->update_check_status.load(std::memory_order_acquire) ==
+        (int)UpdateCheckStatus::UpdateAvailable) {
+        std::string latest_version;
+        {
+            std::lock_guard<std::mutex> lk(d->update_check_mtx);
+            latest_version = d->latest_release_version;
+        }
+        if (!latest_version.empty()) {
+            char update_notice[512];
+            snprintf(update_notice, sizeof(update_notice),
+                T_("UpdateAvailableNoticeFmt"),
+                latest_version.c_str());
+            obs_property_t* update_notice_p = obs_properties_add_text(
+                grp,
+                "update_available_notice_top",
+                update_notice,
+                OBS_TEXT_INFO);
+            obs_property_text_set_info_word_wrap(update_notice_p, true);
+        }
+    }
 
     if (d->is_duplicate_instance) {
         obs_properties_add_text(

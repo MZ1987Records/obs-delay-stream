@@ -56,6 +56,7 @@ add_library(obs-delay-stream MODULE
   src/plugin-main-utils.cpp
   src/plugin-main-obs-services.cpp
   src/plugin-main-receiver-assets.cpp
+  src/plugin-main-release-check.cpp
   src/plugin-main-props-refresh.cpp
   src/plugin-main-config.cpp
   src/plugin-main-audio-processing.cpp
@@ -171,6 +172,7 @@ target_link_libraries(obs-delay-stream
   avutil
   swresample
   ws2_32
+  wininet
   mswsock
   iphlpapi
   psapi

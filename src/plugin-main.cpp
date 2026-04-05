@@ -30,6 +30,7 @@
 #include "plugin-main-obs-services.hpp"
 #include "plugin-main-props-refresh.hpp"
 #include "plugin-main-receiver-assets.hpp"
+#include "plugin-main-release-check.hpp"
 #include "plugin-main-config.hpp"
 #include "plugin-main-settings-helpers.hpp"
 #include "plugin-main-state.hpp"
@@ -133,6 +134,97 @@ static void schedule_audio_sync_check(
             request_properties_refresh(d, "audio_sync_offset_poll");
         }
         schedule_audio_sync_check(d, life_token_weak);
+    });
+}
+
+// 最新リリース確認をバックグラウンドで実行し、UIスレッドで結果を反映する。
+static void start_update_check_async(
+    DelayStreamData* d,
+    std::weak_ptr<std::atomic<bool>> life_token_weak)
+{
+    if (!d) return;
+    bool expected = false;
+    if (!d->update_check_inflight.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
+    d->update_check_status.store((int)UpdateCheckStatus::Checking, std::memory_order_release);
+
+    try {
+        std::thread([d, life_token_weak]() {
+            plugin_main_release_check::LatestReleaseInfo info;
+            const bool ok = plugin_main_release_check::fetch_latest_release_info(info);
+            // const bool has_update = true;
+            const bool has_update =
+                ok && plugin_main_release_check::is_newer_version(info.latest_version, PLUGIN_VERSION);
+
+            struct Ctx {
+                std::weak_ptr<std::atomic<bool>> life_token;
+                DelayStreamData* d;
+                bool ok = false;
+                bool has_update = false;
+                plugin_main_release_check::LatestReleaseInfo info;
+            };
+            auto* ctx = new Ctx{life_token_weak, d, ok, has_update, std::move(info)};
+            obs_queue_task(OBS_TASK_UI, [](void* p) {
+                auto* ctx = static_cast<Ctx*>(p);
+                auto life = ctx->life_token.lock();
+                if (life && life->load(std::memory_order_acquire)) {
+                    DelayStreamData* d = ctx->d;
+                    {
+                        std::lock_guard<std::mutex> lk(d->update_check_mtx);
+                        d->latest_release_version = ctx->info.latest_version;
+                        d->latest_release_url = ctx->info.release_url;
+                        d->update_check_error = ctx->info.error;
+                    }
+                    int status = (int)UpdateCheckStatus::Error;
+                    if (ctx->ok) {
+                        status = ctx->has_update
+                            ? (int)UpdateCheckStatus::UpdateAvailable
+                            : (int)UpdateCheckStatus::UpToDate;
+                    }
+                    const int prev = d->update_check_status.exchange(status, std::memory_order_acq_rel);
+                    d->update_check_inflight.store(false, std::memory_order_release);
+                    if (status == (int)UpdateCheckStatus::UpdateAvailable ||
+                        prev != status) {
+                        request_properties_refresh(d, "release_update_check");
+                    }
+                    if (ctx->ok) {
+                        blog(LOG_INFO,
+                             "[obs-delay-stream] update check done latest=v%s current=v%s has_update=%d",
+                             d->latest_release_version.c_str(),
+                             PLUGIN_VERSION,
+                             status == (int)UpdateCheckStatus::UpdateAvailable ? 1 : 0);
+                    } else {
+                        blog(LOG_WARNING,
+                             "[obs-delay-stream] update check failed: %s",
+                             d->update_check_error.c_str());
+                    }
+                }
+                delete ctx;
+            }, ctx, false);
+        }).detach();
+    } catch (...) {
+        d->update_check_inflight.store(false, std::memory_order_release);
+        d->update_check_status.store((int)UpdateCheckStatus::Error, std::memory_order_release);
+        request_properties_refresh(d, "release_update_check_spawn_error");
+    }
+}
+
+// 初回起動時と一定間隔で更新確認を行う。UIスレッドタイマーは軽量トリガーのみ。
+static void schedule_update_check(
+    DelayStreamData* d,
+    std::weak_ptr<std::atomic<bool>> life_token_weak,
+    bool immediate)
+{
+    constexpr int kInitialDelayMs = 1200;
+    constexpr int kIntervalMs = 6 * 60 * 60 * 1000;
+    const int delay = immediate ? kInitialDelayMs : kIntervalMs;
+    QTimer::singleShot(delay, qApp, [d, life_token_weak]() {
+        auto token = life_token_weak.lock();
+        if (!token || !token->load(std::memory_order_acquire)) return;
+        start_update_check_async(d, life_token_weak);
+        schedule_update_check(d, life_token_weak, false);
     });
 }
 
@@ -326,7 +418,9 @@ static void* ds_create(obs_data_t* settings, obs_source_t* source) {
     d->create_done.store(true);
     // 音声同期オフセット変化の定期チェックを UI スレッドで開始する。
     queue_ui_safe(d, [](DelayStreamData* dp) {
-        schedule_audio_sync_check(dp, std::weak_ptr<std::atomic<bool>>(dp->life_token));
+        auto life = std::weak_ptr<std::atomic<bool>>(dp->life_token);
+        schedule_audio_sync_check(dp, life);
+        schedule_update_check(dp, life, true);
     });
     blog(LOG_INFO, "[obs-delay-stream] ds_create complete");
     return d;
