@@ -12,6 +12,7 @@ obs_property_t* obs_properties_add_stepper(
     double def_val,
     int decimals,
     const char* suffix,
-    bool store_as_int = false);
+    bool store_as_int = false,
+    int max_input_chars = 7);
 
 void schedule_stepper_inject(obs_source_t* source);

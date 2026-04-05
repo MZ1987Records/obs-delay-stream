@@ -1,10 +1,10 @@
 #include "delay-table-widget.hpp"
+#include "focus-spin-box.hpp"
 #include "widget-inject-utils.hpp"
 #include "widget-payload-utils.hpp"
 
 #include <QAbstractScrollArea>
 #include <QApplication>
-#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFontMetrics>
 #include <QHBoxLayout>
@@ -143,9 +143,10 @@ public:
         auto* hlay = new QHBoxLayout();
         hlay->setContentsMargins(0, 0, 0, 0);
         hlay->setSpacing(4);
+        hlay->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
         auto* adj_label = new QLabel(labels.value(7), this);
-        adj_label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        adj_label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         hlay->addWidget(adj_label);
 
         auto* reset_btn = new QPushButton(QStringLiteral("Reset"), this);
@@ -160,16 +161,25 @@ public:
                 [this]() { spin_->setValue(0.0); });
         hlay->addWidget(reset_btn);
 
-        spin_ = new QDoubleSpinBox(this);
+        spin_ = new FocusSpinBox(this);
         spin_->setRange(-500.0, 500.0);   // SUB_ADJUST_MIN_MS .. SUB_ADJUST_MAX_MS
         spin_->setDecimals(0);
         spin_->setSuffix(QStringLiteral(" ms"));
         spin_->setSingleStep(1.0);
         spin_->setKeyboardTracking(false);
-        spin_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        spin_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         spin_->setStyleSheet(
             QStringLiteral("QAbstractSpinBox { padding-left: 4px; padding-right: 4px; }"));
-        hlay->addWidget(spin_, 1);
+        {
+            constexpr int kMaxInputChars = 7;
+            const QFontMetrics fm(spin_->font());
+            const QString probe(kMaxInputChars, QLatin1Char('0'));
+            const int text_w = fm.horizontalAdvance(probe);
+            const int suffix_w = fm.horizontalAdvance(QStringLiteral(" ms"));
+            constexpr int kSpinChromePx = 40; // up/down領域や枠、余白のぶん
+            spin_->setMaximumWidth(text_w + suffix_w + kSpinChromePx);
+        }
+        hlay->addWidget(spin_);
 
         const int delta_btn_w =
             QFontMetrics(font()).horizontalAdvance(QStringLiteral("+100")) + 8;
@@ -269,7 +279,7 @@ private:
     int             ch_count_    = 0;
     int             selected_ch_ = 0;
     QTableWidget*   table_       = nullptr;
-    QDoubleSpinBox* spin_        = nullptr;
+    FocusSpinBox*   spin_        = nullptr;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 #include "stepper-widget.hpp"
+#include "focus-spin-box.hpp"
 #include "widget-inject-utils.hpp"
 
 #include <QApplication>
-#include <QDoubleSpinBox>
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -31,6 +32,7 @@ public:
     StepperRow(obs_source_t *source, const char *key, double min_val,
                double max_val, double def_val, int decimals,
                const char *suffix, bool store_as_int = false,
+               int max_input_chars = 7,
                QWidget *parent = nullptr)
         : QWidget(parent),
           source_(source ? obs_source_get_ref(source) : nullptr),
@@ -41,6 +43,7 @@ public:
         auto *lay = new QHBoxLayout(this);
         lay->setContentsMargins(0, 0, 0, 0);
         lay->setSpacing(4);
+        lay->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
         reset_btn_ = new QPushButton(QStringLiteral("Reset"));
         reset_btn_->setStyleSheet(
@@ -52,7 +55,7 @@ public:
         }
         lay->addWidget(reset_btn_);
 
-        spin_ = new QDoubleSpinBox();
+        spin_ = new FocusSpinBox(this);
         spin_->setRange(min_val, max_val);
         spin_->setDecimals(decimals);
         if (suffix && *suffix)
@@ -62,8 +65,18 @@ public:
         spin_->setStyleSheet(QStringLiteral(
             "QAbstractSpinBox { padding-left: 4px; padding-right: 4px; }"));
         spin_->setMinimumWidth(0);
-        spin_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        lay->addWidget(spin_, 1);
+        spin_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        {
+            const int clamped_chars = std::max(1, max_input_chars);
+            const QFontMetrics fm(spin_->font());
+            const QString probe(clamped_chars, QLatin1Char('0'));
+            const int text_w = fm.horizontalAdvance(probe);
+            const int suffix_w =
+                (suffix && *suffix) ? fm.horizontalAdvance(QString::fromUtf8(suffix)) : 0;
+            constexpr int kSpinChromePx = 40; // up/down領域や枠、余白のぶん
+            spin_->setMaximumWidth(text_w + suffix_w + kSpinChromePx);
+        }
+        lay->addWidget(spin_);
 
         static constexpr int kDeltas[] = {-100, -10, 10, 100};
         const int delta_btn_w =
@@ -173,7 +186,7 @@ private:
     bool store_as_int_ = false;
     QPushButton *reset_btn_ = nullptr;
     std::vector<QPushButton *> delta_buttons_;
-    QDoubleSpinBox *spin_ = nullptr;
+    FocusSpinBox *spin_ = nullptr;
 };
 
 struct StepperInjectCtx {
@@ -242,11 +255,27 @@ void do_stepper_inject(void *param)
         const double def_val = fields[4].toDouble();
         const int decimals = fields[5].toInt();
         const QString suffix = fields[6];
-        const bool store_as_int =
-            (fields.size() >= 9 && fields[7] == QLatin1String("1"));
-        const QString row_label =
-            (fields.size() >= 9) ? fields.mid(8).join(QStringLiteral(" "))
-                                 : fields.mid(7).join(QStringLiteral(" "));
+        bool store_as_int = false;
+        int max_input_chars = 7;
+        QString row_label;
+        if (fields.size() >= 10) {
+            bool ok = false;
+            const int parsed_chars = fields[8].toInt(&ok);
+            if (ok) {
+                store_as_int = (fields[7] == QLatin1String("1"));
+                max_input_chars = std::max(1, parsed_chars);
+                row_label = fields.mid(9).join(QStringLiteral(" "));
+            } else {
+                // 旧フォーマット（...|store_as_int|label）互換
+                store_as_int = (fields[7] == QLatin1String("1"));
+                row_label = fields.mid(8).join(QStringLiteral(" "));
+            }
+        } else if (fields.size() >= 9) {
+            store_as_int = (fields[7] == QLatin1String("1"));
+            row_label = fields.mid(8).join(QStringLiteral(" "));
+        } else {
+            row_label = fields.mid(7).join(QStringLiteral(" "));
+        }
 
         QWidget *parent = ph.label->parentWidget();
         if (!parent)
@@ -263,7 +292,8 @@ void do_stepper_inject(void *param)
 
         auto *stepper = new StepperRow(
             ctx->source, key.toUtf8().constData(), min_val, max_val, def_val,
-            decimals, suffix.toUtf8().constData(), store_as_int, parent);
+            decimals, suffix.toUtf8().constData(), store_as_int,
+            max_input_chars, parent);
 
         form->removeRow(row);
         if (!row_label.isEmpty())
@@ -297,21 +327,24 @@ obs_property_t *obs_properties_add_stepper(obs_properties_t *props,
                                            double def_val,
                                            int decimals,
                                            const char *suffix,
-                                           bool store_as_int)
+                                           bool store_as_int,
+                                           int max_input_chars)
 {
+    const int clamped_chars = std::max(1, max_input_chars);
     const int len = std::snprintf(nullptr, 0,
-                                  "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%s",
+                                  "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%d|%s",
                                   setting_key, min_val, max_val, def_val,
                                   decimals, suffix ? suffix : "",
-                                  store_as_int ? 1 : 0, label ? label : "");
+                                  store_as_int ? 1 : 0, clamped_chars,
+                                  label ? label : "");
     if (len < 0)
         return nullptr;
 
     std::string buf(static_cast<size_t>(len) + 1, '\0');
     std::snprintf(buf.data(), buf.size(),
-                  "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%s", setting_key,
+                  "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%d|%s", setting_key,
                   min_val, max_val, def_val, decimals, suffix ? suffix : "",
-                  store_as_int ? 1 : 0, label ? label : "");
+                  store_as_int ? 1 : 0, clamped_chars, label ? label : "");
     return obs_properties_add_text(props, prop_name, buf.c_str(), OBS_TEXT_INFO);
 }
 
