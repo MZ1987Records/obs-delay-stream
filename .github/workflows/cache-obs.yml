@@ -60,11 +60,13 @@ jobs:
       - name: Clone OBS Studio
         shell: pwsh
         run: |
-          if (-Not (Test-Path "third_party/obs-studio/.git")) {
-            git clone --filter=blob:none https://github.com/obsproject/obs-studio.git third_party/obs-studio
-          }
+          New-Item -ItemType Directory -Force third_party/obs-studio | Out-Null
           Set-Location third_party/obs-studio
-          git fetch --tags origin
+          if (-Not (Test-Path ".git")) {
+            git init
+            git remote add origin https://github.com/obsproject/obs-studio.git
+          }
+          git fetch --filter=blob:none --tags origin
           git checkout --force $env:OBS_STUDIO_SHA
           git submodule update --init --recursive --depth 1
 
