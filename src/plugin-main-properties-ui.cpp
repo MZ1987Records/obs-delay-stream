@@ -5,6 +5,7 @@
 #include <mutex>
 
 #include "color-buttons-widget.hpp"
+#include "flow-progress-widget.hpp"
 #include "constants.hpp"
 #include "delay-table-widget.hpp"
 #include "plugin-main-config.hpp"
@@ -285,33 +286,36 @@ void build_flow_panel(obs_properties_t* props, DelayStreamData* d) {
         props, "flow_measure_controls_row", T_("FlowMeasureLabel"), flow_measure_buttons,
         sizeof(flow_measure_buttons) / sizeof(flow_measure_buttons[0]));
 
-    std::string step1_status_text;
     if (is_step1_measuring) {
-        char buf[256];
-        snprintf(buf, sizeof(buf), T_("FlowMeasureProgressFmt"),
-                 res.completed_count, res.connected_count);
-        step1_status_text = buf;
-    } else if (is_step1_done_or_later) {
-        step1_status_text = T_("FlowMeasureDoneApplied");
-        for (int i = 0; i < sub_count; ++i) {
-            if (!res.channels[i].connected) continue;
-            const auto memo_key = make_sub_memo_key(i);
-            const char* memo = s ? obs_data_get_string(s, memo_key.data()) : "";
-            std::string name = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
-            if (res.channels[i].measured) {
-                char line[192];
-                snprintf(line, sizeof(line), "\n  Ch.%d %s : %.1f ms",
-                         i + 1, name.c_str(), d->sub[i].delay_ms);
-                step1_status_text += line;
-            } else {
-                step1_status_text +=
-                    "\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
-            }
-        }
+        const int pct = (res.ping_total_count > 0)
+            ? res.ping_sent_count * 100 / res.ping_total_count
+            : 0;
+        obs_properties_add_flow_progress(props, "flow_s1_status",
+                                         T_("FlowMeasureProgressLabel"), pct);
     } else {
-        step1_status_text = T_("FlowNotMeasured");
+        std::string step1_status_text;
+        if (is_step1_done_or_later) {
+            step1_status_text = T_("FlowMeasureDoneApplied");
+            for (int i = 0; i < sub_count; ++i) {
+                if (!res.channels[i].connected) continue;
+                const auto memo_key = make_sub_memo_key(i);
+                const char* memo = s ? obs_data_get_string(s, memo_key.data()) : "";
+                std::string name = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
+                if (res.channels[i].measured) {
+                    char line[192];
+                    snprintf(line, sizeof(line), "\n  Ch.%d %s : %.1f ms",
+                             i + 1, name.c_str(), d->sub[i].delay_ms);
+                    step1_status_text += line;
+                } else {
+                    step1_status_text +=
+                        "\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
+                }
+            }
+        } else {
+            step1_status_text = T_("FlowNotMeasured");
+        }
+        obs_properties_add_text(props, "flow_s1_status", step1_status_text.c_str(), OBS_TEXT_INFO);
     }
-    obs_properties_add_text(props, "flow_s1_status", step1_status_text.c_str(), OBS_TEXT_INFO);
 
     auto* retry_failed_btn = obs_properties_add_button2(
         props, "flow_retry_btn", T_("FlowRetryFailed"), cb_flow_retry_failed, d);

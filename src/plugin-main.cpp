@@ -44,6 +44,7 @@
 #include "text-button-widget.hpp"
 #include "color-buttons-widget.hpp"
 #include "delay-table-widget.hpp"
+#include "flow-progress-widget.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-delay-stream", "ja-JP")
@@ -170,6 +171,13 @@ static const char* ds_get_name(void*) { return "obs-delay-stream"; }
 // UI 操作が必要な処理は queue_ui_safe() 経由で UI スレッドへ移譲する。
 static void setup_event_callbacks(DelayStreamData* d) {
     d->flow.on_update      = [d]() { request_properties_refresh(d, "flow.on_update"); };
+    d->flow.on_progress    = [d]() {
+        const FlowResult res = d->flow.result();
+        const int pct = res.ping_total_count > 0
+            ? res.ping_sent_count * 100 / res.ping_total_count
+            : 0;
+        update_flow_progress(d->context, pct);
+    };
     d->flow.on_ch_measured = [d](int, LatencyResult) {
         request_properties_refresh(d, "flow.on_ch_measured");
     };
@@ -249,6 +257,7 @@ static void setup_event_callbacks(DelayStreamData* d) {
 // コンポーネント停止後に呼ぶこと（競合なし）。
 static void clear_event_callbacks(DelayStreamData* d) {
     d->flow.on_update          = nullptr;
+    d->flow.on_progress        = nullptr;
     d->flow.on_ch_measured     = nullptr;
     d->flow.on_apply_master    = nullptr;
     d->flow.on_apply_sub_delays = nullptr;
@@ -334,6 +343,7 @@ static void ds_destroy(void* data) {
     }
     if (d->context) {
         plugin_main_props_refresh::props_refresh_block_source(d->context);
+        flow_progress_unregister_source(d->context);
     }
     bool        release_singleton_slot = d->owns_singleton_slot;
     obs_source_t* my_source            = d->context;
@@ -454,6 +464,7 @@ static obs_properties_t* ds_get_properties(void* data) {
         schedule_text_button_inject(d->context);
         schedule_color_button_row_inject(d->context);
         schedule_delay_table_inject(d->context);
+        schedule_flow_progress_inject(d->context);
     }
 
     return props;
