@@ -26,11 +26,13 @@ rem - OBS_CI: 1=CI mode (skip install and pause).
 rem - You can define KEY=VALUE entries in build.env. See build.env.sample.
 rem Options:
 rem - --receiver-only / --receiver / /receiver-only / /receiver : build and install receiver files only.
+rem - --clean / /clean : remove build directory before configure/build.
 
 set "OBS_SOURCE_DIR="
 set "OBS_LEGACY_INSTALL="
 set "OBS_CI="
 set "RECEIVER_ONLY=0"
+set "CLEAN_BUILD=0"
 set "ENV_FILE=%PLUGIN_DIR%\build.env"
 if exist "%ENV_FILE%" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
@@ -64,6 +66,16 @@ if /I "%~1"=="/receiver-only" (
 )
 if /I "%~1"=="/receiver" (
     set "RECEIVER_ONLY=1"
+    shift
+    goto :parse_args
+)
+if /I "%~1"=="--clean" (
+    set "CLEAN_BUILD=1"
+    shift
+    goto :parse_args
+)
+if /I "%~1"=="/clean" (
+    set "CLEAN_BUILD=1"
     shift
     goto :parse_args
 )
@@ -186,8 +198,10 @@ echo  [Step 2] Running CMake configure...
 echo ================================================================
 cd /d "%PLUGIN_DIR%"
 
-if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
-mkdir "%BUILD_DIR%"
+if "%CLEAN_BUILD%"=="1" (
+    if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
+)
+if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
 set OBS_PLUGIN_LEGACY_INSTALL=OFF
 if "%OBS_LEGACY_INSTALL%"=="1" set OBS_PLUGIN_LEGACY_INSTALL=ON
