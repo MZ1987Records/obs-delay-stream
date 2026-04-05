@@ -77,6 +77,8 @@ public:
     std::function<void(const std::string&, int, size_t)> on_conn_change;
     // 計測結果通知（sid, ch_0idx, result）
     std::function<void(const std::string&, int, LatencyResult)> on_any_latency_result;
+    // ping送信通知（sid, ch_0idx, seq）
+    std::function<void(const std::string&, int, int)> on_any_ping_sent;
 
     // ----- 起動 / 停止 -----
     bool start(uint16_t port);
@@ -103,7 +105,7 @@ public:
                     uint32_t sample_rate, uint32_t channels);
 
     // ----- RTT計測 (ch: 0-indexed) -----
-    bool          start_measurement(int ch, int num_pings = 10, int interval_ms = 150);
+    bool          start_measurement(int ch, int num_pings = 10, int interval_ms = 150, int start_delay_ms = 0);
     bool          is_measuring(int ch) const;
     LatencyResult last_result(int ch) const;
 
@@ -184,7 +186,7 @@ private:
     void on_http(ConnHandle h);
 
     void measure_loop(const std::string& sid, int ch,
-                      int num_pings, int interval_ms);
+                      int num_pings, int interval_ms, int start_delay_ms);
     void finalize_result(const std::string& sid, int ch);
     void broadcast_text(const std::string& sid, int ch, const std::string& msg);
 

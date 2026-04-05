@@ -33,7 +33,9 @@ FlowPhase SyncFlow::phase() const {
 
 FlowResult SyncFlow::result() const {
     std::lock_guard<std::mutex> lk(mtx_);
-    return result_;
+    FlowResult r = result_;
+    r.ping_sent_count = ping_sent_count_.load(std::memory_order_relaxed);
+    return r;
 }
 
 bool SyncFlow::busy() const {
@@ -63,6 +65,7 @@ bool SyncFlow::start_step1(StreamRouter& router, const std::string& stream_id) {
             result_.channels[i].measured  = false;
             if (result_.channels[i].connected) ++result_.connected_count;
         }
+        result_.ping_total_count = result_.connected_count * ping_count_;
     }
 
     if (result_.connected_count == 0) {
@@ -71,14 +74,21 @@ bool SyncFlow::start_step1(StreamRouter& router, const std::string& stream_id) {
         return false;
     }
 
+    router.on_any_ping_sent = [this](const std::string&, int, int) {
+        ++ping_sent_count_;
+        if (on_progress) on_progress();
+    };
+
     pending_count_ = result_.connected_count;
+    int ch_index = 0;
     for (int i = 0; i < active; ++i) {
         if (!result_.channels[i].connected) continue;
         router.set_on_latency_result(i,
             [this, i](const std::string&, int, LatencyResult r) {
                 on_ch_result(i, r);
             });
-        router.start_measurement(i, ping_count_, PING_INTV_MS);
+        router.start_measurement(i, ping_count_, PING_INTV_MS, ch_index * PING_INTV_MS);
+        ++ch_index;
     }
     if (on_update) on_update();
     return true;
@@ -101,10 +111,18 @@ bool SyncFlow::retry_failed_step1(StreamRouter& router) {
 
         // 進捗表示は「成功済み + 今回の再計測完了数」で更新する。
         result_.completed_count = result_.measured_count;
+        result_.ping_total_count = retry_count * ping_count_;
         phase_ = FlowPhase::Step1_Measuring;
     }
 
+    ping_sent_count_.store(0, std::memory_order_relaxed);
+    router.on_any_ping_sent = [this](const std::string&, int, int) {
+        ++ping_sent_count_;
+        if (on_progress) on_progress();
+    };
+
     pending_count_ = retry_count;
+    int ch_index = 0;
     for (int i = 0; i < active; ++i) {
         auto& ch = result_.channels[i];
         if (!ch.connected || ch.measured) continue;
@@ -112,7 +130,8 @@ bool SyncFlow::retry_failed_step1(StreamRouter& router) {
             [this, i](const std::string&, int, LatencyResult r) {
                 on_ch_result(i, r);
             });
-        router.start_measurement(i, ping_count_, PING_INTV_MS);
+        router.start_measurement(i, ping_count_, PING_INTV_MS, ch_index * PING_INTV_MS);
+        ++ch_index;
     }
     if (on_update) on_update();
     return true;
@@ -172,9 +191,10 @@ bool SyncFlow::apply_step3() {
 void SyncFlow::reset() {
     prober_.cancel();
     std::lock_guard<std::mutex> lk(mtx_);
-    phase_         = FlowPhase::Idle;
-    pending_count_ = 0;
-    result_        = FlowResult{};
+    phase_            = FlowPhase::Idle;
+    pending_count_    = 0;
+    ping_sent_count_  = 0;
+    result_           = FlowResult{};
 }
 
 // ============================================================

@@ -58,6 +58,8 @@ struct FlowResult {
     int    connected_count  = 0;
     int    completed_count  = 0; // 成功/失敗を問わず計測処理が完了した件数
     int    measured_count   = 0;
+    int    ping_sent_count  = 0; // 送信済みpingの合計数
+    int    ping_total_count = 0; // 予定ping総数（connected_count × ping_count）
     double max_latency_ms   = 0.0; // 基準(最大片道レイテンシ)
 
     // Step3
@@ -74,6 +76,8 @@ class SyncFlow {
 public:
     // GUI再描画要求コールバック
     std::function<void()>                      on_update;
+    // ping送信ごとの軽量進捗コールバック（プロパティ再構築不要な更新用）
+    std::function<void()>                      on_progress;
     // 各CH計測完了通知
     std::function<void(int ch, LatencyResult)> on_ch_measured;
     // マスター遅延書き込み要求
@@ -105,6 +109,7 @@ private:
     int                active_ch_     = MAX_SUB_CH;
     int                ping_count_    = DEFAULT_PING_COUNT;
     std::atomic<int>   pending_count_{0};
+    std::atomic<int>   ping_sent_count_{0};
     FlowResult         result_;
     RtmpProber         prober_;
 };

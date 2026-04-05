@@ -288,7 +288,7 @@ void StreamRouter::send_audio(int ch, const float* data, size_t frames,
 // RTT計測
 // ============================================================
 
-bool StreamRouter::start_measurement(int ch, int num_pings, int interval_ms) {
+bool StreamRouter::start_measurement(int ch, int num_pings, int interval_ms, int start_delay_ms) {
     std::string sid;
     {
         std::lock_guard<std::mutex> lk(mtx_);
@@ -303,8 +303,8 @@ bool StreamRouter::start_measurement(int ch, int num_pings, int interval_ms) {
 
     auto mt = std::make_unique<MeasureThread>();
     MeasureThread* mt_ptr = mt.get();
-    mt->th = std::thread([this, sid, ch, num_pings, interval_ms, mt_ptr]() {
-        measure_loop(sid, ch, num_pings, interval_ms);
+    mt->th = std::thread([this, sid, ch, num_pings, interval_ms, start_delay_ms, mt_ptr]() {
+        measure_loop(sid, ch, num_pings, interval_ms, start_delay_ms);
         mt_ptr->done.store(true, std::memory_order_release);
     });
     {
@@ -350,6 +350,7 @@ void StreamRouter::clear_callbacks() {
         kv.second.on_result = nullptr;
     on_conn_change = nullptr;
     on_any_latency_result = nullptr;
+    on_any_ping_sent = nullptr;
 }
 
 void StreamRouter::notify_apply_delay(int ch, double ms, const char* reason) {
@@ -1052,8 +1053,10 @@ void StreamRouter::on_http(ConnHandle h) {
 // ============================================================
 
 void StreamRouter::measure_loop(const std::string& sid, int ch,
-                                 int num_pings, int interval_ms)
+                                 int num_pings, int interval_ms, int start_delay_ms)
 {
+    for (int t = 0; t < start_delay_ms && running_; ++t)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     blog(LOG_INFO, "[obs-delay-stream] latency measure start: sid=%s ch=%d pings=%d",
          sid.c_str(), ch + 1, num_pings);
     for (int seq = 0; seq < num_pings; ++seq) {
@@ -1074,6 +1077,7 @@ void StreamRouter::measure_loop(const std::string& sid, int ch,
                 catch (...) {}
             }
         }
+        if (on_any_ping_sent) on_any_ping_sent(sid, ch, seq);
         for (int t = 0; t < interval_ms && running_; ++t)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
