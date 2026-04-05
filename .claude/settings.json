@@ -29,6 +29,7 @@
       "Bash(sort *)",
       "Bash(uniq *)",
       "Bash(pwd)",
+      "Bash(xargs grep *)",
       "Bash(cmake --build build *)",
       "Bash(npm run *)",
       "Bash(npx vite build *)",
