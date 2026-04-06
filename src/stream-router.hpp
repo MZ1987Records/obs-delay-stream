@@ -105,7 +105,7 @@ public:
                     uint32_t sample_rate, uint32_t channels);
 
     // ----- RTT計測 (ch: 0-indexed) -----
-    bool          start_measurement(int ch, int num_pings = 10, int interval_ms = 150, int start_delay_ms = 0);
+    bool          start_measurement(int ch, int num_pings = DEFAULT_PING_COUNT, int interval_ms = 150, int start_delay_ms = 0);
     bool          is_measuring(int ch) const;
     LatencyResult last_result(int ch) const;
 
