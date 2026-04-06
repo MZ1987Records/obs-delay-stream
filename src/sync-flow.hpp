@@ -7,10 +7,10 @@
  *
  * Step1: 接続中の全CHを並列計測（デフォルト DEFAULT_PING_COUNT 回 ping、UI で変更可）
  * Step2: （廃止）
- * Step3: RTMPレイテンシ計測 → マスター遅延 = パフォーマー最大レイテンシ + RTMP片道レイテンシ を算出・確認表示
+ * Step3: RTMPレイテンシ計測 → マスター遅延 = チャンネル最大レイテンシ + RTMP片道レイテンシ を算出・確認表示
  *
  * マスター遅延の設計:
- *   マスター遅延 = max_latency + rtmp_latency (パフォーマー最大レイテンシ + 配信レイテンシ)
+ *   マスター遅延 = max_latency + rtmp_latency (チャンネル最大レイテンシ + 配信レイテンシ)
  */
 
 #include <array>

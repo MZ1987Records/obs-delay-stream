@@ -86,9 +86,9 @@ public:
             hdr->setSectionResizeMode(0, QHeaderView::ResizeToContents); // Ch
             hdr->setSectionResizeMode(1, QHeaderView::Stretch);          // 名前
             hdr->setSectionResizeMode(2, QHeaderView::ResizeToContents); // 計測
-            hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents); // 基準
-            hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents); // 追加
-            hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents); // 全体
+            hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents); // ベース
+            hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents); // アジャスト
+            hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents); // 共通
             hdr->setSectionResizeMode(6, QHeaderView::ResizeToContents); // 合計
         }
 
@@ -138,7 +138,7 @@ public:
 
         vlay->addWidget(table_);
 
-        // ─── 選択チャンネルの追加遅延エディタ ─────────────────────────────
+        // ─── 選択チャンネルの「アジャスト」エディタ ─────────────────────────────
         // 順序は StepperRow に合わせる: [ラベル] [Reset] [Spin] [デルタボタン群]
         auto* hlay = new QHBoxLayout();
         hlay->setContentsMargins(0, 0, 0, 0);

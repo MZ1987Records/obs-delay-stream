@@ -29,7 +29,7 @@ std::string build_url_share_copy_text(const std::vector<UrlShareRow>& rows,
                                  : "-";
     std::string out;
     out.reserve(512);
-    out += "演者は各自、以下のURLをChromeで開いて音声ストリームを再生してください。\r\n"
+    out += "出演者は各自、以下のURLをChromeで開いて音声ストリームを再生してください。\r\n"
            "Each performer should open the following URL in Chrome and play the audio stream.\r\n"
            "\r\n";
     for (const auto& row : rows) {
