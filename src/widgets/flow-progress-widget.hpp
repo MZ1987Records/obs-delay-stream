@@ -10,12 +10,12 @@
 //   3. update_flow_progress() でプロパティ再構築なしに値を直接更新
 //   4. ソース破棄時に flow_progress_unregister_source() を呼ぶ
 
-obs_property_t* obs_properties_add_flow_progress(
-    obs_properties_t* props,
-    const char* prop_name,
-    const char* row_label,
-    int value);
+obs_property_t *obs_properties_add_flow_progress(
+	obs_properties_t *props,
+	const char       *prop_name,
+	const char       *row_label,
+	int               value);
 
-void schedule_flow_progress_inject(obs_source_t* source);
-void update_flow_progress(obs_source_t* source, int value);
-void flow_progress_unregister_source(obs_source_t* source);
+void schedule_flow_progress_inject(obs_source_t *source);
+void update_flow_progress(obs_source_t *source, int value);
+void flow_progress_unregister_source(obs_source_t *source);

@@ -4,284 +4,290 @@
 
 #include "network/stream-router.hpp"
 
-#include <obs-module.h>
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <numeric>
+#include <obs-module.h>
 
 // ============================================================
 // 起動 / 停止
 // ============================================================
 
 bool StreamRouter::start(uint16_t port) {
-    if (running_) return true;
-    port_ = port;
-    auto srv = std::make_shared<WsServer>();
-    try {
-        srv->set_error_channels(websocketpp::log::elevel::none);
-        srv->set_access_channels(websocketpp::log::alevel::none);
-        srv->init_asio();
-        srv->set_reuse_addr(true);
-        srv->set_open_handler([this](ConnHandle h) { on_open(h); });
-        srv->set_close_handler([this](ConnHandle h) { on_close(h); });
-        srv->set_message_handler([this](ConnHandle h, WsServer::message_ptr m) {
-            on_message(h, m);
-        });
-        srv->set_http_handler([this](ConnHandle h) { on_http(h); });
-        srv->listen(port_);
-        srv->start_accept();
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            server_ptr_ = srv;
-        }
-        thread_ = std::thread([srv]() { srv->run(); });
-        running_ = true;
-        return true;
-    } catch (...) {
-        std::lock_guard<std::mutex> lk(mtx_);
-        server_ptr_.reset();
-        return false;
-    }
+	if (running_) return true;
+	port_    = port;
+	auto srv = std::make_shared<WsServer>();
+	try {
+		srv->set_error_channels(websocketpp::log::elevel::none);
+		srv->set_access_channels(websocketpp::log::alevel::none);
+		srv->init_asio();
+		srv->set_reuse_addr(true);
+		srv->set_open_handler([this](ConnHandle h) { on_open(h); });
+		srv->set_close_handler([this](ConnHandle h) { on_close(h); });
+		srv->set_message_handler([this](ConnHandle h, WsServer::message_ptr m) {
+			on_message(h, m);
+		});
+		srv->set_http_handler([this](ConnHandle h) { on_http(h); });
+		srv->listen(port_);
+		srv->start_accept();
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			server_ptr_ = srv;
+		}
+		thread_  = std::thread([srv]() { srv->run(); });
+		running_ = true;
+		return true;
+	} catch (...) {
+		std::lock_guard<std::mutex> lk(mtx_);
+		server_ptr_.reset();
+		return false;
+	}
 }
 
 void StreamRouter::stop() {
-    if (!running_) return;
-    running_ = false;
+	if (!running_) return;
+	running_ = false;
 
-    // 1. 全計測スレッドの停止を要求
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        for (auto& kv : ch_map_)
-            kv.second.measuring = false;
-    }
+	// 1. 全計測スレッドの停止を要求
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		for (auto &kv : ch_map_)
+			kv.second.measuring = false;
+	}
 
-    // 2. 全計測スレッドを join
-    join_all_measure_threads();
+	// 2. 全計測スレッドを join
+	join_all_measure_threads();
 
-    // 3. ASIO サーバーを停止
-    std::shared_ptr<WsServer> srv;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        srv = server_ptr_;
-    }
-    if (srv) {
-        try { srv->stop_listening(); } catch (...) {}
-        try { srv->stop(); } catch (...) {}
-    }
-    if (thread_.joinable()) thread_.join();
+	// 3. ASIO サーバーを停止
+	std::shared_ptr<WsServer> srv;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		srv = server_ptr_;
+	}
+	if (srv) {
+		try {
+			srv->stop_listening();
+		} catch (...) {
+		}
+		try {
+			srv->stop();
+		} catch (...) {
+		}
+	}
+	if (thread_.joinable()) thread_.join();
 
-    // 4. 計測結果・適用遅延をキャッシュに退避してから状態をクリア
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        for (auto& [key, cs] : ch_map_) {
-            if (cs.last_result.valid || cs.last_applied_delay >= 0.0)
-                ch_cache_[key] = {
-                    cs.last_result,
-                    cs.last_applied_delay,
-                    cs.last_applied_reason
-                };
-        }
-        conn_map_.clear();
-        ch_map_.clear();
-        reset_opus_state();
-    }
+	// 4. 計測結果・適用遅延をキャッシュに退避してから状態をクリア
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		for (auto &[key, cs] : ch_map_) {
+			if (cs.last_result.valid || cs.last_applied_delay >= 0.0)
+				ch_cache_[key] = {
+					cs.last_result,
+					cs.last_applied_delay,
+					cs.last_applied_reason};
+		}
+		conn_map_.clear();
+		ch_map_.clear();
+		reset_opus_state();
+	}
 
-    // 5. サーバーオブジェクト破棄
-    std::lock_guard<std::mutex> lk(mtx_);
-    server_ptr_.reset();
+	// 5. サーバーオブジェクト破棄
+	std::lock_guard<std::mutex> lk(mtx_);
+	server_ptr_.reset();
 }
 
 // ============================================================
 // 配信ID / チャンネル設定
 // ============================================================
 
-void StreamRouter::set_stream_id(const std::string& id) {
-    std::lock_guard<std::mutex> lk(mtx_);
-    stream_id_ = sanitize_id(id);
+void StreamRouter::set_stream_id(const std::string &id) {
+	std::lock_guard<std::mutex> lk(mtx_);
+	stream_id_ = sanitize_id(id);
 }
 
 std::string StreamRouter::stream_id() const {
-    std::lock_guard<std::mutex> lk(mtx_);
-    return stream_id_;
+	std::lock_guard<std::mutex> lk(mtx_);
+	return stream_id_;
 }
 
 void StreamRouter::set_active_channels(int n) {
-    if (n < 1) n = 1;
-    if (n > MAX_SUB_CH) n = MAX_SUB_CH;
-    std::shared_ptr<WsServer> srv;
-    std::vector<ConnHandle> to_close;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        active_ch_max_ = n;
-        srv = server_ptr_;
-        for (auto& kv : conn_map_) {
-            if (kv.second.ch >= n) to_close.push_back(kv.first);
-        }
-    }
-    if (srv) {
-        for (auto& h : to_close) {
-            try {
-                srv->close(h, websocketpp::close::status::policy_violation,
-                           "ch_out_of_range");
-            } catch (...) {}
-        }
-    }
+	if (n < 1) n = 1;
+	if (n > MAX_SUB_CH) n = MAX_SUB_CH;
+	std::shared_ptr<WsServer> srv;
+	std::vector<ConnHandle>   to_close;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		active_ch_max_ = n;
+		srv            = server_ptr_;
+		for (auto &kv : conn_map_) {
+			if (kv.second.ch >= n) to_close.push_back(kv.first);
+		}
+	}
+	if (srv) {
+		for (auto &h : to_close) {
+			try {
+				srv->close(h, websocketpp::close::status::policy_violation, "ch_out_of_range");
+			} catch (...) {
+			}
+		}
+	}
 }
 
 int StreamRouter::active_channels() const {
-    std::lock_guard<std::mutex> lk(mtx_);
-    return active_ch_max_;
+	std::lock_guard<std::mutex> lk(mtx_);
+	return active_ch_max_;
 }
 
-void StreamRouter::set_sub_code(int ch, const std::string& code) {
-    if (ch < 0 || ch >= MAX_SUB_CH) return;
-    std::lock_guard<std::mutex> lk(mtx_);
-    sub_code_[ch] = code;
+void StreamRouter::set_sub_code(int ch, const std::string &code) {
+	if (ch < 0 || ch >= MAX_SUB_CH) return;
+	std::lock_guard<std::mutex> lk(mtx_);
+	sub_code_[ch] = code;
 }
 
 std::string StreamRouter::sub_code(int ch) const {
-    if (ch < 0 || ch >= MAX_SUB_CH) return "";
-    std::lock_guard<std::mutex> lk(mtx_);
-    return sub_code_[ch];
+	if (ch < 0 || ch >= MAX_SUB_CH) return "";
+	std::lock_guard<std::mutex> lk(mtx_);
+	return sub_code_[ch];
 }
 
-int StreamRouter::resolve_code(const std::string& code) const {
-    if (code.empty()) return -1;
-    std::lock_guard<std::mutex> lk(mtx_);
-    for (int i = 0; i < active_ch_max_; ++i) {
-        if (sub_code_[i] == code) return i;
-    }
-    return -1;
+int StreamRouter::resolve_code(const std::string &code) const {
+	if (code.empty()) return -1;
+	std::lock_guard<std::mutex> lk(mtx_);
+	for (int i = 0; i < active_ch_max_; ++i) {
+		if (sub_code_[i] == code) return i;
+	}
+	return -1;
 }
 
-void StreamRouter::set_sub_memo(int ch, const std::string& memo) {
-    if (ch < 0 || ch >= MAX_SUB_CH) return;
-    std::string sid;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        if (sub_memo_[ch] == memo) return;
-        sub_memo_[ch] = memo;
-        sid = stream_id_;
-    }
-    if (sid.empty()) return;
-    std::string msg = "{\"type\":\"memo\",\"ch\":" + std::to_string(ch + 1)
-                    + ",\"memo\":\"" + json_escape(memo) + "\"}";
-    broadcast_text(sid, ch, msg);
+void StreamRouter::set_sub_memo(int ch, const std::string &memo) {
+	if (ch < 0 || ch >= MAX_SUB_CH) return;
+	std::string sid;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		if (sub_memo_[ch] == memo) return;
+		sub_memo_[ch] = memo;
+		sid           = stream_id_;
+	}
+	if (sid.empty()) return;
+	std::string msg = "{\"type\":\"memo\",\"ch\":" + std::to_string(ch + 1) + ",\"memo\":\"" + json_escape(memo) + "\"}";
+	broadcast_text(sid, ch, msg);
 }
 
 // ============================================================
 // 音声送信
 // ============================================================
 
-void StreamRouter::send_audio(int ch, const float* data, size_t frames,
-                              uint32_t sample_rate, uint32_t channels)
-{
-    if (!running_) return;
-    if (opus_reset_pending_.exchange(false, std::memory_order_acq_rel)) {
-        reset_opus_state();
-    }
-    if (opus_flush_pending_.exchange(false, std::memory_order_acq_rel)) {
-        for (auto& enc : opus_) enc.flush_pending = true;
-    }
+void StreamRouter::send_audio(int ch, const float *data, size_t frames, uint32_t sample_rate, uint32_t channels) {
+	if (!running_) return;
+	if (opus_reset_pending_.exchange(false, std::memory_order_acq_rel)) {
+		reset_opus_state();
+	}
+	if (opus_flush_pending_.exchange(false, std::memory_order_acq_rel)) {
+		for (auto &enc : opus_)
+			enc.flush_pending = true;
+	}
 
-    std::vector<ConnHandle> targets_opus;
-    std::vector<ConnHandle> targets_pcm;
-    std::shared_ptr<WsServer> srv;
-    const int default_codec = audio_codec_.load(std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto* cs = find_ch(stream_id_, ch);
-        if (!cs || cs->conns.empty()) return;
-        for (auto& hdl : cs->conns) {
-            auto it = conn_map_.find(hdl);
-            if (it == conn_map_.end()) continue;
-            if (!it->second.force_pcm && default_codec == 0) {
-                targets_opus.push_back(hdl);
-            } else {
-                targets_pcm.push_back(hdl);
-            }
-        }
-        srv = server_ptr_;
-    }
-    if (!srv) return;
-    if (targets_opus.empty() && targets_pcm.empty()) return;
+	std::vector<ConnHandle>   targets_opus;
+	std::vector<ConnHandle>   targets_pcm;
+	std::shared_ptr<WsServer> srv;
+	const int                 default_codec = audio_codec_.load(std::memory_order_relaxed);
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		auto                       *cs = find_ch(stream_id_, ch);
+		if (!cs || cs->conns.empty()) return;
+		for (auto &hdl : cs->conns) {
+			auto it = conn_map_.find(hdl);
+			if (it == conn_map_.end()) continue;
+			if (!it->second.force_pcm && default_codec == 0) {
+				targets_opus.push_back(hdl);
+			} else {
+				targets_pcm.push_back(hdl);
+			}
+		}
+		srv = server_ptr_;
+	}
+	if (!srv) return;
+	if (targets_opus.empty() && targets_pcm.empty()) return;
 
-    // --- Opus 優先、失敗時 PCM（Opus対象のみ） ---
-    if (!targets_opus.empty() && default_codec == 0) {
-        std::vector<std::shared_ptr<std::string>> pkts;
-        if (encode_opus_packets(ch, data, frames, sample_rate, channels, pkts)) {
-            if (!pkts.empty()) {
-                try {
-                    srv->get_io_service().post([srv, targets = std::move(targets_opus),
-                                                pkts = std::move(pkts)]() mutable {
-                        for (auto& pkt : pkts) {
-                            for (auto& hdl : targets) {
-                                try { srv->send(hdl, *pkt, websocketpp::frame::opcode::binary); }
-                                catch (...) {}
-                            }
-                        }
-                    });
-                } catch (...) {}
-            }
-            if (targets_pcm.empty()) return;
-        } else {
-            // Opus失敗時は対象をPCMへ回す
-            targets_pcm.insert(targets_pcm.end(), targets_opus.begin(), targets_opus.end());
-        }
-    }
+	// --- Opus 優先、失敗時 PCM（Opus対象のみ） ---
+	if (!targets_opus.empty() && default_codec == 0) {
+		std::vector<std::shared_ptr<std::string>> pkts;
+		if (encode_opus_packets(ch, data, frames, sample_rate, channels, pkts)) {
+			if (!pkts.empty()) {
+				try {
+					srv->get_io_service().post([srv, targets = std::move(targets_opus), pkts = std::move(pkts)]() mutable {
+						for (auto &pkt : pkts) {
+							for (auto &hdl : targets) {
+								try {
+									srv->send(hdl, *pkt, websocketpp::frame::opcode::binary);
+								} catch (...) {
+								}
+							}
+						}
+					});
+				} catch (...) {
+				}
+			}
+			if (targets_pcm.empty()) return;
+		} else {
+			// Opus失敗時は対象をPCMへ回す
+			targets_pcm.insert(targets_pcm.end(), targets_opus.begin(), targets_opus.end());
+		}
+	}
 
-    if (targets_pcm.empty()) return;
+	if (targets_pcm.empty()) return;
 
-    const float* tx_data = data;
-    uint32_t tx_channels = channels;
-    std::vector<float> preprocessed;
-    preprocess_audio(data, frames, channels, tx_data, tx_channels, preprocessed);
+	const float       *tx_data     = data;
+	uint32_t           tx_channels = channels;
+	std::vector<float> preprocessed;
+	preprocess_audio(data, frames, channels, tx_data, tx_channels, preprocessed);
 
-    // PCM ダウンサンプリング
-    std::vector<float> downsampled;
-    size_t tx_frames = frames;
-    uint32_t tx_sample_rate = sample_rate;
-    {
-        const int ds = pcm_downsample_ratio_.load(std::memory_order_relaxed);
-        if (ds >= 2 && tx_frames >= (size_t)ds) {
-            downsample_pcm(tx_data, tx_frames, tx_channels, ds, downsampled, tx_frames);
-            tx_data = downsampled.data();
-            tx_sample_rate = sample_rate / (uint32_t)ds;
-        }
-    }
+	// PCM ダウンサンプリング
+	std::vector<float> downsampled;
+	size_t             tx_frames      = frames;
+	uint32_t           tx_sample_rate = sample_rate;
+	{
+		const int ds = pcm_downsample_ratio_.load(std::memory_order_relaxed);
+		if (ds >= 2 && tx_frames >= (size_t)ds) {
+			downsample_pcm(tx_data, tx_frames, tx_channels, ds, downsampled, tx_frames);
+			tx_data        = downsampled.data();
+			tx_sample_rate = sample_rate / (uint32_t)ds;
+		}
+	}
 
-    // パケットを構築（PCM）
-    size_t samples = tx_frames * tx_channels;
-    size_t pcm_bytes = samples * sizeof(int16_t);
-    auto pkt = std::make_shared<std::string>(16 + pcm_bytes, '\0');
-    uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
-    hdr[0] = MAGIC_AUDI;
-    hdr[1] = tx_sample_rate;
-    hdr[2] = tx_channels;
-    hdr[3] = static_cast<uint32_t>(tx_frames);
-    int16_t* dst = reinterpret_cast<int16_t*>(&(*pkt)[16]);
-    for (size_t i = 0; i < samples; ++i) {
-        float v = tx_data[i];
-        if (!std::isfinite(v)) v = 0.0f;
-        if (v > 1.0f) v = 1.0f;
-        if (v < -1.0f) v = -1.0f;
-        dst[i] = static_cast<int16_t>(std::lrintf(v * 32767.0f));
-    }
+	// パケットを構築（PCM）
+	size_t    samples   = tx_frames * tx_channels;
+	size_t    pcm_bytes = samples * sizeof(int16_t);
+	auto      pkt       = std::make_shared<std::string>(16 + pcm_bytes, '\0');
+	uint32_t *hdr       = reinterpret_cast<uint32_t *>(&(*pkt)[0]);
+	hdr[0]              = MAGIC_AUDI;
+	hdr[1]              = tx_sample_rate;
+	hdr[2]              = tx_channels;
+	hdr[3]              = static_cast<uint32_t>(tx_frames);
+	int16_t *dst        = reinterpret_cast<int16_t *>(&(*pkt)[16]);
+	for (size_t i = 0; i < samples; ++i) {
+		float v = tx_data[i];
+		if (!std::isfinite(v)) v = 0.0f;
+		if (v > 1.0f) v = 1.0f;
+		if (v < -1.0f) v = -1.0f;
+		dst[i] = static_cast<int16_t>(std::lrintf(v * 32767.0f));
+	}
 
-    // ASIO スレッドに送信を委譲（音声スレッドはブロックしない）
-    try {
-        srv->get_io_service().post([srv, targets = std::move(targets_pcm),
-                                    pkt = std::move(pkt)]() {
-            for (auto& hdl : targets) {
-                try { srv->send(hdl, *pkt, websocketpp::frame::opcode::binary); }
-                catch (...) {}
-            }
-        });
-    } catch (...) {}
+	// ASIO スレッドに送信を委譲（音声スレッドはブロックしない）
+	try {
+		srv->get_io_service().post([srv, targets = std::move(targets_pcm), pkt = std::move(pkt)]() {
+			for (auto &hdl : targets) {
+				try {
+					srv->send(hdl, *pkt, websocketpp::frame::opcode::binary);
+				} catch (...) {
+				}
+			}
+		});
+	} catch (...) {
+	}
 }
 
 // ============================================================
@@ -289,50 +295,49 @@ void StreamRouter::send_audio(int ch, const float* data, size_t frames,
 // ============================================================
 
 bool StreamRouter::start_measurement(int ch, int num_pings, int interval_ms, int start_delay_ms) {
-    std::string sid;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto* cs = find_ch(stream_id_, ch);
-        if (!cs || cs->conns.empty() || cs->measuring) return false;
+	std::string sid;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		auto                       *cs = find_ch(stream_id_, ch);
+		if (!cs || cs->conns.empty() || cs->measuring) return false;
 
-        cs->measuring = true;
-        cs->ping_times.clear();
-        cs->rtt_samples.clear();
-        sid = stream_id_;
-    }
+		cs->measuring = true;
+		cs->ping_times.clear();
+		cs->rtt_samples.clear();
+		sid = stream_id_;
+	}
 
-    auto mt = std::make_unique<MeasureThread>();
-    MeasureThread* mt_ptr = mt.get();
-    mt->th = std::thread([this, sid, ch, num_pings, interval_ms, start_delay_ms, mt_ptr]() {
-        measure_loop(sid, ch, num_pings, interval_ms, start_delay_ms);
-        mt_ptr->done.store(true, std::memory_order_release);
-    });
-    {
-        std::lock_guard<std::mutex> lk(measure_threads_mtx_);
-        measure_threads_.push_back(std::move(mt));
-    }
-    cleanup_done_measure_threads();
-    return true;
+	auto           mt     = std::make_unique<MeasureThread>();
+	MeasureThread *mt_ptr = mt.get();
+	mt->th                = std::thread([this, sid, ch, num_pings, interval_ms, start_delay_ms, mt_ptr]() {
+		measure_loop(sid, ch, num_pings, interval_ms, start_delay_ms);
+		mt_ptr->done.store(true, std::memory_order_release);
+	});
+	{
+		std::lock_guard<std::mutex> lk(measure_threads_mtx_);
+		measure_threads_.push_back(std::move(mt));
+	}
+	cleanup_done_measure_threads();
+	return true;
 }
 
 bool StreamRouter::is_measuring(int ch) const {
-    std::lock_guard<std::mutex> lk(mtx_);
-    auto* cs = find_ch(stream_id_, ch);
-    return cs ? cs->measuring.load() : false;
+	std::lock_guard<std::mutex> lk(mtx_);
+	auto                       *cs = find_ch(stream_id_, ch);
+	return cs ? cs->measuring.load() : false;
 }
 
 LatencyResult StreamRouter::last_result(int ch) const {
-    std::lock_guard<std::mutex> lk(mtx_);
-    auto* cs = find_ch(stream_id_, ch);
-    return cs ? cs->last_result : LatencyResult{};
+	std::lock_guard<std::mutex> lk(mtx_);
+	auto                       *cs = find_ch(stream_id_, ch);
+	return cs ? cs->last_result : LatencyResult{};
 }
 
-void StreamRouter::set_on_latency_result(int ch,
-    std::function<void(const std::string&, int, LatencyResult)> cb)
-{
-    std::lock_guard<std::mutex> lk(mtx_);
-    auto& cs = ch_map_[make_key(stream_id_, ch)];
-    cs.on_result = std::move(cb);
+void StreamRouter::set_on_latency_result(int                                                          ch,
+										 std::function<void(const std::string &, int, LatencyResult)> cb) {
+	std::lock_guard<std::mutex> lk(mtx_);
+	auto                       &cs = ch_map_[make_key(stream_id_, ch)];
+	cs.on_result                   = std::move(cb);
 }
 
 // ============================================================
@@ -340,355 +345,343 @@ void StreamRouter::set_on_latency_result(int ch,
 // ============================================================
 
 void StreamRouter::set_http_index_html(std::string html) {
-    std::lock_guard<std::mutex> lk(mtx_);
-    http_index_html_ = std::move(html);
+	std::lock_guard<std::mutex> lk(mtx_);
+	http_index_html_ = std::move(html);
 }
 
 void StreamRouter::clear_callbacks() {
-    std::lock_guard<std::mutex> lk(mtx_);
-    for (auto& kv : ch_map_)
-        kv.second.on_result = nullptr;
-    on_conn_change = nullptr;
-    on_any_latency_result = nullptr;
-    on_any_ping_sent = nullptr;
+	std::lock_guard<std::mutex> lk(mtx_);
+	for (auto &kv : ch_map_)
+		kv.second.on_result = nullptr;
+	on_conn_change        = nullptr;
+	on_any_latency_result = nullptr;
+	on_any_ping_sent      = nullptr;
 }
 
-void StreamRouter::notify_apply_delay(int ch, double ms, const char* reason) {
-    const char* use_reason = (reason && *reason) ? reason : "auto_measure";
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto& cs = ch_map_[make_key(stream_id_, ch)];
-        cs.last_applied_delay = ms;
-        cs.last_applied_reason = use_reason;
-    }
-    // 遅延変更 → Opus FIFO をフレーム境界でドレインしてからエンコーダ状態リセット
-    if (audio_codec_.load(std::memory_order_relaxed) == 0)
-        opus_flush_pending_.store(true, std::memory_order_release);
+void StreamRouter::notify_apply_delay(int ch, double ms, const char *reason) {
+	const char *use_reason = (reason && *reason) ? reason : "auto_measure";
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		auto                       &cs = ch_map_[make_key(stream_id_, ch)];
+		cs.last_applied_delay          = ms;
+		cs.last_applied_reason         = use_reason;
+	}
+	// 遅延変更 → Opus FIFO をフレーム境界でドレインしてからエンコーダ状態リセット
+	if (audio_codec_.load(std::memory_order_relaxed) == 0)
+		opus_flush_pending_.store(true, std::memory_order_release);
 
-    char buf[160];
-    snprintf(buf, sizeof(buf),
-             "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
-             ms, use_reason);
-    broadcast_text(stream_id_, ch, buf);
+	char buf[160];
+	snprintf(buf, sizeof(buf), "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}", ms, use_reason);
+	broadcast_text(stream_id_, ch, buf);
 }
 
 size_t StreamRouter::client_count(int ch) const {
-    std::lock_guard<std::mutex> lk(mtx_);
-    auto* cs = find_ch(stream_id_, ch);
-    return cs ? cs->conns.size() : 0;
+	std::lock_guard<std::mutex> lk(mtx_);
+	auto                       *cs = find_ch(stream_id_, ch);
+	return cs ? cs->conns.size() : 0;
 }
 
-std::string StreamRouter::make_url(const std::string& host, int ch_1indexed) const {
-    std::lock_guard<std::mutex> lk(mtx_);
-    int ch0 = ch_1indexed - 1;
-    std::string code_str;
-    if (ch0 >= 0 && ch0 < MAX_SUB_CH) code_str = sub_code_[ch0];
-    if (code_str.empty()) code_str = "(code未設定)";
-    char buf[256];
-    snprintf(buf, sizeof(buf), "ws://%s:%d/%s/%s",
-             host.c_str(), (int)port_,
-             stream_id_.empty() ? "(配信ID未設定)" : stream_id_.c_str(),
-             code_str.c_str());
-    return buf;
+std::string StreamRouter::make_url(const std::string &host, int ch_1indexed) const {
+	std::lock_guard<std::mutex> lk(mtx_);
+	int                         ch0 = ch_1indexed - 1;
+	std::string                 code_str;
+	if (ch0 >= 0 && ch0 < MAX_SUB_CH) code_str = sub_code_[ch0];
+	if (code_str.empty()) code_str = "(code未設定)";
+	char buf[256];
+	snprintf(buf, sizeof(buf), "ws://%s:%d/%s/%s", host.c_str(), (int)port_, stream_id_.empty() ? "(配信ID未設定)" : stream_id_.c_str(), code_str.c_str());
+	return buf;
 }
 
-void StreamRouter::set_audio_config(const AudioConfig& cfg) {
-    int mode = cfg.audio_codec_mode;
-    if (mode != 0 && mode != 1) mode = 0;
+void StreamRouter::set_audio_config(const AudioConfig &cfg) {
+	int mode = cfg.audio_codec_mode;
+	if (mode != 0 && mode != 1) mode = 0;
 
-    int bitrate_kbps = cfg.opus_bitrate_kbps;
-    if (bitrate_kbps < 6) bitrate_kbps = 6;
-    if (bitrate_kbps > 510) bitrate_kbps = 510;
+	int bitrate_kbps = cfg.opus_bitrate_kbps;
+	if (bitrate_kbps < 6) bitrate_kbps = 6;
+	if (bitrate_kbps > 510) bitrate_kbps = 510;
 
-    int target_sample_rate = cfg.opus_target_sample_rate;
-    if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 0;
+	int target_sample_rate = cfg.opus_target_sample_rate;
+	if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 0;
 
-    int quantization_bits = cfg.quantization_bits;
-    if (quantization_bits != 8 && quantization_bits != 16) quantization_bits = 16;
+	int quantization_bits = cfg.quantization_bits;
+	if (quantization_bits != 8 && quantization_bits != 16) quantization_bits = 16;
 
-    int downsample_ratio = cfg.pcm_downsample_ratio;
-    if (!is_valid_pcm_downsample_ratio(downsample_ratio)) downsample_ratio = 1;
+	int downsample_ratio = cfg.pcm_downsample_ratio;
+	if (!is_valid_pcm_downsample_ratio(downsample_ratio)) downsample_ratio = 1;
 
-    int playback_ms = cfg.playback_buffer_ms;
-    if (playback_ms < PLAYBACK_BUFFER_MIN_MS) playback_ms = PLAYBACK_BUFFER_MIN_MS;
-    if (playback_ms > PLAYBACK_BUFFER_MAX_MS) playback_ms = PLAYBACK_BUFFER_MAX_MS;
+	int playback_ms = cfg.playback_buffer_ms;
+	if (playback_ms < PLAYBACK_BUFFER_MIN_MS) playback_ms = PLAYBACK_BUFFER_MIN_MS;
+	if (playback_ms > PLAYBACK_BUFFER_MAX_MS) playback_ms = PLAYBACK_BUFFER_MAX_MS;
 
-    bool reset_opus = false;
-    if (audio_codec_.exchange(mode, std::memory_order_relaxed) != mode) reset_opus = true;
-    if (opus_bitrate_kbps_.exchange(bitrate_kbps, std::memory_order_relaxed) != bitrate_kbps) {
-        reset_opus = true;
-    }
-    if (opus_target_sample_rate_.exchange(target_sample_rate, std::memory_order_relaxed) != target_sample_rate) {
-        reset_opus = true;
-    }
-    audio_quantization_bits_.store(quantization_bits, std::memory_order_relaxed);
-    if (audio_mono_.exchange(cfg.mono, std::memory_order_relaxed) != cfg.mono) {
-        reset_opus = true;
-    }
-    pcm_downsample_ratio_.store(downsample_ratio, std::memory_order_relaxed);
+	bool reset_opus = false;
+	if (audio_codec_.exchange(mode, std::memory_order_relaxed) != mode) reset_opus = true;
+	if (opus_bitrate_kbps_.exchange(bitrate_kbps, std::memory_order_relaxed) != bitrate_kbps) {
+		reset_opus = true;
+	}
+	if (opus_target_sample_rate_.exchange(target_sample_rate, std::memory_order_relaxed) != target_sample_rate) {
+		reset_opus = true;
+	}
+	audio_quantization_bits_.store(quantization_bits, std::memory_order_relaxed);
+	if (audio_mono_.exchange(cfg.mono, std::memory_order_relaxed) != cfg.mono) {
+		reset_opus = true;
+	}
+	pcm_downsample_ratio_.store(downsample_ratio, std::memory_order_relaxed);
 
-    int prev_playback_ms = playback_buffer_ms_.exchange(playback_ms, std::memory_order_relaxed);
-    if (reset_opus) {
-        opus_reset_pending_.store(true, std::memory_order_release);
-    }
-    if (prev_playback_ms == playback_ms) return;
+	int prev_playback_ms = playback_buffer_ms_.exchange(playback_ms, std::memory_order_relaxed);
+	if (reset_opus) {
+		opus_reset_pending_.store(true, std::memory_order_release);
+	}
+	if (prev_playback_ms == playback_ms) return;
 
-    // デバウンス: 値が安定するまで送信を遅延（スライダードラッグ中の連打を間引く）
-    pb_debounce_seq_.fetch_add(1, std::memory_order_relaxed);
-    bool expected = false;
-    if (!pb_debounce_running_.compare_exchange_strong(expected, true))
-        return; // 既にデバウンスタイマー稼働中
-    std::thread([this]() {
-        uint64_t snap = 0;
-        do {
-            snap = pb_debounce_seq_.load(std::memory_order_relaxed);
-            std::this_thread::sleep_for(std::chrono::milliseconds(150));
-        } while (snap != pb_debounce_seq_.load(std::memory_order_relaxed)
-                 && running_.load(std::memory_order_relaxed));
-        pb_debounce_running_.store(false, std::memory_order_relaxed);
-        if (!running_.load(std::memory_order_relaxed)) return;
+	// デバウンス: 値が安定するまで送信を遅延（スライダードラッグ中の連打を間引く）
+	pb_debounce_seq_.fetch_add(1, std::memory_order_relaxed);
+	bool expected = false;
+	if (!pb_debounce_running_.compare_exchange_strong(expected, true))
+		return; // 既にデバウンスタイマー稼働中
+	std::thread([this]() {
+		uint64_t snap = 0;
+		do {
+			snap = pb_debounce_seq_.load(std::memory_order_relaxed);
+			std::this_thread::sleep_for(std::chrono::milliseconds(150));
+		} while (snap != pb_debounce_seq_.load(std::memory_order_relaxed) && running_.load(std::memory_order_relaxed));
+		pb_debounce_running_.store(false, std::memory_order_relaxed);
+		if (!running_.load(std::memory_order_relaxed)) return;
 
-        int cur = playback_buffer_ms_.load(std::memory_order_relaxed);
-        std::string sid;
-        int active = 0;
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            sid = stream_id_;
-            active = active_ch_max_;
-        }
-        if (sid.empty() || active <= 0) return;
-        const std::string msg =
-            "{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(cur) + "}";
-        for (int ch = 0; ch < active; ++ch)
-            broadcast_text(sid, ch, msg);
-    }).detach();
+		int         cur = playback_buffer_ms_.load(std::memory_order_relaxed);
+		std::string sid;
+		int         active = 0;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			sid    = stream_id_;
+			active = active_ch_max_;
+		}
+		if (sid.empty() || active <= 0) return;
+		const std::string msg =
+			"{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(cur) + "}";
+		for (int ch = 0; ch < active; ++ch)
+			broadcast_text(sid, ch, msg);
+	}).detach();
 }
 
 void StreamRouter::set_http_root_dir(std::string dir) {
-    std::lock_guard<std::mutex> lk(mtx_);
-    http_root_dir_ = std::move(dir);
+	std::lock_guard<std::mutex> lk(mtx_);
+	http_root_dir_ = std::move(dir);
 }
 
 // ============================================================
 // private: static ヘルパー (websocket_server_detail への委譲)
 // ============================================================
 
-std::string StreamRouter::make_key(const std::string& sid, int ch) {
-    return websocket_server_detail::make_key(sid, ch);
+std::string StreamRouter::make_key(const std::string &sid, int ch) {
+	return websocket_server_detail::make_key(sid, ch);
 }
-std::string StreamRouter::sanitize_id(const std::string& raw) {
-    return websocket_server_detail::sanitize_id(raw);
+std::string StreamRouter::sanitize_id(const std::string &raw) {
+	return websocket_server_detail::sanitize_id(raw);
 }
-std::string StreamRouter::json_escape(const std::string& s) {
-    return websocket_server_detail::json_escape(s);
+std::string StreamRouter::json_escape(const std::string &s) {
+	return websocket_server_detail::json_escape(s);
 }
-std::string StreamRouter::url_decode(const std::string& s) {
-    return websocket_server_detail::url_decode(s);
+std::string StreamRouter::url_decode(const std::string &s) {
+	return websocket_server_detail::url_decode(s);
 }
 websocket_server_detail::PathParseResult StreamRouter::parse_path_code(
-    const std::string& path, std::string& stream_id, std::string& code)
-{
-    return websocket_server_detail::parse_path_code(path, stream_id, code);
+	const std::string &path,
+	std::string       &stream_id,
+	std::string       &code) {
+	return websocket_server_detail::parse_path_code(path, stream_id, code);
 }
-bool StreamRouter::is_safe_rel_path(const std::string& rel) {
-    return websocket_server_detail::is_safe_rel_path(rel);
+bool StreamRouter::is_safe_rel_path(const std::string &rel) {
+	return websocket_server_detail::is_safe_rel_path(rel);
 }
-std::string StreamRouter::join_path(const std::string& base, const std::string& rel) {
-    return websocket_server_detail::join_path(base, rel);
+std::string StreamRouter::join_path(const std::string &base, const std::string &rel) {
+	return websocket_server_detail::join_path(base, rel);
 }
-bool StreamRouter::read_file_to_string(const std::string& path, std::string& out) {
-    return websocket_server_detail::read_file_to_string(path, out);
+bool StreamRouter::read_file_to_string(const std::string &path, std::string &out) {
+	return websocket_server_detail::read_file_to_string(path, out);
 }
-const char* StreamRouter::guess_content_type(const std::string& path) {
-    return websocket_server_detail::guess_content_type(path);
+const char *StreamRouter::guess_content_type(const std::string &path) {
+	return websocket_server_detail::guess_content_type(path);
 }
 bool StreamRouter::is_valid_opus_sample_rate(int sample_rate) {
-    return websocket_server_detail::is_valid_opus_sample_rate(sample_rate);
+	return websocket_server_detail::is_valid_opus_sample_rate(sample_rate);
 }
 bool StreamRouter::is_valid_pcm_downsample_ratio(int r) {
-    return websocket_server_detail::is_valid_pcm_downsample_ratio(r);
+	return websocket_server_detail::is_valid_pcm_downsample_ratio(r);
 }
 
 // ============================================================
 // private: 音声処理
 // ============================================================
 
-void StreamRouter::downsample_pcm(const float* in, size_t in_frames, uint32_t channels,
-                                   int factor, std::vector<float>& out, size_t& out_frames)
-{
-    auto decimate2 = [channels](const float* src, size_t n_in, std::vector<float>& dst) {
-        const size_t n_out = n_in / 2;
-        dst.resize(n_out * channels);
-        for (size_t f = 0; f < n_out; ++f) {
-            for (uint32_t c = 0; c < channels; ++c) {
-                const float prev = src[(f > 0 ? f * 2 - 1 : 0) * channels + c];
-                const float curr = src[ f * 2          * channels + c];
-                const float next = src[(f * 2 + 1)     * channels + c];
-                dst[f * channels + c] = 0.25f * prev + 0.5f * curr + 0.25f * next;
-            }
-        }
-    };
+void StreamRouter::downsample_pcm(const float *in, size_t in_frames, uint32_t channels, int factor, std::vector<float> &out, size_t &out_frames) {
+	auto decimate2 = [channels](const float *src, size_t n_in, std::vector<float> &dst) {
+		const size_t n_out = n_in / 2;
+		dst.resize(n_out * channels);
+		for (size_t f = 0; f < n_out; ++f) {
+			for (uint32_t c = 0; c < channels; ++c) {
+				const float prev      = src[(f > 0 ? f * 2 - 1 : 0) * channels + c];
+				const float curr      = src[f * 2 * channels + c];
+				const float next      = src[(f * 2 + 1) * channels + c];
+				dst[f * channels + c] = 0.25f * prev + 0.5f * curr + 0.25f * next;
+			}
+		}
+	};
 
-    if (factor == 4) {
-        std::vector<float> tmp;
-        decimate2(in, in_frames, tmp);
-        decimate2(tmp.data(), in_frames / 2, out);
-        out_frames = in_frames / 4;
-    } else { // factor == 2
-        decimate2(in, in_frames, out);
-        out_frames = in_frames / 2;
-    }
+	if (factor == 4) {
+		std::vector<float> tmp;
+		decimate2(in, in_frames, tmp);
+		decimate2(tmp.data(), in_frames / 2, out);
+		out_frames = in_frames / 4;
+	} else { // factor == 2
+		decimate2(in, in_frames, out);
+		out_frames = in_frames / 2;
+	}
 }
 
 float StreamRouter::quantize_sample(float v, int bits) {
-    if (!std::isfinite(v)) v = 0.0f;
-    if (v > 1.0f) v = 1.0f;
-    if (v < -1.0f) v = -1.0f;
-    if (bits >= 16) return v;
-    int scale = (1 << (bits - 1)) - 1;
-    if (scale <= 0) return v;
-    return std::round(v * (float)scale) / (float)scale;
+	if (!std::isfinite(v)) v = 0.0f;
+	if (v > 1.0f) v = 1.0f;
+	if (v < -1.0f) v = -1.0f;
+	if (bits >= 16) return v;
+	int scale = (1 << (bits - 1)) - 1;
+	if (scale <= 0) return v;
+	return std::round(v * (float)scale) / (float)scale;
 }
 
-void StreamRouter::preprocess_audio(const float* in_data, size_t frames, uint32_t in_channels,
-                                     const float*& out_data, uint32_t& out_channels,
-                                     std::vector<float>& work)
-{
-    out_data = in_data;
-    out_channels = in_channels;
-    work.clear();
-    if (!in_data || frames == 0 || in_channels == 0) return;
+void StreamRouter::preprocess_audio(const float *in_data, size_t frames, uint32_t in_channels, const float *&out_data, uint32_t &out_channels, std::vector<float> &work) {
+	out_data     = in_data;
+	out_channels = in_channels;
+	work.clear();
+	if (!in_data || frames == 0 || in_channels == 0) return;
 
-    const bool use_mono  = audio_mono_.load(std::memory_order_relaxed) && in_channels > 1;
-    const int  quant_bits = audio_quantization_bits_.load(std::memory_order_relaxed);
-    const bool use_quant  = (quant_bits == 8);
+	const bool use_mono   = audio_mono_.load(std::memory_order_relaxed) && in_channels > 1;
+	const int  quant_bits = audio_quantization_bits_.load(std::memory_order_relaxed);
+	const bool use_quant  = (quant_bits == 8);
 
-    if (!use_mono && !use_quant) return;
+	if (!use_mono && !use_quant) return;
 
-    if (use_mono) {
-        out_channels = 1;
-        work.resize(frames);
-        for (size_t f = 0; f < frames; ++f) {
-            float sum = 0.0f;
-            for (uint32_t c = 0; c < in_channels; ++c)
-                sum += in_data[f * in_channels + c];
-            float v = sum / (float)in_channels;
-            work[f] = use_quant ? quantize_sample(v, quant_bits) : quantize_sample(v, 16);
-        }
-        out_data = work.data();
-        return;
-    }
+	if (use_mono) {
+		out_channels = 1;
+		work.resize(frames);
+		for (size_t f = 0; f < frames; ++f) {
+			float sum = 0.0f;
+			for (uint32_t c = 0; c < in_channels; ++c)
+				sum += in_data[f * in_channels + c];
+			float v = sum / (float)in_channels;
+			work[f] = use_quant ? quantize_sample(v, quant_bits) : quantize_sample(v, 16);
+		}
+		out_data = work.data();
+		return;
+	}
 
-    const size_t samples = frames * in_channels;
-    work.resize(samples);
-    for (size_t i = 0; i < samples; ++i)
-        work[i] = quantize_sample(in_data[i], quant_bits);
-    out_data = work.data();
+	const size_t samples = frames * in_channels;
+	work.resize(samples);
+	for (size_t i = 0; i < samples; ++i)
+		work[i] = quantize_sample(in_data[i], quant_bits);
+	out_data = work.data();
 }
 
 bool StreamRouter::ensure_opus_encoder(int ch, uint32_t sample_rate, uint32_t channels) {
-    if (ch < 0 || channels == 0 || sample_rate == 0) return false;
-    if ((size_t)(ch + 1) > opus_.size()) opus_.resize(ch + 1);
-    OpusEnc& enc = opus_[ch];
-    if (enc.disabled) return false;
-    int bitrate = opus_bitrate_kbps_.load(std::memory_order_relaxed);
-    int target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
-    if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 48000;
-    int output_sample_rate = target_sample_rate;
-    if (enc.ctx &&
-        enc.input_sample_rate  == (int)sample_rate &&
-        enc.output_sample_rate == output_sample_rate &&
-        enc.channels           == (int)channels &&
-        enc.bitrate_kbps       == bitrate &&
-        enc.complexity         == 10) {
-        return true;
-    }
-    return enc.init((int)sample_rate, (int)channels, bitrate, target_sample_rate);
+	if (ch < 0 || channels == 0 || sample_rate == 0) return false;
+	if ((size_t)(ch + 1) > opus_.size()) opus_.resize(ch + 1);
+	OpusEnc &enc = opus_[ch];
+	if (enc.disabled) return false;
+	int bitrate            = opus_bitrate_kbps_.load(std::memory_order_relaxed);
+	int target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
+	if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 48000;
+	int output_sample_rate = target_sample_rate;
+	if (enc.ctx &&
+		enc.input_sample_rate == (int)sample_rate &&
+		enc.output_sample_rate == output_sample_rate &&
+		enc.channels == (int)channels &&
+		enc.bitrate_kbps == bitrate &&
+		enc.complexity == 10) {
+		return true;
+	}
+	return enc.init((int)sample_rate, (int)channels, bitrate, target_sample_rate);
 }
 
 void StreamRouter::reset_opus_state() {
-    for (auto& enc : opus_) enc.reset();
-    opus_.clear();
+	for (auto &enc : opus_)
+		enc.reset();
+	opus_.clear();
 }
 
-bool StreamRouter::encode_opus_packets(int ch, const float* data, size_t frames,
-                                        uint32_t sample_rate, uint32_t channels,
-                                        std::vector<std::shared_ptr<std::string>>& out)
-{
-    if (!ensure_opus_encoder(ch, sample_rate, channels)) return false;
-    OpusEnc& enc = opus_[ch];
-    if (!enc.ctx || enc.disabled || !enc.fifo) return false;
+bool StreamRouter::encode_opus_packets(int ch, const float *data, size_t frames, uint32_t sample_rate, uint32_t channels, std::vector<std::shared_ptr<std::string>> &out) {
+	if (!ensure_opus_encoder(ch, sample_rate, channels)) return false;
+	OpusEnc &enc = opus_[ch];
+	if (!enc.ctx || enc.disabled || !enc.fifo) return false;
 
-    // 遅延変更に伴うフラッシュ: 完全フレームを吐き切ってからエンコーダ状態リセット
-    if (enc.flush_pending) {
-        enc.flush_pending = false;
-        if (!enc.drain(MAGIC_OPUS, out)) {
-            enc.disabled = true;
-            return false;
-        }
-    }
+	// 遅延変更に伴うフラッシュ: 完全フレームを吐き切ってからエンコーダ状態リセット
+	if (enc.flush_pending) {
+		enc.flush_pending = false;
+		if (!enc.drain(MAGIC_OPUS, out)) {
+			enc.disabled = true;
+			return false;
+		}
+	}
 
-    if (!enc.feed_fifo(data, frames)) {
-        enc.disabled = true;
-        return false;
-    }
+	if (!enc.feed_fifo(data, frames)) {
+		enc.disabled = true;
+		return false;
+	}
 
-    while (av_audio_fifo_size(enc.fifo) >= enc.frame_size) {
-        if (av_frame_make_writable(enc.frame) < 0) {
-            enc.disabled = true;
-            return false;
-        }
-        enc.frame->nb_samples = enc.frame_size;
-        enc.frame->pts = enc.pts;
-        enc.pts += enc.frame_size;
-        int read = av_audio_fifo_read(enc.fifo, (void**)enc.frame->data, enc.frame_size);
-        if (read != enc.frame_size) {
-            enc.disabled = true;
-            return false;
-        }
+	while (av_audio_fifo_size(enc.fifo) >= enc.frame_size) {
+		if (av_frame_make_writable(enc.frame) < 0) {
+			enc.disabled = true;
+			return false;
+		}
+		enc.frame->nb_samples = enc.frame_size;
+		enc.frame->pts        = enc.pts;
+		enc.pts += enc.frame_size;
+		int read = av_audio_fifo_read(enc.fifo, (void **)enc.frame->data, enc.frame_size);
+		if (read != enc.frame_size) {
+			enc.disabled = true;
+			return false;
+		}
 
-        int ret = avcodec_send_frame(enc.ctx, enc.frame);
-        if (ret < 0) {
-            enc.disabled = true;
-            return false;
-        }
+		int ret = avcodec_send_frame(enc.ctx, enc.frame);
+		if (ret < 0) {
+			enc.disabled = true;
+			return false;
+		}
 
-        while (ret >= 0) {
-            ret = avcodec_receive_packet(enc.ctx, enc.pkt);
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
-            if (ret < 0) {
-                enc.disabled = true;
-                return false;
-            }
-            uint32_t pkt_frames = (enc.pkt->duration > 0)
-                ? (uint32_t)enc.pkt->duration
-                : (uint32_t)enc.frame_size;
-            auto pkt = std::make_shared<std::string>(16 + enc.pkt->size, '\0');
-            uint32_t* hdr = reinterpret_cast<uint32_t*>(&(*pkt)[0]);
-            hdr[0] = MAGIC_OPUS;
-            hdr[1] = (uint32_t)enc.output_sample_rate;
-            hdr[2] = channels;
-            hdr[3] = pkt_frames;
-            std::memcpy(&(*pkt)[16], enc.pkt->data, enc.pkt->size);
-            out.push_back(std::move(pkt));
-            av_packet_unref(enc.pkt);
-        }
-    }
-    return true;
+		while (ret >= 0) {
+			ret = avcodec_receive_packet(enc.ctx, enc.pkt);
+			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
+			if (ret < 0) {
+				enc.disabled = true;
+				return false;
+			}
+			uint32_t  pkt_frames = (enc.pkt->duration > 0)
+									   ? (uint32_t)enc.pkt->duration
+									   : (uint32_t)enc.frame_size;
+			auto      pkt        = std::make_shared<std::string>(16 + enc.pkt->size, '\0');
+			uint32_t *hdr        = reinterpret_cast<uint32_t *>(&(*pkt)[0]);
+			hdr[0]               = MAGIC_OPUS;
+			hdr[1]               = (uint32_t)enc.output_sample_rate;
+			hdr[2]               = channels;
+			hdr[3]               = pkt_frames;
+			std::memcpy(&(*pkt)[16], enc.pkt->data, enc.pkt->size);
+			out.push_back(std::move(pkt));
+			av_packet_unref(enc.pkt);
+		}
+	}
+	return true;
 }
 
 // ============================================================
 // private: ch_map_ 検索
 // ============================================================
 
-ChannelState* StreamRouter::find_ch(const std::string& sid, int ch) {
-    auto it = ch_map_.find(make_key(sid, ch));
-    return it != ch_map_.end() ? &it->second : nullptr;
+ChannelState *StreamRouter::find_ch(const std::string &sid, int ch) {
+	auto it = ch_map_.find(make_key(sid, ch));
+	return it != ch_map_.end() ? &it->second : nullptr;
 }
 
-const ChannelState* StreamRouter::find_ch(const std::string& sid, int ch) const {
-    auto it = ch_map_.find(make_key(sid, ch));
-    return it != ch_map_.end() ? &it->second : nullptr;
+const ChannelState *StreamRouter::find_ch(const std::string &sid, int ch) const {
+	auto it = ch_map_.find(make_key(sid, ch));
+	return it != ch_map_.end() ? &it->second : nullptr;
 }
 
 // ============================================================
@@ -696,32 +689,32 @@ const ChannelState* StreamRouter::find_ch(const std::string& sid, int ch) const 
 // ============================================================
 
 void StreamRouter::join_all_measure_threads() {
-    std::vector<std::unique_ptr<MeasureThread>> threads;
-    {
-        std::lock_guard<std::mutex> lk(measure_threads_mtx_);
-        threads.swap(measure_threads_);
-    }
-    for (auto& t : threads) {
-        if (t && t->th.joinable()) t->th.join();
-    }
+	std::vector<std::unique_ptr<MeasureThread>> threads;
+	{
+		std::lock_guard<std::mutex> lk(measure_threads_mtx_);
+		threads.swap(measure_threads_);
+	}
+	for (auto &t : threads) {
+		if (t && t->th.joinable()) t->th.join();
+	}
 }
 
 void StreamRouter::cleanup_done_measure_threads() {
-    std::vector<std::unique_ptr<MeasureThread>> done;
-    {
-        std::lock_guard<std::mutex> lk(measure_threads_mtx_);
-        for (auto it = measure_threads_.begin(); it != measure_threads_.end(); ) {
-            if ((*it)->done.load(std::memory_order_acquire)) {
-                done.push_back(std::move(*it));
-                it = measure_threads_.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-    for (auto& t : done) {
-        if (t && t->th.joinable()) t->th.join();
-    }
+	std::vector<std::unique_ptr<MeasureThread>> done;
+	{
+		std::lock_guard<std::mutex> lk(measure_threads_mtx_);
+		for (auto it = measure_threads_.begin(); it != measure_threads_.end();) {
+			if ((*it)->done.load(std::memory_order_acquire)) {
+				done.push_back(std::move(*it));
+				it = measure_threads_.erase(it);
+			} else {
+				++it;
+			}
+		}
+	}
+	for (auto &t : done) {
+		if (t && t->th.joinable()) t->th.join();
+	}
 }
 
 // ============================================================
@@ -729,477 +722,497 @@ void StreamRouter::cleanup_done_measure_threads() {
 // ============================================================
 
 void StreamRouter::on_open(ConnHandle h) {
-    std::shared_ptr<WsServer> srv;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        srv = server_ptr_;
-    }
-    if (!srv) return;
-    auto con = srv->get_con_from_hdl(h);
-    std::string path = con->get_resource();
-    std::string sid; std::string code;
-    auto parse_res = parse_path_code(path, sid, code);
-    if (parse_res != PathParseResult::Ok) {
-        con->close(websocketpp::close::status::policy_violation,
-                   "invalid path: use /stream_id/code");
-        return;
-    }
-    std::string current_sid;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        current_sid = stream_id_;
-    }
-    if (!current_sid.empty() && sid != current_sid) {
-        con->close(websocketpp::close::status::policy_violation, "stream_id_mismatch");
-        return;
-    }
+	std::shared_ptr<WsServer> srv;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		srv = server_ptr_;
+	}
+	if (!srv) return;
+	auto        con  = srv->get_con_from_hdl(h);
+	std::string path = con->get_resource();
+	std::string sid;
+	std::string code;
+	auto        parse_res = parse_path_code(path, sid, code);
+	if (parse_res != PathParseResult::Ok) {
+		con->close(websocketpp::close::status::policy_violation,
+				   "invalid path: use /stream_id/code");
+		return;
+	}
+	std::string current_sid;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		current_sid = stream_id_;
+	}
+	if (!current_sid.empty() && sid != current_sid) {
+		con->close(websocketpp::close::status::policy_violation, "stream_id_mismatch");
+		return;
+	}
 
-    // 識別コードからチャンネルを解決
-    int ch = resolve_code(code);
-    if (ch < 0) {
-        con->close(websocketpp::close::status::policy_violation, "code_not_found");
-        return;
-    }
+	// 識別コードからチャンネルを解決
+	int ch = resolve_code(code);
+	if (ch < 0) {
+		con->close(websocketpp::close::status::policy_violation, "code_not_found");
+		return;
+	}
 
-    std::function<void(const std::string&, int, size_t)> cb;
-    size_t count = 0;
-    LatencyResult cached_result;
-    double cached_delay = -1.0;
-    int pb_ms = playback_buffer_ms_.load(std::memory_order_relaxed);
-    std::string cached_delay_reason;
-    std::string memo;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        conn_map_[h] = { sid, ch };
-        auto key = make_key(sid, ch);
-        auto& cs = ch_map_[key];
-        if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
-            auto it = ch_cache_.find(key);
-            if (it != ch_cache_.end()) {
-                cs.last_result         = it->second.last_result;
-                cs.last_applied_delay  = it->second.last_applied_delay;
-                cs.last_applied_reason = it->second.last_applied_reason;
-            }
-        }
-        cs.conns.insert(h);
-        count = cs.conns.size();
-        cb = on_conn_change;
-        cached_result       = cs.last_result;
-        cached_delay        = cs.last_applied_delay;
-        cached_delay_reason = cs.last_applied_reason;
-        if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
-    }
-    if (cb) cb(sid, ch, count);
+	std::function<void(const std::string &, int, size_t)> cb;
+	size_t                                                count = 0;
+	LatencyResult                                         cached_result;
+	double                                                cached_delay = -1.0;
+	int                                                   pb_ms        = playback_buffer_ms_.load(std::memory_order_relaxed);
+	std::string                                           cached_delay_reason;
+	std::string                                           memo;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		conn_map_[h] = {sid, ch};
+		auto  key    = make_key(sid, ch);
+		auto &cs     = ch_map_[key];
+		if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
+			auto it = ch_cache_.find(key);
+			if (it != ch_cache_.end()) {
+				cs.last_result         = it->second.last_result;
+				cs.last_applied_delay  = it->second.last_applied_delay;
+				cs.last_applied_reason = it->second.last_applied_reason;
+			}
+		}
+		cs.conns.insert(h);
+		count               = cs.conns.size();
+		cb                  = on_conn_change;
+		cached_result       = cs.last_result;
+		cached_delay        = cs.last_applied_delay;
+		cached_delay_reason = cs.last_applied_reason;
+		if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
+	}
+	if (cb) cb(sid, ch, count);
 
-    std::string info = "{\"type\":\"session_info\",\"stream_id\":\"" + sid
-                     + "\",\"ch\":" + std::to_string(ch + 1)
-                     + ",\"code\":\"" + json_escape(code) + "\"";
-    if (!memo.empty()) info += ",\"memo\":\"" + json_escape(memo) + "\"";
-    info += "}";
-    try { srv->send(h, info, websocketpp::frame::opcode::text); }
-    catch (...) {}
-    try {
-        std::string pb_msg =
-            "{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(pb_ms) + "}";
-        srv->send(h, pb_msg, websocketpp::frame::opcode::text);
-    } catch (...) {}
+	std::string info = "{\"type\":\"session_info\",\"stream_id\":\"" + sid + "\",\"ch\":" + std::to_string(ch + 1) + ",\"code\":\"" + json_escape(code) + "\"";
+	if (!memo.empty()) info += ",\"memo\":\"" + json_escape(memo) + "\"";
+	info += "}";
+	try {
+		srv->send(h, info, websocketpp::frame::opcode::text);
+	} catch (...) {
+	}
+	try {
+		std::string pb_msg =
+			"{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(pb_ms) + "}";
+		srv->send(h, pb_msg, websocketpp::frame::opcode::text);
+	} catch (...) {
+	}
 
-    if (cached_result.valid) {
-        try { srv->send(h, format_latency_result_json(cached_result),
-                           websocketpp::frame::opcode::text); }
-        catch (...) {}
-    }
-    if (cached_delay >= 0.0 && cached_delay_reason == "auto_measure") {
-        char buf[160];
-        snprintf(buf, sizeof(buf),
-            "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
-            cached_delay, cached_delay_reason.c_str());
-        try { srv->send(h, std::string(buf), websocketpp::frame::opcode::text); }
-        catch (...) {}
-    }
+	if (cached_result.valid) {
+		try {
+			srv->send(h, format_latency_result_json(cached_result), websocketpp::frame::opcode::text);
+		} catch (...) {
+		}
+	}
+	if (cached_delay >= 0.0 && cached_delay_reason == "auto_measure") {
+		char buf[160];
+		snprintf(buf, sizeof(buf), "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}", cached_delay, cached_delay_reason.c_str());
+		try {
+			srv->send(h, std::string(buf), websocketpp::frame::opcode::text);
+		} catch (...) {
+		}
+	}
 }
 
 void StreamRouter::on_close(ConnHandle h) {
-    std::string sid;
-    int ch = -1;
-    size_t count = 0;
-    std::function<void(const std::string&, int, size_t)> cb;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto it = conn_map_.find(h);
-        if (it == conn_map_.end()) return;
-        sid = it->second.stream_id;
-        ch  = it->second.ch;
-        auto* cs = find_ch(sid, ch);
-        if (cs) {
-            cs->conns.erase(h);
-            if (cs->conns.empty()) cs->measuring = false;
-            count = cs->conns.size();
-        }
-        conn_map_.erase(it);
-        cb = on_conn_change;
-    }
-    if (cb) cb(sid, ch, count);
+	std::string                                           sid;
+	int                                                   ch    = -1;
+	size_t                                                count = 0;
+	std::function<void(const std::string &, int, size_t)> cb;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		auto                        it = conn_map_.find(h);
+		if (it == conn_map_.end()) return;
+		sid      = it->second.stream_id;
+		ch       = it->second.ch;
+		auto *cs = find_ch(sid, ch);
+		if (cs) {
+			cs->conns.erase(h);
+			if (cs->conns.empty()) cs->measuring = false;
+			count = cs->conns.size();
+		}
+		conn_map_.erase(it);
+		cb = on_conn_change;
+	}
+	if (cb) cb(sid, ch, count);
 }
 
 void StreamRouter::on_message(ConnHandle h, WsServer::message_ptr msg) {
-    if (msg->get_opcode() != websocketpp::frame::opcode::text) return;
-    const std::string& p = msg->get_payload();
-    if (p.find("\"pong\"") != std::string::npos) {
-        int seq = -1;
-        auto pos = p.find("\"seq\":");
-        if (pos != std::string::npos) seq = std::atoi(p.c_str() + pos + 6);
-        if (seq < 0) return;
+	if (msg->get_opcode() != websocketpp::frame::opcode::text) return;
+	const std::string &p = msg->get_payload();
+	if (p.find("\"pong\"") != std::string::npos) {
+		int  seq = -1;
+		auto pos = p.find("\"seq\":");
+		if (pos != std::string::npos) seq = std::atoi(p.c_str() + pos + 6);
+		if (seq < 0) return;
 
-        auto now = Clock::now();
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto it = conn_map_.find(h);
-        if (it == conn_map_.end()) return;
-        auto* cs = find_ch(it->second.stream_id, it->second.ch);
-        if (!cs) return;
-        auto pt = cs->ping_times.find(seq);
-        if (pt != cs->ping_times.end()) {
-            cs->rtt_samples.push_back(Ms(now - pt->second).count());
-            cs->ping_times.erase(pt);
-        }
-        return;
-    }
+		auto                        now = Clock::now();
+		std::lock_guard<std::mutex> lk(mtx_);
+		auto                        it = conn_map_.find(h);
+		if (it == conn_map_.end()) return;
+		auto *cs = find_ch(it->second.stream_id, it->second.ch);
+		if (!cs) return;
+		auto pt = cs->ping_times.find(seq);
+		if (pt != cs->ping_times.end()) {
+			cs->rtt_samples.push_back(Ms(now - pt->second).count());
+			cs->ping_times.erase(pt);
+		}
+		return;
+	}
 
-    if (p.find("\"audio_codec\"") != std::string::npos) {
-        int mode = -1;
-        if (p.find("\"mode\":\"pcm\"") != std::string::npos) mode = 1;
-        else if (p.find("\"mode\":\"opus\"") != std::string::npos) mode = 0;
-        if (mode < 0) return;
+	if (p.find("\"audio_codec\"") != std::string::npos) {
+		int mode = -1;
+		if (p.find("\"mode\":\"pcm\"") != std::string::npos)
+			mode = 1;
+		else if (p.find("\"mode\":\"opus\"") != std::string::npos)
+			mode = 0;
+		if (mode < 0) return;
 
-        auto parse_json_int = [&p](const char* key, int& out) -> bool {
-            std::string token = std::string("\"") + key + "\":";
-            auto pos = p.find(token);
-            if (pos == std::string::npos) return false;
-            pos += token.size();
-            while (pos < p.size() && std::isspace((unsigned char)p[pos])) ++pos;
-            const char* begin = p.c_str() + pos;
-            char* end = nullptr;
-            long v = std::strtol(begin, &end, 10);
-            if (begin == end) return false;
-            out = (int)v;
-            return true;
-        };
+		auto parse_json_int = [&p](const char *key, int &out) -> bool {
+			std::string token = std::string("\"") + key + "\":";
+			auto        pos   = p.find(token);
+			if (pos == std::string::npos) return false;
+			pos += token.size();
+			while (pos < p.size() && std::isspace((unsigned char)p[pos]))
+				++pos;
+			const char *begin = p.c_str() + pos;
+			char       *end   = nullptr;
+			long        v     = std::strtol(begin, &end, 10);
+			if (begin == end) return false;
+			out = (int)v;
+			return true;
+		};
 
-        int req_bitrate = 0;
-        int req_sample_rate = 0;
-        bool has_bitrate = parse_json_int("bitrate_kbps", req_bitrate);
-        bool has_sample_rate = parse_json_int("sample_rate", req_sample_rate);
+		int  req_bitrate     = 0;
+		int  req_sample_rate = 0;
+		bool has_bitrate     = parse_json_int("bitrate_kbps", req_bitrate);
+		bool has_sample_rate = parse_json_int("sample_rate", req_sample_rate);
 
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            auto it = conn_map_.find(h);
-            if (it == conn_map_.end()) return;
-            it->second.force_pcm = (mode == 1);
-        }
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			auto                        it = conn_map_.find(h);
+			if (it == conn_map_.end()) return;
+			it->second.force_pcm = (mode == 1);
+		}
 
-        if (has_bitrate || has_sample_rate) {
-            AudioConfig cfg{};
-            cfg.audio_codec_mode = audio_codec_.load(std::memory_order_relaxed);
-            cfg.opus_bitrate_kbps = opus_bitrate_kbps_.load(std::memory_order_relaxed);
-            cfg.opus_target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
-            cfg.quantization_bits = audio_quantization_bits_.load(std::memory_order_relaxed);
-            cfg.mono = audio_mono_.load(std::memory_order_relaxed);
-            cfg.pcm_downsample_ratio = pcm_downsample_ratio_.load(std::memory_order_relaxed);
-            cfg.playback_buffer_ms = playback_buffer_ms_.load(std::memory_order_relaxed);
-            if (has_bitrate) cfg.opus_bitrate_kbps = req_bitrate;
-            if (has_sample_rate) cfg.opus_target_sample_rate = req_sample_rate;
-            set_audio_config(cfg);
-        }
-    }
+		if (has_bitrate || has_sample_rate) {
+			AudioConfig cfg{};
+			cfg.audio_codec_mode        = audio_codec_.load(std::memory_order_relaxed);
+			cfg.opus_bitrate_kbps       = opus_bitrate_kbps_.load(std::memory_order_relaxed);
+			cfg.opus_target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
+			cfg.quantization_bits       = audio_quantization_bits_.load(std::memory_order_relaxed);
+			cfg.mono                    = audio_mono_.load(std::memory_order_relaxed);
+			cfg.pcm_downsample_ratio    = pcm_downsample_ratio_.load(std::memory_order_relaxed);
+			cfg.playback_buffer_ms      = playback_buffer_ms_.load(std::memory_order_relaxed);
+			if (has_bitrate) cfg.opus_bitrate_kbps = req_bitrate;
+			if (has_sample_rate) cfg.opus_target_sample_rate = req_sample_rate;
+			set_audio_config(cfg);
+		}
+	}
 }
 
 void StreamRouter::on_http(ConnHandle h) {
-    std::shared_ptr<WsServer> srv;
-    std::string body;
-    std::string root;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        srv  = server_ptr_;
-        body = http_index_html_;
-        root = http_root_dir_;
-    }
-    if (!srv) return;
-    try {
-        auto con = srv->get_con_from_hdl(h);
-        std::string raw = con->get_resource();
-        std::string path = raw;
-        std::string query;
-        auto qpos = path.find('?');
-        if (qpos != std::string::npos) {
-            query = path.substr(qpos + 1);
-            path  = path.substr(0, qpos);
-        }
-        auto hpos = path.find('#');
-        if (hpos != std::string::npos) path = path.substr(0, hpos);
-        if (path.empty()) path = "/";
+	std::shared_ptr<WsServer> srv;
+	std::string               body;
+	std::string               root;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		srv  = server_ptr_;
+		body = http_index_html_;
+		root = http_root_dir_;
+	}
+	if (!srv) return;
+	try {
+		auto        con  = srv->get_con_from_hdl(h);
+		std::string raw  = con->get_resource();
+		std::string path = raw;
+		std::string query;
+		auto        qpos = path.find('?');
+		if (qpos != std::string::npos) {
+			query = path.substr(qpos + 1);
+			path  = path.substr(0, qpos);
+		}
+		auto hpos = path.find('#');
+		if (hpos != std::string::npos) path = path.substr(0, hpos);
+		if (path.empty()) path = "/";
 
-        if (path == "/config") {
-            int active = MAX_SUB_CH;
-            {
-                std::lock_guard<std::mutex> lk(mtx_);
-                active = active_ch_max_;
-            }
-            std::string resp = "{\"ok\":true,\"max_ch\":" + std::to_string(MAX_SUB_CH)
-                             + ",\"active_ch\":" + std::to_string(active) + "}";
-            con->set_status(websocketpp::http::status_code::ok);
-            con->replace_header("Content-Type", "application/json; charset=utf-8");
-            con->replace_header("Cache-Control", "no-store");
-            con->set_body(std::move(resp));
-            return;
-        }
+		if (path == "/config") {
+			int active = MAX_SUB_CH;
+			{
+				std::lock_guard<std::mutex> lk(mtx_);
+				active = active_ch_max_;
+			}
+			std::string resp = "{\"ok\":true,\"max_ch\":" + std::to_string(MAX_SUB_CH) + ",\"active_ch\":" + std::to_string(active) + "}";
+			con->set_status(websocketpp::http::status_code::ok);
+			con->replace_header("Content-Type", "application/json; charset=utf-8");
+			con->replace_header("Cache-Control", "no-store");
+			con->set_body(std::move(resp));
+			return;
+		}
 
-        if (path == "/memo") {
-            std::string sid_param;
-            std::string code_param;
-            size_t pos = 0;
-            while (pos < query.size()) {
-                size_t amp = query.find('&', pos);
-                if (amp == std::string::npos) amp = query.size();
-                std::string kv  = query.substr(pos, amp - pos);
-                size_t eq = kv.find('=');
-                std::string key = (eq == std::string::npos) ? kv : kv.substr(0, eq);
-                std::string val = (eq == std::string::npos) ? "" : kv.substr(eq + 1);
-                if (key == "sid") sid_param = url_decode(val);
-                else if (key == "code") code_param = url_decode(val);
-                pos = amp + 1;
-            }
+		if (path == "/memo") {
+			std::string sid_param;
+			std::string code_param;
+			size_t      pos = 0;
+			while (pos < query.size()) {
+				size_t amp = query.find('&', pos);
+				if (amp == std::string::npos) amp = query.size();
+				std::string kv  = query.substr(pos, amp - pos);
+				size_t      eq  = kv.find('=');
+				std::string key = (eq == std::string::npos) ? kv : kv.substr(0, eq);
+				std::string val = (eq == std::string::npos) ? "" : kv.substr(eq + 1);
+				if (key == "sid")
+					sid_param = url_decode(val);
+				else if (key == "code")
+					code_param = url_decode(val);
+				pos = amp + 1;
+			}
 
-            std::string sid = sanitize_id(sid_param);
-            std::string code = sanitize_id(code_param);
-            if (sid.empty() || code.empty()) {
-                con->set_status(websocketpp::http::status_code::bad_request);
-                con->replace_header("Content-Type", "text/plain; charset=utf-8");
-                con->set_body("Bad Request");
-                return;
-            }
+			std::string sid  = sanitize_id(sid_param);
+			std::string code = sanitize_id(code_param);
+			if (sid.empty() || code.empty()) {
+				con->set_status(websocketpp::http::status_code::bad_request);
+				con->replace_header("Content-Type", "text/plain; charset=utf-8");
+				con->set_body("Bad Request");
+				return;
+			}
 
-            int ch = resolve_code(code);
-            if (ch < 0) {
-                con->set_status(websocketpp::http::status_code::not_found);
-                con->replace_header("Content-Type", "text/plain; charset=utf-8");
-                con->set_body("Code Not Found");
-                return;
-            }
+			int ch = resolve_code(code);
+			if (ch < 0) {
+				con->set_status(websocketpp::http::status_code::not_found);
+				con->replace_header("Content-Type", "text/plain; charset=utf-8");
+				con->set_body("Code Not Found");
+				return;
+			}
 
-            std::string current_sid;
-            std::string memo;
-            {
-                std::lock_guard<std::mutex> lk(mtx_);
-                current_sid = stream_id_;
-                if (ch >= 0 && ch < MAX_SUB_CH)
-                    memo = sub_memo_[ch];
-            }
-            if (current_sid.empty() || sid != current_sid) {
-                con->set_status(websocketpp::http::status_code::not_found);
-                con->replace_header("Content-Type", "text/plain; charset=utf-8");
-                con->set_body("Not Found");
-                return;
-            }
+			std::string current_sid;
+			std::string memo;
+			{
+				std::lock_guard<std::mutex> lk(mtx_);
+				current_sid = stream_id_;
+				if (ch >= 0 && ch < MAX_SUB_CH)
+					memo = sub_memo_[ch];
+			}
+			if (current_sid.empty() || sid != current_sid) {
+				con->set_status(websocketpp::http::status_code::not_found);
+				con->replace_header("Content-Type", "text/plain; charset=utf-8");
+				con->set_body("Not Found");
+				return;
+			}
 
-            std::string resp = "{\"ok\":true,\"stream_id\":\"" + current_sid
-                             + "\",\"ch\":" + std::to_string(ch + 1)
-                             + ",\"code\":\"" + json_escape(code)
-                             + "\",\"memo\":\"" + json_escape(memo) + "\"}";
-            con->set_status(websocketpp::http::status_code::ok);
-            con->replace_header("Content-Type", "application/json; charset=utf-8");
-            con->replace_header("Cache-Control", "no-store");
-            con->set_body(std::move(resp));
-            return;
-        }
+			std::string resp = "{\"ok\":true,\"stream_id\":\"" + current_sid + "\",\"ch\":" + std::to_string(ch + 1) + ",\"code\":\"" + json_escape(code) + "\",\"memo\":\"" + json_escape(memo) + "\"}";
+			con->set_status(websocketpp::http::status_code::ok);
+			con->replace_header("Content-Type", "application/json; charset=utf-8");
+			con->replace_header("Cache-Control", "no-store");
+			con->set_body(std::move(resp));
+			return;
+		}
 
-        if (path == "/" || path == "/index.html") {
-            if (!body.empty()) {
-                con->set_status(websocketpp::http::status_code::ok);
-                con->replace_header("Content-Type", "text/html; charset=utf-8");
-                con->replace_header("Cache-Control", "no-store");
-                con->set_body(std::move(body));
-                return;
-            }
-            if (!root.empty()) {
-                std::string full = join_path(root, "index.html");
-                std::string file;
-                if (read_file_to_string(full, file)) {
-                    con->set_status(websocketpp::http::status_code::ok);
-                    con->replace_header("Content-Type", "text/html; charset=utf-8");
-                    con->replace_header("Cache-Control", "no-store");
-                    con->set_body(std::move(file));
-                    return;
-                }
-            }
-        }
+		if (path == "/" || path == "/index.html") {
+			if (!body.empty()) {
+				con->set_status(websocketpp::http::status_code::ok);
+				con->replace_header("Content-Type", "text/html; charset=utf-8");
+				con->replace_header("Cache-Control", "no-store");
+				con->set_body(std::move(body));
+				return;
+			}
+			if (!root.empty()) {
+				std::string full = join_path(root, "index.html");
+				std::string file;
+				if (read_file_to_string(full, file)) {
+					con->set_status(websocketpp::http::status_code::ok);
+					con->replace_header("Content-Type", "text/html; charset=utf-8");
+					con->replace_header("Cache-Control", "no-store");
+					con->set_body(std::move(file));
+					return;
+				}
+			}
+		}
 
-        if (!root.empty()) {
-            std::string rel = path;
-            if (!rel.empty() && rel[0] == '/') rel = rel.substr(1);
-            if (is_safe_rel_path(rel)) {
-                std::string full = join_path(root, rel);
-                std::string file;
-                if (read_file_to_string(full, file)) {
-                    con->set_status(websocketpp::http::status_code::ok);
-                    con->replace_header("Content-Type", guess_content_type(full));
-                    con->replace_header("Cache-Control", "no-store");
-                    con->set_body(std::move(file));
-                    return;
-                }
-            }
-        }
+		if (!root.empty()) {
+			std::string rel = path;
+			if (!rel.empty() && rel[0] == '/') rel = rel.substr(1);
+			if (is_safe_rel_path(rel)) {
+				std::string full = join_path(root, rel);
+				std::string file;
+				if (read_file_to_string(full, file)) {
+					con->set_status(websocketpp::http::status_code::ok);
+					con->replace_header("Content-Type", guess_content_type(full));
+					con->replace_header("Cache-Control", "no-store");
+					con->set_body(std::move(file));
+					return;
+				}
+			}
+		}
 
-        con->set_status(websocketpp::http::status_code::not_found);
-        con->replace_header("Content-Type", "text/plain; charset=utf-8");
-        con->set_body("Not Found");
-    } catch (...) {}
+		con->set_status(websocketpp::http::status_code::not_found);
+		con->replace_header("Content-Type", "text/plain; charset=utf-8");
+		con->set_body("Not Found");
+	} catch (...) {
+	}
 }
 
 // ============================================================
 // private: 計測ループ
 // ============================================================
 
-void StreamRouter::measure_loop(const std::string& sid, int ch,
-                                 int num_pings, int interval_ms, int start_delay_ms)
-{
-    for (int t = 0; t < start_delay_ms && running_; ++t)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    blog(LOG_INFO, "[obs-delay-stream] latency measure start: sid=%s ch=%d pings=%d",
-         sid.c_str(), ch + 1, num_pings);
-    for (int seq = 0; seq < num_pings; ++seq) {
-        if (!running_) break;
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            auto* cs = find_ch(sid, ch);
-            if (!cs || !cs->measuring) break;
-            auto srv = server_ptr_;
-            if (!srv) break;
-            auto t_now = Ms(Clock::now().time_since_epoch()).count();
-            cs->ping_times[seq] = Clock::now();
-            char buf[128];
-            snprintf(buf, sizeof(buf),
-                "{\"type\":\"ping\",\"seq\":%d,\"t\":%.3f,\"total\":%d}", seq, t_now, num_pings);
-            for (auto& hdl : cs->conns) {
-                try { srv->send(hdl, std::string(buf), websocketpp::frame::opcode::text); }
-                catch (...) {}
-            }
-        }
-        if (on_any_ping_sent) on_any_ping_sent(sid, ch, seq);
-        for (int t = 0; t < interval_ms && running_; ++t)
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    for (int t = 0; t < PONG_WAIT_MS && running_; ++t)
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    finalize_result(sid, ch);
+void StreamRouter::measure_loop(const std::string &sid, int ch, int num_pings, int interval_ms, int start_delay_ms) {
+	for (int t = 0; t < start_delay_ms && running_; ++t)
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	blog(LOG_INFO, "[obs-delay-stream] latency measure start: sid=%s ch=%d pings=%d", sid.c_str(), ch + 1, num_pings);
+	for (int seq = 0; seq < num_pings; ++seq) {
+		if (!running_) break;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			auto                       *cs = find_ch(sid, ch);
+			if (!cs || !cs->measuring) break;
+			auto srv = server_ptr_;
+			if (!srv) break;
+			auto t_now          = Ms(Clock::now().time_since_epoch()).count();
+			cs->ping_times[seq] = Clock::now();
+			char buf[128];
+			snprintf(buf, sizeof(buf), "{\"type\":\"ping\",\"seq\":%d,\"t\":%.3f,\"total\":%d}", seq, t_now, num_pings);
+			for (auto &hdl : cs->conns) {
+				try {
+					srv->send(hdl, std::string(buf), websocketpp::frame::opcode::text);
+				} catch (...) {
+				}
+			}
+		}
+		if (on_any_ping_sent) on_any_ping_sent(sid, ch, seq);
+		for (int t = 0; t < interval_ms && running_; ++t)
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	for (int t = 0; t < PONG_WAIT_MS && running_; ++t)
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	finalize_result(sid, ch);
 }
 
-void StreamRouter::finalize_result(const std::string& sid, int ch) {
-    LatencyResult r;
-    std::function<void(const std::string&, int, LatencyResult)> cb;
-    std::function<void(const std::string&, int, LatencyResult)> cb_any;
-    bool no_samples = false;
-    {
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto* cs = find_ch(sid, ch);
-        if (!cs) return;
-        cs->measuring = false;
+void StreamRouter::finalize_result(const std::string &sid, int ch) {
+	LatencyResult                                                r;
+	std::function<void(const std::string &, int, LatencyResult)> cb;
+	std::function<void(const std::string &, int, LatencyResult)> cb_any;
+	bool                                                         no_samples = false;
+	{
+		std::lock_guard<std::mutex> lk(mtx_);
+		auto                       *cs = find_ch(sid, ch);
+		if (!cs) return;
+		cs->measuring = false;
 
-        auto& s = cs->rtt_samples;
-        if (!s.empty()) {
-            r.valid   = true;
-            r.samples = (int)s.size();
-            r.min_rtt_ms = r.max_rtt_ms = s[0];
-            for (double v : s) {
-                if (v < r.min_rtt_ms) r.min_rtt_ms = v;
-                if (v > r.max_rtt_ms) r.max_rtt_ms = v;
-            }
+		auto &s = cs->rtt_samples;
+		if (!s.empty()) {
+			r.valid      = true;
+			r.samples    = (int)s.size();
+			r.min_rtt_ms = r.max_rtt_ms = s[0];
+			for (double v : s) {
+				if (v < r.min_rtt_ms) r.min_rtt_ms = v;
+				if (v > r.max_rtt_ms) r.max_rtt_ms = v;
+			}
 
-            // サンプル数に応じて統計手法を切り替える
-            std::vector<double> sorted = s;
-            std::sort(sorted.begin(), sorted.end());
-            const int n = (int)sorted.size();
+			// サンプル数に応じて統計手法を切り替える
+			std::vector<double> sorted = s;
+			std::sort(sorted.begin(), sorted.end());
+			const int n = (int)sorted.size();
 
-            if (n <= 15) {
-                // 中央値
-                r.method = "median";
-                double median = (n % 2 == 0)
-                    ? (sorted[n/2 - 1] + sorted[n/2]) / 2.0
-                    : sorted[n/2];
-                r.avg_rtt_ms  = median;
-                r.used_samples = 1;
-            } else if (n < 30) {
-                // トリム平均: 上下1サンプル除外
-                r.method = "trimmed";
-                double sum = 0;
-                for (int i = 1; i < n - 1; ++i) sum += sorted[i];
-                r.used_samples = n - 2;
-                r.avg_rtt_ms  = sum / r.used_samples;
-            } else {
-                // IQR除外後の平均
-                r.method = "iqr";
-                double q1 = sorted[n / 4];
-                double q3 = sorted[n * 3 / 4];
-                double iqr = q3 - q1;
-                double lo  = q1 - 1.5 * iqr;
-                double hi  = q3 + 1.5 * iqr;
-                double sum = 0;
-                int cnt = 0;
-                for (double v : sorted) {
-                    if (v >= lo && v <= hi) { sum += v; ++cnt; }
-                }
-                r.used_samples = cnt;
-                r.avg_rtt_ms   = (cnt > 0) ? sum / cnt : sorted[n/2];
-            }
-            r.avg_latency_ms = r.avg_rtt_ms / 2.0;
-        } else {
-            no_samples = true;
-        }
-        cs->last_result = r;
-        cb     = cs->on_result;
-        cb_any = on_any_latency_result;
+			if (n <= 15) {
+				// 中央値
+				r.method       = "median";
+				double median  = (n % 2 == 0)
+									 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+									 : sorted[n / 2];
+				r.avg_rtt_ms   = median;
+				r.used_samples = 1;
+			} else if (n < 30) {
+				// トリム平均: 上下1サンプル除外
+				r.method   = "trimmed";
+				double sum = 0;
+				for (int i = 1; i < n - 1; ++i)
+					sum += sorted[i];
+				r.used_samples = n - 2;
+				r.avg_rtt_ms   = sum / r.used_samples;
+			} else {
+				// IQR除外後の平均
+				r.method   = "iqr";
+				double q1  = sorted[n / 4];
+				double q3  = sorted[n * 3 / 4];
+				double iqr = q3 - q1;
+				double lo  = q1 - 1.5 * iqr;
+				double hi  = q3 + 1.5 * iqr;
+				double sum = 0;
+				int    cnt = 0;
+				for (double v : sorted) {
+					if (v >= lo && v <= hi) {
+						sum += v;
+						++cnt;
+					}
+				}
+				r.used_samples = cnt;
+				r.avg_rtt_ms   = (cnt > 0) ? sum / cnt : sorted[n / 2];
+			}
+			r.avg_latency_ms = r.avg_rtt_ms / 2.0;
+		} else {
+			no_samples = true;
+		}
+		cs->last_result = r;
+		cb              = cs->on_result;
+		cb_any          = on_any_latency_result;
 
-        auto srv = server_ptr_;
-        if (srv) {
-            std::string json = format_latency_result_json(r);
-            for (auto& hdl : cs->conns) {
-                try { srv->send(hdl, json, websocketpp::frame::opcode::text); }
-                catch (...) {}
-            }
-        }
-    }
-    if (no_samples) {
-        blog(LOG_WARNING,
-             "[obs-delay-stream] latency measure failed: sid=%s ch=%d (no pong)",
-             sid.c_str(), ch + 1);
-    } else {
-        blog(LOG_INFO,
-             "[obs-delay-stream] latency measure done: sid=%s ch=%d samples=%d/%d method=%s rtt=%.1fms",
-             sid.c_str(), ch + 1, r.used_samples, r.samples, r.method, r.avg_rtt_ms);
-    }
-    if (cb)     cb(sid, ch, r);
-    if (cb_any) cb_any(sid, ch, r);
+		auto srv = server_ptr_;
+		if (srv) {
+			std::string json = format_latency_result_json(r);
+			for (auto &hdl : cs->conns) {
+				try {
+					srv->send(hdl, json, websocketpp::frame::opcode::text);
+				} catch (...) {
+				}
+			}
+		}
+	}
+	if (no_samples) {
+		blog(LOG_WARNING,
+			 "[obs-delay-stream] latency measure failed: sid=%s ch=%d (no pong)",
+			 sid.c_str(),
+			 ch + 1);
+	} else {
+		blog(LOG_INFO,
+			 "[obs-delay-stream] latency measure done: sid=%s ch=%d samples=%d/%d method=%s rtt=%.1fms",
+			 sid.c_str(),
+			 ch + 1,
+			 r.used_samples,
+			 r.samples,
+			 r.method,
+			 r.avg_rtt_ms);
+	}
+	if (cb) cb(sid, ch, r);
+	if (cb_any) cb_any(sid, ch, r);
 }
 
-std::string StreamRouter::format_latency_result_json(const LatencyResult& r) {
-    char buf[300];
-    snprintf(buf, sizeof(buf),
-        "{\"type\":\"latency_result\","
-        "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
-        "\"min\":%.1f,\"max\":%.1f,"
-        "\"samples\":%d,\"used_samples\":%d,\"method\":\"%s\"}",
-        r.avg_rtt_ms, r.avg_latency_ms,
-        r.min_rtt_ms, r.max_rtt_ms,
-        r.samples, r.used_samples, r.method);
-    return buf;
+std::string StreamRouter::format_latency_result_json(const LatencyResult &r) {
+	char buf[300];
+	snprintf(buf, sizeof(buf), "{\"type\":\"latency_result\","
+							   "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
+							   "\"min\":%.1f,\"max\":%.1f,"
+							   "\"samples\":%d,\"used_samples\":%d,\"method\":\"%s\"}",
+			 r.avg_rtt_ms,
+			 r.avg_latency_ms,
+			 r.min_rtt_ms,
+			 r.max_rtt_ms,
+			 r.samples,
+			 r.used_samples,
+			 r.method);
+	return buf;
 }
 
-void StreamRouter::broadcast_text(const std::string& sid, int ch, const std::string& msg) {
-    std::lock_guard<std::mutex> lk(mtx_);
-    auto* cs = find_ch(sid, ch);
-    auto srv = server_ptr_;
-    if (!cs || !srv) return;
-    for (auto& hdl : cs->conns) {
-        try { srv->send(hdl, msg, websocketpp::frame::opcode::text); }
-        catch (...) {}
-    }
+void StreamRouter::broadcast_text(const std::string &sid, int ch, const std::string &msg) {
+	std::lock_guard<std::mutex> lk(mtx_);
+	auto                       *cs  = find_ch(sid, ch);
+	auto                        srv = server_ptr_;
+	if (!cs || !srv) return;
+	for (auto &hdl : cs->conns) {
+		try {
+			srv->send(hdl, msg, websocketpp::frame::opcode::text);
+		} catch (...) {
+		}
+	}
 }
