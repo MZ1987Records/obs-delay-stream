@@ -121,6 +121,13 @@ if errorlevel 1 (
 )
 echo   npm: OK
 
+where clang-format >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] clang-format not found. Install LLVM/clang-format and add to PATH.
+    goto :error
+)
+echo   clang-format: OK
+
 set VSWHERE="%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not exist %VSWHERE% (
     echo [ERROR] Visual Studio not found.
@@ -214,6 +221,21 @@ if errorlevel 1 (
     goto :error
 )
 echo   CMake configure: OK
+
+echo.
+echo ================================================================
+echo  [Step 2.5] Formatting src with clang-format...
+echo ================================================================
+set FORMATTED_COUNT=0
+for /f "delims=" %%F in ('dir /b /s "%PLUGIN_DIR%\src\*.c" "%PLUGIN_DIR%\src\*.cc" "%PLUGIN_DIR%\src\*.cpp" "%PLUGIN_DIR%\src\*.cxx" "%PLUGIN_DIR%\src\*.h" "%PLUGIN_DIR%\src\*.hh" "%PLUGIN_DIR%\src\*.hpp" "%PLUGIN_DIR%\src\*.hxx" 2^>nul') do (
+    clang-format --style=file --sort-includes=0 -i "%%F"
+    if errorlevel 1 (
+        echo [ERROR] clang-format failed: %%F
+        goto :error
+    )
+    set /a FORMATTED_COUNT+=1
+)
+echo   clang-format: %FORMATTED_COUNT% files formatted.
 
 echo.
 echo ================================================================
