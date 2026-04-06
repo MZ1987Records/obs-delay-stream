@@ -12,6 +12,10 @@
 #include <numeric>
 #include <obs-module.h>
 
+namespace ods::network {
+
+using namespace ods::core;
+
 // ============================================================
 // 起動 / 停止
 // ============================================================
@@ -466,47 +470,6 @@ void StreamRouter::set_audio_config(const AudioConfig &cfg) {
 void StreamRouter::set_http_root_dir(std::string dir) {
 	std::lock_guard<std::mutex> lk(mtx_);
 	http_root_dir_ = std::move(dir);
-}
-
-// ============================================================
-// private: static ヘルパー (websocket_server_detail への委譲)
-// ============================================================
-
-std::string StreamRouter::make_key(const std::string &sid, int ch) {
-	return websocket_server_detail::make_key(sid, ch);
-}
-std::string StreamRouter::sanitize_id(const std::string &raw) {
-	return websocket_server_detail::sanitize_id(raw);
-}
-std::string StreamRouter::json_escape(const std::string &s) {
-	return websocket_server_detail::json_escape(s);
-}
-std::string StreamRouter::url_decode(const std::string &s) {
-	return websocket_server_detail::url_decode(s);
-}
-websocket_server_detail::PathParseResult StreamRouter::parse_path_code(
-	const std::string &path,
-	std::string       &stream_id,
-	std::string       &code) {
-	return websocket_server_detail::parse_path_code(path, stream_id, code);
-}
-bool StreamRouter::is_safe_rel_path(const std::string &rel) {
-	return websocket_server_detail::is_safe_rel_path(rel);
-}
-std::string StreamRouter::join_path(const std::string &base, const std::string &rel) {
-	return websocket_server_detail::join_path(base, rel);
-}
-bool StreamRouter::read_file_to_string(const std::string &path, std::string &out) {
-	return websocket_server_detail::read_file_to_string(path, out);
-}
-const char *StreamRouter::guess_content_type(const std::string &path) {
-	return websocket_server_detail::guess_content_type(path);
-}
-bool StreamRouter::is_valid_opus_sample_rate(int sample_rate) {
-	return websocket_server_detail::is_valid_opus_sample_rate(sample_rate);
-}
-bool StreamRouter::is_valid_pcm_downsample_ratio(int r) {
-	return websocket_server_detail::is_valid_pcm_downsample_ratio(r);
 }
 
 // ============================================================
@@ -1216,3 +1179,5 @@ void StreamRouter::broadcast_text(const std::string &sid, int ch, const std::str
 		}
 	}
 }
+
+} // namespace ods::network

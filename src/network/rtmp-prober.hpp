@@ -16,6 +16,8 @@
 #include <string>
 #include <thread>
 
+namespace ods::network {
+
 // ============================================================
 // RtmpProbeResult
 // ============================================================
@@ -67,3 +69,5 @@ class RtmpProber {
 	mutable std::mutex mtx_;
 	RtmpProbeResult    last_result_;
 };
+
+} // namespace ods::network

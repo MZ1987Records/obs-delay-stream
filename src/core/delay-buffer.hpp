@@ -5,6 +5,8 @@
 #include <cstring>
 #include <vector>
 
+namespace ods::core {
+
 // ============================================================
 // DelayBuffer
 //   サンプルレート・チャンネル数に対応したリングバッファ遅延器
@@ -77,3 +79,5 @@ class DelayBuffer {
 	size_t              write_pos_ = 0;
 	std::vector<float>  buf_;
 };
+
+} // namespace ods::core

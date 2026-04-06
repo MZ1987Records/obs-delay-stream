@@ -2,6 +2,8 @@
 
 #include <obs-module.h>
 
+namespace ods::widgets {
+
 // 遅延テーブルウィジェットに渡す1チャンネル分の情報。
 struct DelayTableChannelInfo {
 	const char *name;        // メモ名 (空文字列可)
@@ -37,3 +39,5 @@ obs_property_t *obs_properties_add_delay_table(
 	const DelayTableLabels      &labels);
 
 void schedule_delay_table_inject(obs_source_t *source);
+
+} // namespace ods::widgets

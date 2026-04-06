@@ -5,7 +5,7 @@
 
 #include <cstring>
 
-namespace plugin_main_settings_helpers {
+namespace ods::plugin {
 
 std::string resolve_rtmp_url_from_source(obs_source_t *source) {
 	if (!source) return "";
@@ -14,7 +14,7 @@ std::string resolve_rtmp_url_from_source(obs_source_t *source) {
 	if (!s) return "";
 	bool auto_mode = obs_data_get_bool(s, "rtmp_url_auto");
 	if (auto_mode) {
-		url = plugin_main_obs_services::get_obs_stream_url();
+		url = get_obs_stream_url();
 	}
 	if (url.empty()) {
 		const char *configured = obs_data_get_string(s, "rtmp_url");
@@ -38,8 +38,8 @@ void maybe_fill_cloudflared_path_from_auto(obs_source_t *source) {
 void maybe_persist_cloudflared_path_after_auto_ready(obs_source_t *source) {
 	if (!source) return;
 	std::string auto_path;
-	if (!TunnelManager::get_auto_cloudflared_path_if_exists(auto_path)) return;
-	std::string ui_path = TunnelManager::to_localappdata_env_path(auto_path);
+	if (!ods::tunnel::TunnelManager::get_auto_cloudflared_path_if_exists(auto_path)) return;
+	std::string ui_path = ods::tunnel::TunnelManager::to_localappdata_env_path(auto_path);
 
 	obs_data_t *s = obs_source_get_settings(source);
 	if (!s) return;
@@ -51,4 +51,4 @@ void maybe_persist_cloudflared_path_after_auto_ready(obs_source_t *source) {
 	obs_data_release(s);
 }
 
-} // namespace plugin_main_settings_helpers
+} // namespace ods::plugin

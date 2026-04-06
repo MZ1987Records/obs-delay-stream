@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace plugin_main_release_check {
+namespace ods::plugin {
 
 struct LatestReleaseInfo {
 	std::string latest_version;
@@ -13,4 +13,4 @@ struct LatestReleaseInfo {
 bool fetch_latest_release_info(LatestReleaseInfo &out);
 bool is_newer_version(const std::string &latest, const std::string &current);
 
-} // namespace plugin_main_release_check
+} // namespace ods::plugin

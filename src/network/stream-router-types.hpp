@@ -11,6 +11,8 @@
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
 
+namespace ods::network {
+
 using WsServer   = websocketpp::server<websocketpp::config::asio>;
 using ConnHandle = websocketpp::connection_hdl;
 using Clock      = std::chrono::steady_clock;
@@ -62,3 +64,5 @@ struct ChannelState {
 
 	std::function<void(const std::string &stream_id, int ch, LatencyResult)> on_result;
 };
+
+} // namespace ods::network

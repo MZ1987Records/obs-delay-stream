@@ -4,7 +4,7 @@
 #include <QStringList>
 #include <string>
 
-namespace widget_payload {
+namespace ods::widgets {
 
 inline std::string escape_field(const char *src) {
 	std::string out;
@@ -46,4 +46,4 @@ inline bool split_escaped_pipe_fields(const QString &text, QStringList &fields) 
 	return true;
 }
 
-} // namespace widget_payload
+} // namespace ods::widgets

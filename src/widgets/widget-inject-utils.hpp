@@ -7,7 +7,7 @@
 #include <QWidget>
 #include <vector>
 
-namespace widget_inject {
+namespace ods::widgets {
 
 struct ScrollSnapshot {
 	QPointer<QAbstractScrollArea> area;
@@ -48,4 +48,4 @@ inline void restore_scroll_snapshots(const std::vector<ScrollSnapshot> &snapshot
 	}
 }
 
-} // namespace widget_inject
+} // namespace ods::widgets

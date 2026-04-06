@@ -3,15 +3,17 @@
 #include <cstdint>
 #include <obs-module.h>
 
+namespace ods::plugin {
 struct DelayStreamData;
+}
 
-namespace plugin_main_properties_ui {
+namespace ods::ui {
 
-bool try_get_parent_audio_sync_offset_ns(DelayStreamData *d, int64_t &out_offset_ns);
+bool try_get_parent_audio_sync_offset_ns(ods::plugin::DelayStreamData *d, int64_t &out_offset_ns);
 
 class PropertiesBuilder {
 	public:
-	PropertiesBuilder(obs_properties_t *props, DelayStreamData *d);
+	PropertiesBuilder(obs_properties_t *props, ods::plugin::DelayStreamData *d);
 
 	// --- properties-builder.cpp が実装 ---
 	void add_plugin_group();
@@ -32,8 +34,8 @@ class PropertiesBuilder {
 	void add_url_share_group();
 
 	private:
-	obs_properties_t *props_;
-	DelayStreamData  *d_;
+	obs_properties_t             *props_;
+	ods::plugin::DelayStreamData *d_;
 
 	// properties-ui 内部ヘルパー
 	void add_flow_rtmp_measure_section(obs_properties_t *grp);
@@ -59,4 +61,4 @@ class PropertiesBuilder {
 	static bool cb_sub_copy_all(obs_properties_t *, obs_property_t *, void *);
 };
 
-} // namespace plugin_main_properties_ui
+} // namespace ods::ui

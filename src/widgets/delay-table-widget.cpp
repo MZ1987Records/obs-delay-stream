@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 
+namespace ods::widgets {
+
 namespace {
 
 constexpr char kDelayTableMagic[]        = "DTABLE|";
@@ -288,7 +290,6 @@ bool parse_delay_table_payload(const QString              &text,
 							   int                        &selected_ch,
 							   QStringList                &labels,
 							   std::vector<ParsedChannel> &channels) {
-	using widget_payload::split_escaped_pipe_fields;
 	QStringList fields;
 	if (!split_escaped_pipe_fields(text, fields))
 		return false;
@@ -335,8 +336,8 @@ void do_delay_table_inject(void *param) {
 		QLabel *label = nullptr;
 		QString text;
 	};
-	std::vector<Placeholder>                   found;
-	std::vector<widget_inject::ScrollSnapshot> scroll_snapshots;
+	std::vector<Placeholder>    found;
+	std::vector<ScrollSnapshot> scroll_snapshots;
 
 	const auto all_widgets = QApplication::allWidgets();
 	for (QWidget *w : all_widgets) {
@@ -347,7 +348,7 @@ void do_delay_table_inject(void *param) {
 			found.push_back({lbl, text});
 	}
 	for (const auto &ph : found)
-		widget_inject::collect_ancestor_scroll_snapshot(ph.label, scroll_snapshots);
+		collect_ancestor_scroll_snapshot(ph.label, scroll_snapshots);
 
 	int replaced_count = 0;
 	for (const auto &ph : found) {
@@ -380,7 +381,7 @@ void do_delay_table_inject(void *param) {
 		++replaced_count;
 	}
 
-	widget_inject::restore_scroll_snapshots(scroll_snapshots);
+	restore_scroll_snapshots(scroll_snapshots);
 
 	if ((found.empty() || replaced_count < static_cast<int>(found.size())) &&
 		ctx->retries_left > 0) {
@@ -405,7 +406,6 @@ obs_property_t *obs_properties_add_delay_table(
 	int                          ch_count,
 	const DelayTableChannelInfo *channels,
 	const DelayTableLabels      &labels) {
-	using widget_payload::escape_field;
 	if (!props || !prop_name || !*prop_name || ch_count <= 0 || !channels)
 		return nullptr;
 
@@ -455,3 +455,5 @@ void schedule_delay_table_inject(obs_source_t *source) {
 	auto *ctx = new DelayTableInjectCtx(source);
 	obs_queue_task(OBS_TASK_UI, do_delay_table_inject, ctx, false);
 }
+
+} // namespace ods::widgets

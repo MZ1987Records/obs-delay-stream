@@ -12,7 +12,9 @@
 #include <mutex>
 #include <string>
 
-namespace plugin_settings {
+namespace ods::plugin {
+
+using namespace ods::core;
 
 SubSettingKey make_sub_key(const char *suffix, int ch) {
 	SubSettingKey key{};
@@ -51,20 +53,6 @@ float calc_effective_sub_delay_value_ms(float base_delay_ms,
 }
 
 namespace {
-
-using plugin_utils::clamp_sub_ch_count;
-using plugin_utils::normalize_opus_sample_rate;
-using plugin_utils::normalize_quantization_bits;
-using plugin_utils::normalize_pcm_downsample_ratio;
-using plugin_utils::normalize_playback_buffer_ms;
-using plugin_utils::sanitize_stream_id;
-using plugin_utils::generate_stream_id;
-using plugin_settings::make_sub_delay_key;
-using plugin_settings::make_sub_adjust_key;
-using plugin_settings::make_sub_memo_key;
-using plugin_settings::make_sub_code_key;
-using plugin_settings::calc_sub_delay_raw_value_ms;
-using plugin_settings::calc_effective_sub_delay_value_ms;
 
 constexpr float kSubAdjustMinMs = -500.0f;
 constexpr float kSubAdjustMaxMs = 500.0f;
@@ -108,7 +96,7 @@ class SettingsApplier {
 			d_->router_running.store(false, std::memory_order_relaxed);
 			blog(LOG_INFO, "[obs-delay-stream] WebSocket server stopped by defaults reset");
 		}
-		TunnelState ts = d_->tunnel.state();
+		ods::tunnel::TunnelState ts = d_->tunnel.state();
 		if (ts == TunnelState::Starting || ts == TunnelState::Running) {
 			d_->tunnel.stop();
 			blog(LOG_INFO, "[obs-delay-stream] Tunnel stopped by defaults reset");
@@ -212,8 +200,8 @@ class SettingsApplier {
 		}
 		d_->set_stream_id(sid);
 		d_->router.set_stream_id(sid);
-		plugin_main_obs_services::maybe_autofill_rtmp_url(s_, true);
-		plugin_main_settings_helpers::maybe_fill_cloudflared_path_from_auto(d_->context);
+		maybe_autofill_rtmp_url(s_, true);
+		maybe_fill_cloudflared_path_from_auto(d_->context);
 
 		{
 			int ws_port = (int)obs_data_get_int(s_, "ws_port");
@@ -266,7 +254,7 @@ class SettingsApplier {
 				obs_data_set_string(s_, code_key.data(), code.c_str());
 			}
 			d_->router.set_sub_code(i, code);
-			plugin_main_audio_processing::apply_sub_delay_to_buffer(d_, i);
+			ods::audio::apply_sub_delay_to_buffer(d_, i);
 
 			const float prev_raw =
 				calc_sub_delay_raw_value_ms(prev_delay, prev_adjust, prev_sub_offset);
@@ -313,4 +301,4 @@ void apply_settings(DelayStreamData *d, obs_data_t *settings) {
 	SettingsApplier(d, settings).apply_all();
 }
 
-} // namespace plugin_settings
+} // namespace ods::plugin

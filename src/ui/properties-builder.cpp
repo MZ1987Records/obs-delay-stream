@@ -19,11 +19,19 @@
 
 #define T_(s) obs_module_text(s)
 
-namespace plugin_main_properties_ui {
+namespace ods::ui {
+
+using ods::plugin::DelayStreamData;
+using ods::plugin::UpdateCheckStatus;
+using ods::sync::FlowPhase;
+using ods::sync::FlowResult;
+using ods::tunnel::TunnelState;
+using namespace ods::core;
+using namespace ods::widgets;
 
 namespace {
-using plugin_utils::extract_host_from_url;
-using plugin_settings::make_sub_memo_key;
+using ods::plugin::extract_host_from_url;
+using ods::plugin::make_sub_memo_key;
 
 static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
 } // namespace
@@ -40,7 +48,7 @@ bool try_get_parent_audio_sync_offset_ns(DelayStreamData *d, int64_t &out_offset
 
 	obs_source_t *parent = obs_filter_get_parent(d->context);
 	if (!parent) parent = obs_filter_get_target(d->context);
-	if (!parent || plugin_main_obs_services::is_obs_source_removed(parent)) return false;
+	if (!parent || ods::plugin::is_obs_source_removed(parent)) return false;
 
 	out_offset_ns = obs_source_get_sync_offset(parent);
 	return true;
@@ -54,7 +62,7 @@ bool PropertiesBuilder::cb_rtmp_url_auto_changed(void *priv, obs_properties_t *p
 	bool auto_new = obs_data_get_bool(settings, "rtmp_url_auto");
 	d->rtmp_url_auto.store(auto_new, std::memory_order_relaxed);
 	if (auto_new) {
-		plugin_main_obs_services::maybe_autofill_rtmp_url(settings, true);
+		ods::plugin::maybe_autofill_rtmp_url(settings, true);
 	}
 	if (props) {
 		if (auto *url_p = obs_properties_get(props, "rtmp_url")) {
@@ -128,7 +136,7 @@ bool PropertiesBuilder::cb_flow_retry_failed(obs_properties_t *, obs_property_t 
 bool PropertiesBuilder::cb_flow_start_step3(obs_properties_t *, obs_property_t *, void *priv) {
 	auto *d = static_cast<DelayStreamData *>(priv);
 	if (!d) return false;
-	std::string url = plugin_main_settings_helpers::resolve_rtmp_url_from_source(d->context);
+	std::string url = ods::plugin::resolve_rtmp_url_from_source(d->context);
 	d->flow.start_step3(url);
 	return false;
 }
@@ -156,8 +164,8 @@ bool PropertiesBuilder::cb_stream_id_changed(void *, obs_properties_t *props, ob
 
 bool PropertiesBuilder::cb_audio_codec_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
 	auto *d = static_cast<DelayStreamData *>(priv);
-	plugin_main_config::apply_codec_option_visibility(props, settings);
-	plugin_main_props_refresh::props_ui_with_preserved_scroll([d]() {
+	ods::plugin::apply_codec_option_visibility(props, settings);
+	props_ui_with_preserved_scroll([d]() {
 		if (!d || !d->context) return;
 		schedule_stepper_inject(d->context);
 		schedule_text_button_inject(d->context);
@@ -525,7 +533,7 @@ void PropertiesBuilder::add_ws_group(bool has_sid) {
 	if (d_->context) {
 		obs_data_t *s = obs_source_get_settings(d_->context);
 		if (s) {
-			plugin_main_config::apply_codec_option_visibility(grp, s);
+			ods::plugin::apply_codec_option_visibility(grp, s);
 			obs_data_release(s);
 		}
 	}
@@ -725,4 +733,4 @@ void PropertiesBuilder::add_master_group() {
 	obs_properties_add_group(props_, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
 }
 
-} // namespace plugin_main_properties_ui
+} // namespace ods::ui

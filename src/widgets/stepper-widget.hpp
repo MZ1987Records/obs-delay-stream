@@ -2,6 +2,8 @@
 
 #include <obs-module.h>
 
+namespace ods::widgets {
+
 obs_property_t *obs_properties_add_stepper(
 	obs_properties_t *props,
 	const char       *prop_name,
@@ -16,3 +18,5 @@ obs_property_t *obs_properties_add_stepper(
 	int               max_input_chars = 7);
 
 void schedule_stepper_inject(obs_source_t *source);
+
+} // namespace ods::widgets

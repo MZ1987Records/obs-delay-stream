@@ -64,6 +64,8 @@
 #include "network/stream-router-types.hpp"
 #include "network/stream-router-utils.hpp"
 
+namespace ods::network {
+
 // ============================================================
 // StreamRouter
 //   全chを1ポートで管理。配信ID + ch番号でルーティング。
@@ -104,7 +106,7 @@ class StreamRouter {
 	void send_audio(int ch, const float *data, size_t frames, uint32_t sample_rate, uint32_t channels);
 
 	// ----- RTT計測 (ch: 0-indexed) -----
-	bool          start_measurement(int ch, int num_pings = DEFAULT_PING_COUNT, int interval_ms = 150, int start_delay_ms = 0);
+	bool          start_measurement(int ch, int num_pings = ods::core::DEFAULT_PING_COUNT, int interval_ms = 150, int start_delay_ms = 0);
 	bool          is_measuring(int ch) const;
 	LatencyResult last_result(int ch) const;
 
@@ -134,23 +136,6 @@ class StreamRouter {
 	void set_http_root_dir(std::string dir);
 
 	private:
-	using OpusEnc         = websocket_server_detail::OpusEnc;
-	using PathParseResult = websocket_server_detail::PathParseResult;
-
-	static std::string     make_key(const std::string &sid, int ch);
-	static std::string     sanitize_id(const std::string &raw);
-	static std::string     json_escape(const std::string &s);
-	static std::string     url_decode(const std::string &s);
-	static PathParseResult parse_path_code(const std::string &path,
-										   std::string       &stream_id,
-										   std::string       &code);
-	static bool            is_safe_rel_path(const std::string &rel);
-	static std::string     join_path(const std::string &base, const std::string &rel);
-	static bool            read_file_to_string(const std::string &path, std::string &out);
-	static const char     *guess_content_type(const std::string &path);
-	static bool            is_valid_opus_sample_rate(int sample_rate);
-	static bool            is_valid_pcm_downsample_ratio(int r);
-
 	// 三角形フィルタ [0.25, 0.5, 0.25] による 1/2 間引きを段階適用
 	// factor=2: 1 段、factor=4: 2 段カスケード（等価 7 タップ FIR）
 	static void        downsample_pcm(const float *in, size_t in_frames, uint32_t channels, int factor, std::vector<float> &out, size_t &out_frames);
@@ -203,18 +188,18 @@ class StreamRouter {
 	std::atomic<int>          audio_quantization_bits_{8};
 	std::atomic<bool>         audio_mono_{true};
 	std::atomic<int>          pcm_downsample_ratio_{4}; // 1: そのまま, 2: 1/2, 4: 1/4
-	std::atomic<int>          playback_buffer_ms_{PLAYBACK_BUFFER_DEFAULT_MS};
+	std::atomic<int>          playback_buffer_ms_{ods::core::PLAYBACK_BUFFER_DEFAULT_MS};
 	std::atomic<uint64_t>     pb_debounce_seq_{0};
 	std::atomic<bool>         pb_debounce_running_{false};
 	std::vector<OpusEnc>      opus_;
-	int                       active_ch_max_ = MAX_SUB_CH;
+	int                       active_ch_max_ = ods::core::MAX_SUB_CH;
 
 	// conn_handle → ConnInfo
 	std::map<ConnHandle, ConnInfo, std::owner_less<ConnHandle>> conn_map_;
 	// "stream_id/ch_0idx" → ChannelState
-	std::map<std::string, ChannelState> ch_map_;
-	std::array<std::string, MAX_SUB_CH> sub_memo_{};
-	std::array<std::string, MAX_SUB_CH> sub_code_{};
+	std::map<std::string, ChannelState>            ch_map_;
+	std::array<std::string, ods::core::MAX_SUB_CH> sub_memo_{};
+	std::array<std::string, ods::core::MAX_SUB_CH> sub_code_{};
 
 	// stop() 時に退避される計測結果・適用遅延キャッシュ
 	std::map<std::string, ChannelCache> ch_cache_;
@@ -223,3 +208,5 @@ class StreamRouter {
 	std::mutex                                  measure_threads_mtx_;
 	std::vector<std::unique_ptr<MeasureThread>> measure_threads_;
 };
+
+} // namespace ods::network

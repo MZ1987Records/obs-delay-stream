@@ -13,7 +13,7 @@
 #include <set>
 #include <vector>
 
-namespace plugin_main_props_refresh {
+namespace ods::ui {
 
 namespace {
 
@@ -138,7 +138,7 @@ void do_request_properties_refresh_ui(void *p) {
 			should_update = false;
 		}
 	}
-	if (should_update && plugin_main_obs_services::is_obs_source_removed(ctx->source)) {
+	if (should_update && ods::plugin::is_obs_source_removed(ctx->source)) {
 		should_update = false;
 	}
 	if (should_update) {
@@ -195,7 +195,7 @@ void props_refresh_request(obs_source_t *source,
 						   const char   *reason) {
 	if (!source || !create_done) return;
 	if (destroying) return;
-	if (plugin_main_obs_services::is_obs_source_removed(source)) return;
+	if (ods::plugin::is_obs_source_removed(source)) return;
 	if (get_props_depth > 0) return;
 
 	uint64_t seq = g_props_refresh_seq.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -235,4 +235,4 @@ void props_refresh_request(obs_source_t *source,
 	}
 }
 
-} // namespace plugin_main_props_refresh
+} // namespace ods::ui

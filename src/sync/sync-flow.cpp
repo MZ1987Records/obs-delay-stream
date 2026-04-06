@@ -8,6 +8,11 @@
 
 #include <algorithm>
 
+namespace ods::sync {
+
+using namespace ods::core;
+using ods::network::StreamRouter;
+
 // ============================================================
 // SyncFlow
 // ============================================================
@@ -242,3 +247,5 @@ void SyncFlow::compute_proposals() {
 		ch.proposed_delay = ch.measured ? (max_ow - ch.one_way_latency_ms) : 0.0;
 	}
 }
+
+} // namespace ods::sync

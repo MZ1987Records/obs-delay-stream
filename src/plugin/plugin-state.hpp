@@ -17,6 +17,25 @@
 #include <string>
 #include <vector>
 
+namespace ods::plugin {
+
+using ods::core::DelayBuffer;
+using ods::core::MAX_SUB_CH;
+using ods::core::WS_PORT;
+using ods::core::DEFAULT_PING_COUNT;
+using ods::core::PLAYBACK_BUFFER_DEFAULT_MS;
+
+using ods::network::LatencyResult;
+using ods::network::RtmpProber;
+using ods::network::RtmpProbeResult;
+using ods::network::StreamRouter;
+using ods::network::AudioConfig;
+using ods::sync::SyncFlow;
+using ods::sync::FlowPhase;
+using ods::sync::FlowResult;
+using ods::tunnel::TunnelManager;
+using ods::tunnel::TunnelState;
+
 // スレッドセーフな計測状態管理クラス。
 // mutex を外部から直接触らずに済む操作インターフェースを提供する。
 class MeasureState {
@@ -224,7 +243,7 @@ struct DelayStreamData {
 	// プロパティUI の再描画を依頼する。
 	// create_done / destroying / get_props_depth を自動参照するため呼び出し側で展開不要。
 	void request_props_refresh(const char *reason = nullptr) const {
-		plugin_main_props_refresh::props_refresh_request(
+		ods::ui::props_refresh_request(
 			context,
 			create_done.load(std::memory_order_acquire),
 			destroying.load(std::memory_order_acquire),
@@ -232,3 +251,5 @@ struct DelayStreamData {
 			reason);
 	}
 };
+
+} // namespace ods::plugin

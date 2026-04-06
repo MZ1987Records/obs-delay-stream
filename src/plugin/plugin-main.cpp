@@ -54,8 +54,17 @@ static std::mutex    g_singleton_mtx;
 static obs_source_t *g_singleton_owner      = nullptr;
 static uint64_t      g_singleton_generation = 0;
 
-using plugin_utils::get_local_ip;
-using plugin_settings::make_sub_delay_key;
+using ods::plugin::get_local_ip;
+using ods::plugin::make_sub_delay_key;
+using ods::plugin::DelayStreamData;
+using ods::plugin::UpdateCheckStatus;
+using ods::plugin::ChCtx;
+using ods::sync::FlowResult;
+using ods::sync::FlowPhase;
+using ods::network::LatencyResult;
+using ods::network::RtmpProbeResult;
+using namespace ods::core;
+using namespace ods::widgets;
 
 class DelayStreamFilter {
 	public:
@@ -116,7 +125,7 @@ void DelayStreamFilter::schedule_audio_sync_check(
 		auto token = life_token_weak.lock();
 		if (!token || !token->load(std::memory_order_acquire)) return;
 		int64_t current = INT64_MIN;
-		plugin_main_properties_ui::try_get_parent_audio_sync_offset_ns(d, current);
+		ods::ui::try_get_parent_audio_sync_offset_ns(d, current);
 		const int64_t last =
 			d->last_rendered_audio_sync_offset_ns.load(std::memory_order_relaxed);
 		if (current != last) {
@@ -142,17 +151,17 @@ void DelayStreamFilter::start_update_check_async(
 
 	try {
 		std::thread([d, life_token_weak]() {
-			plugin_main_release_check::LatestReleaseInfo info;
-			const bool                                   ok = plugin_main_release_check::fetch_latest_release_info(info);
-			const bool                                   has_update =
-				ok && plugin_main_release_check::is_newer_version(info.latest_version, PLUGIN_VERSION);
+			ods::plugin::LatestReleaseInfo info;
+			const bool                     ok = ods::plugin::fetch_latest_release_info(info);
+			const bool                     has_update =
+				ok && ods::plugin::is_newer_version(info.latest_version, PLUGIN_VERSION);
 
 			struct Ctx {
-				std::weak_ptr<std::atomic<bool>>             life_token;
-				DelayStreamData                             *d;
-				bool                                         ok         = false;
-				bool                                         has_update = false;
-				plugin_main_release_check::LatestReleaseInfo info;
+				std::weak_ptr<std::atomic<bool>> life_token;
+				DelayStreamData                 *d;
+				bool                             ok         = false;
+				bool                             has_update = false;
+				ods::plugin::LatestReleaseInfo   info;
 			};
 			auto *ctx = new Ctx{life_token_weak, d, ok, has_update, std::move(info)};
 			obs_queue_task(OBS_TASK_UI, [](void *p) {
@@ -268,7 +277,7 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->tunnel.on_download_state = [d](bool downloading) {
 		if (!downloading) {
 			queue_ui_safe(d, [](DelayStreamData *d) {
-				plugin_main_settings_helpers::maybe_persist_cloudflared_path_after_auto_ready(d->context);
+				ods::plugin::maybe_persist_cloudflared_path_after_auto_ready(d->context);
 				d->request_props_refresh("tunnel.on_download_state.done");
 			});
 			return;
@@ -333,8 +342,8 @@ void *DelayStreamFilter::ds_create(obs_data_t *settings, obs_source_t *source) {
 			d->owns_singleton_slot   = false;
 		}
 	}
-	plugin_main_props_refresh::props_refresh_unblock_source(source);
-	plugin_main_obs_services::maybe_autofill_rtmp_url(settings, false);
+	ods::ui::props_refresh_unblock_source(source);
+	ods::plugin::maybe_autofill_rtmp_url(settings, false);
 	d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
 	if (d->is_duplicate_instance) {
 		blog(LOG_WARNING, "[obs-delay-stream] duplicate filter instance created as warning-only");
@@ -342,14 +351,14 @@ void *DelayStreamFilter::ds_create(obs_data_t *settings, obs_source_t *source) {
 		return d;
 	}
 	{
-		auto html = plugin_main_receiver_assets::load_receiver_index_html();
+		auto html = ods::plugin::load_receiver_index_html();
 		if (html.empty()) {
 			blog(LOG_WARNING, "[obs-delay-stream] receiver/index.html not found; HTTP top page disabled");
 		} else {
-			blog(LOG_INFO, "[obs-delay-stream] receiver html loaded: build=%s", plugin_main_receiver_assets::get_receiver_build_timestamp());
+			blog(LOG_INFO, "[obs-delay-stream] receiver html loaded: build=%s", ods::plugin::get_receiver_build_timestamp());
 		}
 		d->router.set_http_index_html(std::move(html));
-		auto root = plugin_main_receiver_assets::get_receiver_root_dir();
+		auto root = ods::plugin::get_receiver_root_dir();
 		if (!root.empty()) d->router.set_http_root_dir(std::move(root));
 	}
 	d->auto_ip = get_local_ip();
@@ -380,7 +389,7 @@ void DelayStreamFilter::ds_destroy(void *data) {
 		d->life_token.reset();
 	}
 	if (d->context) {
-		plugin_main_props_refresh::props_refresh_block_source(d->context);
+		ods::ui::props_refresh_block_source(d->context);
 		flow_progress_unregister_source(d->context);
 	}
 	bool          release_singleton_slot = d->owns_singleton_slot;
@@ -405,12 +414,12 @@ void DelayStreamFilter::ds_destroy(void *data) {
 
 // OBS設定値を内部状態へ同期する。
 void DelayStreamFilter::ds_update(void *data, obs_data_t *settings) {
-	plugin_settings::apply_settings(static_cast<DelayStreamData *>(data), settings);
+	ods::plugin::apply_settings(static_cast<DelayStreamData *>(data), settings);
 }
 
 // マスター遅延適用とチャンネル配信用の音声分岐を行う。
 obs_audio_data *DelayStreamFilter::ds_filter_audio(void *data, obs_audio_data *audio) {
-	return plugin_main_audio_processing::filter_audio_delay_stream(
+	return ods::audio::filter_audio_delay_stream(
 		static_cast<DelayStreamData *>(data),
 		audio);
 }
@@ -436,7 +445,7 @@ void DelayStreamFilter::apply_sub_delay(DelayStreamData *d, int i, double ms) {
 	obs_data_set_double(s, delay_key.data(), ms);
 	obs_data_release(s);
 	d->sub[i].delay_ms = (float)ms;
-	plugin_main_audio_processing::apply_sub_delay_to_buffer(d, i);
+	ods::audio::apply_sub_delay_to_buffer(d, i);
 	d->router.notify_apply_delay(i, d->sub[i].delay_ms, "auto_measure");
 }
 
@@ -461,11 +470,11 @@ obs_properties_t *DelayStreamFilter::ds_get_properties(void *data) {
 
 	{
 		int64_t sync_offset_ns = INT64_MIN;
-		plugin_main_properties_ui::try_get_parent_audio_sync_offset_ns(d, sync_offset_ns);
+		ods::ui::try_get_parent_audio_sync_offset_ns(d, sync_offset_ns);
 		d->last_rendered_audio_sync_offset_ns.store(sync_offset_ns, std::memory_order_relaxed);
 	}
 
-	plugin_main_properties_ui::PropertiesBuilder ui(props, d);
+	ods::ui::PropertiesBuilder ui(props, d);
 	ui.add_plugin_group();
 	if (!d->is_duplicate_instance) {
 		ui.add_sub_channels_group();
@@ -492,7 +501,7 @@ obs_properties_t *DelayStreamFilter::ds_get_properties(void *data) {
 
 // 各設定項目のデフォルト値を定義する。
 void DelayStreamFilter::ds_get_defaults(obs_data_t *settings) {
-	plugin_main_config::set_delay_stream_defaults(settings);
+	ods::plugin::set_delay_stream_defaults(settings);
 }
 
 static struct obs_source_info delay_stream_filter;

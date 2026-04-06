@@ -30,6 +30,10 @@
 #include <numeric>
 #include <vector>
 
+namespace ods::network {
+
+using namespace ods::core;
+
 using ProbeClk = std::chrono::steady_clock;
 using ProbeMs  = std::chrono::duration<double, std::milli>;
 
@@ -248,3 +252,5 @@ void RtmpProber::probe_loop() {
 
 	if (on_result) on_result(r);
 }
+
+} // namespace ods::network

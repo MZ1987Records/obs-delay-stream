@@ -3,6 +3,8 @@
 #include <QDoubleSpinBox>
 #include <QWheelEvent>
 
+namespace ods::widgets {
+
 // マウスオーバーだけではホイールで値が変わらないスピンボックス。
 // クリックしてフォーカスを得た後のみホイール操作を受け付ける。
 class FocusSpinBox : public QDoubleSpinBox {
@@ -18,3 +20,5 @@ class FocusSpinBox : public QDoubleSpinBox {
 		event->ignore();
 	}
 };
+
+} // namespace ods::widgets

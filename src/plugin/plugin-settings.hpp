@@ -3,9 +3,9 @@
 #include <array>
 #include <obs-module.h>
 
-struct DelayStreamData;
+namespace ods::plugin {
 
-namespace plugin_settings {
+struct DelayStreamData;
 
 using SubSettingKey = std::array<char, 32>;
 
@@ -25,4 +25,4 @@ float calc_effective_sub_delay_value_ms(float base_delay_ms,
 
 void apply_settings(DelayStreamData *d, obs_data_t *settings);
 
-} // namespace plugin_settings
+} // namespace ods::plugin

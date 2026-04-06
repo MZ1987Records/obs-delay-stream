@@ -2,6 +2,8 @@
 
 // 共通定数（このプロジェクトで一元管理する）
 
+namespace ods::core {
+
 // チャンネル数・ポート
 static constexpr int   MAX_SUB_CH                 = 20;
 static constexpr int   WS_PORT                    = 19000;
@@ -33,3 +35,5 @@ static constexpr int TUNNEL_KILL_TIMEOUT_MS    = 2000;
 static constexpr const char *UI_COLOR_START_BUTTON_BG = "#1E7F34";
 static constexpr const char *UI_COLOR_STOP_BUTTON_BG  = "#8B1E1E";
 static constexpr const char *UI_COLOR_BUTTON_TEXT     = "#FFFFFF";
+
+} // namespace ods::core

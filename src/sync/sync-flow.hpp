@@ -24,7 +24,17 @@
 #include <string>
 
 // StreamRouter は .cpp 側で include するため前方宣言のみ
+namespace ods::network {
 class StreamRouter;
+}
+
+namespace ods::sync {
+
+using ods::core::MAX_SUB_CH;
+using ods::core::DEFAULT_PING_COUNT;
+using ods::network::LatencyResult;
+using ods::network::RtmpProber;
+using ods::network::RtmpProbeResult;
 
 // ============================================================
 // フローの状態
@@ -94,8 +104,8 @@ class SyncFlow {
 	FlowResult result() const;
 	bool       busy() const;
 
-	bool start_step1(StreamRouter &router, const std::string &stream_id);
-	bool retry_failed_step1(StreamRouter &router);
+	bool start_step1(ods::network::StreamRouter &router, const std::string &stream_id);
+	bool retry_failed_step1(ods::network::StreamRouter &router);
 	bool start_step3(const std::string &rtmp_url);
 	bool apply_step3();
 	void reset();
@@ -113,3 +123,5 @@ class SyncFlow {
 	FlowResult         result_;
 	RtmpProber         prober_;
 };
+
+} // namespace ods::sync

@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+namespace ods::widgets {
+
 namespace {
 
 constexpr char kStepperMagic[]        = "STEPPER\x1F"; // legacy format
@@ -211,8 +213,8 @@ void do_stepper_inject(void *param) {
 		QLabel *label;
 		QString text;
 	};
-	std::vector<Placeholder>                   found;
-	std::vector<widget_inject::ScrollSnapshot> scroll_snapshots;
+	std::vector<Placeholder>    found;
+	std::vector<ScrollSnapshot> scroll_snapshots;
 
 	const auto all_widgets = QApplication::allWidgets();
 	for (QWidget *w : all_widgets) {
@@ -224,7 +226,7 @@ void do_stepper_inject(void *param) {
 			found.push_back({lbl, text});
 	}
 	for (const auto &ph : found)
-		widget_inject::collect_ancestor_scroll_snapshot(ph.label, scroll_snapshots);
+		collect_ancestor_scroll_snapshot(ph.label, scroll_snapshots);
 
 	int replaced_count = 0;
 	for (auto &ph : found) {
@@ -293,7 +295,7 @@ void do_stepper_inject(void *param) {
 		++replaced_count;
 	}
 
-	widget_inject::restore_scroll_snapshots(scroll_snapshots);
+	restore_scroll_snapshots(scroll_snapshots);
 
 	if ((found.empty() || replaced_count < static_cast<int>(found.size())) &&
 		ctx->retries_left > 0) {
@@ -335,3 +337,5 @@ void schedule_stepper_inject(obs_source_t *source) {
 	auto *ctx = new StepperInjectCtx(source);
 	obs_queue_task(OBS_TASK_UI, do_stepper_inject, ctx, false);
 }
+
+} // namespace ods::widgets

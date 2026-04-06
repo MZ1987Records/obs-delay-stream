@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace plugin_main_url_share_renderer {
+namespace ods::ui {
 
 struct UrlShareRow {
 	int         ch_1indexed = 0;
@@ -29,4 +29,4 @@ std::string build_url_confirm_html_text(const std::vector<UrlShareRow> &rows,
 										const UrlConfirmThemeColors    *theme_colors = nullptr,
 										bool                            linkify_urls = true);
 
-} // namespace plugin_main_url_share_renderer
+} // namespace ods::ui

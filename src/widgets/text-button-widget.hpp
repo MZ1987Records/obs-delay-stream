@@ -2,6 +2,8 @@
 
 #include <obs-module.h>
 
+namespace ods::widgets {
+
 obs_property_t *obs_properties_add_text_button(
 	obs_properties_t      *props,
 	const char            *prop_name,
@@ -14,3 +16,5 @@ obs_property_t *obs_properties_add_text_button(
 	bool                   button_enabled = true);
 
 void schedule_text_button_inject(obs_source_t *source);
+
+} // namespace ods::widgets

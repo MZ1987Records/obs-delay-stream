@@ -13,7 +13,10 @@
 
 #define T_(s) obs_module_text(s)
 
-namespace plugin_main_properties_ui {
+namespace ods::ui {
+
+using ods::plugin::DelayStreamData;
+using ods::tunnel::TunnelState;
 
 namespace {
 
@@ -48,16 +51,16 @@ std::string make_sub_url(DelayStreamData *d, int ch0) {
 	return base + "/#!/" + sid + "/" + code;
 }
 
-std::vector<plugin_main_url_share_renderer::UrlShareRow>
+std::vector<UrlShareRow>
 collect_sub_url_rows(DelayStreamData *d, obs_data_t *s) {
-	std::vector<plugin_main_url_share_renderer::UrlShareRow> rows;
+	std::vector<UrlShareRow> rows;
 	if (!d || !s) return rows;
 	int sub_count = d->sub_ch_count;
 	rows.reserve(sub_count);
 	for (int i = 0; i < sub_count; ++i) {
-		const auto                                  memo_key = plugin_settings::make_sub_memo_key(i);
-		const char                                 *memo     = obs_data_get_string(s, memo_key.data());
-		plugin_main_url_share_renderer::UrlShareRow row;
+		const auto  memo_key = ods::plugin::make_sub_memo_key(i);
+		const char *memo     = obs_data_get_string(s, memo_key.data());
+		UrlShareRow row;
 		row.ch_1indexed = i + 1;
 		row.name        = (memo && *memo) ? memo : "";
 		row.url         = make_sub_url(d, i);
@@ -74,11 +77,11 @@ bool PropertiesBuilder::cb_sub_copy_all(obs_properties_t *, obs_property_t *, vo
 	obs_data_t *s = obs_source_get_settings(d->context);
 	if (!s) return false;
 	auto        rows = collect_sub_url_rows(d, s);
-	std::string out  = plugin_main_url_share_renderer::build_url_share_copy_text(
+	std::string out  = build_url_share_copy_text(
 		rows,
 		T_("NotConfigured"));
 	obs_data_release(s);
-	if (!out.empty()) plugin_utils::copy_to_clipboard(out);
+	if (!out.empty()) ods::plugin::copy_to_clipboard(out);
 	return false;
 }
 
@@ -96,7 +99,7 @@ void PropertiesBuilder::add_url_share_group() {
 			const QColor   alt_row_color = pick_alt_row_color(
 				base_color,
 				pal.color(QPalette::AlternateBase));
-			plugin_main_url_share_renderer::UrlConfirmThemeColors theme_colors;
+			UrlConfirmThemeColors theme_colors;
 			theme_colors.table_bg =
 				pal.color(QPalette::Window).name(QColor::HexRgb).toStdString();
 			theme_colors.header_bg =
@@ -114,7 +117,7 @@ void PropertiesBuilder::add_url_share_group() {
 			theme_colors.link =
 				pal.color(QPalette::Link).name(QColor::HexRgb).toStdString();
 			const bool  linkify_urls = (ts != TunnelState::Starting);
-			std::string list_html    = plugin_main_url_share_renderer::build_url_confirm_html_text(
+			std::string list_html    = build_url_confirm_html_text(
 				rows,
 				T_("NotConfigured"),
 				&theme_colors,
@@ -141,4 +144,4 @@ void PropertiesBuilder::add_url_share_group() {
 	obs_properties_add_group(props_, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);
 }
 
-} // namespace plugin_main_properties_ui
+} // namespace ods::ui

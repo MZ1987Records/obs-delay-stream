@@ -15,7 +15,7 @@
 
 #include "plugin/release-check.hpp"
 
-namespace plugin_main_release_check {
+namespace ods::plugin {
 
 namespace {
 
@@ -322,4 +322,4 @@ bool is_newer_version(const std::string &latest, const std::string &current) {
 	return compare_versions(cnums, lnums) < 0;
 }
 
-} // namespace plugin_main_release_check
+} // namespace ods::plugin

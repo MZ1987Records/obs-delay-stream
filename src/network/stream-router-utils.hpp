@@ -8,7 +8,7 @@
 #include <iterator>
 #include <string>
 
-namespace websocket_server_detail {
+namespace ods::network {
 
 inline std::string make_key(const std::string &sid, int ch) {
 	return sid + "/" + std::to_string(ch);
@@ -168,4 +168,4 @@ inline bool is_valid_pcm_downsample_ratio(int r) {
 	return r == 1 || r == 2 || r == 4;
 }
 
-} // namespace websocket_server_detail
+} // namespace ods::network

@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+namespace ods::widgets {
+
 namespace {
 
 // プレースホルダーQLabel に埋め込むマジックプレフィックス。
@@ -51,8 +53,8 @@ void do_inject(void *param) {
 		QLabel *label;
 		QString text;
 	};
-	std::vector<Found>                         found;
-	std::vector<widget_inject::ScrollSnapshot> scroll_snapshots;
+	std::vector<Found>          found;
+	std::vector<ScrollSnapshot> scroll_snapshots;
 
 	for (QWidget *w : QApplication::allWidgets()) {
 		auto *lbl = qobject_cast<QLabel *>(w);
@@ -62,7 +64,7 @@ void do_inject(void *param) {
 			found.push_back({lbl, text});
 	}
 	for (const auto &f : found)
-		widget_inject::collect_ancestor_scroll_snapshot(f.label, scroll_snapshots);
+		collect_ancestor_scroll_snapshot(f.label, scroll_snapshots);
 
 	int replaced = 0;
 	for (const auto &f : found) {
@@ -108,7 +110,7 @@ void do_inject(void *param) {
 		++replaced;
 	}
 
-	widget_inject::restore_scroll_snapshots(scroll_snapshots);
+	restore_scroll_snapshots(scroll_snapshots);
 
 	if ((found.empty() || replaced < static_cast<int>(found.size())) &&
 		ctx->retries_left > 0) {
@@ -177,3 +179,5 @@ void flow_progress_unregister_source(obs_source_t *source) {
 	std::lock_guard<std::mutex> lk(g_reg_mtx);
 	g_registry.erase(source);
 }
+
+} // namespace ods::widgets

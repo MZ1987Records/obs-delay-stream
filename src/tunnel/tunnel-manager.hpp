@@ -24,6 +24,13 @@
 
 #include "core/constants.hpp"
 
+namespace ods::tunnel {
+
+using ods::core::WS_PORT;
+using ods::core::CLOUDFLARED_URL_TIMEOUT_S;
+using ods::core::CLOUDFLARED_POLL_INTV_MS;
+using ods::core::TUNNEL_KILL_TIMEOUT_MS;
+
 // ============================================================
 // TunnelState
 // ============================================================
@@ -104,3 +111,5 @@ class TunnelManager {
 	HANDLE     proc_handle_   = INVALID_HANDLE_VALUE;
 	HANDLE     thread_handle_ = INVALID_HANDLE_VALUE;
 };
+
+} // namespace ods::tunnel

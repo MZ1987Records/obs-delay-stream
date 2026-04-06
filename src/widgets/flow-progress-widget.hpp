@@ -2,6 +2,8 @@
 
 #include <obs-module.h>
 
+namespace ods::widgets {
+
 // OBSプロパティパネルにプログレスバーを埋め込む。
 //
 // 使い方:
@@ -19,3 +21,5 @@ obs_property_t *obs_properties_add_flow_progress(
 void schedule_flow_progress_inject(obs_source_t *source);
 void update_flow_progress(obs_source_t *source, int value);
 void flow_progress_unregister_source(obs_source_t *source);
+
+} // namespace ods::widgets

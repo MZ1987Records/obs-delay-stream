@@ -33,6 +33,10 @@
 
 #include "tunnel/tunnel-manager.hpp"
 
+namespace ods::tunnel {
+
+using namespace ods::core;
+
 // ============================================================
 // Destructor / lifecycle
 // ============================================================
@@ -566,3 +570,5 @@ bool TunnelManager::extract_cloudflared_error(const std::string &text, std::stri
 	}
 	return false;
 }
+
+} // namespace ods::tunnel

@@ -22,7 +22,9 @@
 
 #include "core/constants.hpp"
 
-namespace plugin_utils {
+namespace ods::plugin {
+
+using namespace ods::core;
 
 std::string trim_copy(std::string s) {
 	const char  *ws    = " \t\r\n";
@@ -241,4 +243,4 @@ void replace_all(std::string &s, const std::string &from, const std::string &to)
 	}
 }
 
-} // namespace plugin_utils
+} // namespace ods::plugin

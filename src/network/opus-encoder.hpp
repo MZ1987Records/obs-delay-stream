@@ -23,7 +23,7 @@ extern "C" {
 
 #include "network/stream-router-utils.hpp"
 
-namespace websocket_server_detail {
+namespace ods::network {
 
 struct OpusEnc {
 	bool    disabled           = false;
@@ -306,4 +306,4 @@ struct OpusEnc {
 	}
 };
 
-} // namespace websocket_server_detail
+} // namespace ods::network

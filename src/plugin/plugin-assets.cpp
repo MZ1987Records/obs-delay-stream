@@ -6,7 +6,7 @@
 #include <obs-module.h>
 #include <util/platform.h>
 
-namespace plugin_main_receiver_assets {
+namespace ods::plugin {
 
 namespace {
 
@@ -22,17 +22,17 @@ std::string load_receiver_index_html() {
 	std::string html;
 	char       *mod_path = obs_module_file("receiver/index.html");
 	if (mod_path) {
-		html = plugin_utils::read_file_to_string(mod_path);
+		html = read_file_to_string(mod_path);
 		bfree(mod_path);
 	}
 	if (html.empty()) {
-		html = plugin_utils::read_file_to_string("receiver/index.html");
+		html = read_file_to_string("receiver/index.html");
 	}
 	if (html.empty()) {
 		html = std::string(kReceiverIndexHtml);
 	}
-	plugin_utils::replace_all(html, "@PROJECT_VERSION@", PLUGIN_VERSION);
-	plugin_utils::replace_all(html, "@BUILD_TIMESTAMP@", kReceiverBuildTimestamp);
+	replace_all(html, "@PROJECT_VERSION@", PLUGIN_VERSION);
+	replace_all(html, "@BUILD_TIMESTAMP@", kReceiverBuildTimestamp);
 	return html;
 }
 
@@ -51,4 +51,4 @@ std::string get_receiver_root_dir() {
 	return path.substr(0, pos);
 }
 
-} // namespace plugin_main_receiver_assets
+} // namespace ods::plugin

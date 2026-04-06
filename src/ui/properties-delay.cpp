@@ -9,7 +9,11 @@
 
 #define T_(s) obs_module_text(s)
 
-namespace plugin_main_properties_ui {
+namespace ods::ui {
+
+using ods::plugin::DelayStreamData;
+using ods::sync::FlowResult;
+using namespace ods::widgets;
 
 void PropertiesBuilder::add_sub_offset_group() {
 	if (!props_ || !d_) return;
@@ -50,7 +54,7 @@ void PropertiesBuilder::add_delay_summary_group() {
 	const FlowResult                   flow_res = d_->flow.result();
 	std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
 	for (int i = 0; i < sub_count; ++i) {
-		const auto  memo_key    = plugin_settings::make_sub_memo_key(i);
+		const auto  memo_key    = ods::plugin::make_sub_memo_key(i);
 		const char *memo        = settings ? obs_data_get_string(settings, memo_key.data()) : "";
 		channels[i].name        = (memo && *memo) ? memo : "";
 		channels[i].measured_ms = flow_res.channels[i].measured
@@ -59,7 +63,7 @@ void PropertiesBuilder::add_delay_summary_group() {
 		channels[i].base_ms     = d_->sub[i].delay_ms;
 		channels[i].adjust_ms   = d_->sub[i].adjust_ms;
 		channels[i].global_ms   = d_->sub_offset_ms;
-		const float raw         = plugin_settings::calc_sub_delay_raw_value_ms(
+		const float raw         = ods::plugin::calc_sub_delay_raw_value_ms(
 			d_->sub[i].delay_ms,
 			d_->sub[i].adjust_ms,
 			d_->sub_offset_ms);
@@ -67,7 +71,7 @@ void PropertiesBuilder::add_delay_summary_group() {
 		const float latency  = flow_res.channels[i].measured
 								   ? (float)flow_res.channels[i].one_way_latency_ms
 								   : 0.0f;
-		channels[i].total_ms = latency + plugin_settings::calc_effective_sub_delay_value_ms(
+		channels[i].total_ms = latency + ods::plugin::calc_effective_sub_delay_value_ms(
 											 d_->sub[i].delay_ms,
 											 d_->sub[i].adjust_ms,
 											 d_->sub_offset_ms);
@@ -100,4 +104,4 @@ void PropertiesBuilder::add_delay_summary_group() {
 		grp);
 }
 
-} // namespace plugin_main_properties_ui
+} // namespace ods::ui

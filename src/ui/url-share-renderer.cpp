@@ -1,6 +1,6 @@
 #include "ui/url-share-renderer.hpp"
 
-namespace plugin_main_url_share_renderer {
+namespace ods::ui {
 
 namespace {
 
@@ -158,4 +158,4 @@ std::string build_url_confirm_html_text(const std::vector<UrlShareRow> &rows,
 	return html;
 }
 
-} // namespace plugin_main_url_share_renderer
+} // namespace ods::ui

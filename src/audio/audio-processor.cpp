@@ -3,23 +3,25 @@
 #include "plugin/plugin-settings.hpp"
 #include "plugin/plugin-state.hpp"
 
-namespace plugin_main_audio_processing {
+namespace ods::audio {
+
+using namespace ods::core;
 
 namespace {
 
-static float calc_effective_sub_delay_value_ms(const DelayStreamData *d,
-											   float                  base_delay_ms,
-											   float                  adjust_ms) {
+static float calc_effective_sub_delay_value_ms(const ods::plugin::DelayStreamData *d,
+											   float                               base_delay_ms,
+											   float                               adjust_ms) {
 	if (!d) return 0.0f;
-	return plugin_settings::calc_effective_sub_delay_value_ms(
+	return ods::plugin::calc_effective_sub_delay_value_ms(
 		base_delay_ms,
 		adjust_ms,
 		d->sub_offset_ms);
 }
 
-static uint32_t calc_effective_sub_delay_ms(const DelayStreamData *d,
-											float                  base_delay_ms,
-											float                  adjust_ms) {
+static uint32_t calc_effective_sub_delay_ms(const ods::plugin::DelayStreamData *d,
+											float                               base_delay_ms,
+											float                               adjust_ms) {
 	if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
 	return static_cast<uint32_t>(
 		calc_effective_sub_delay_value_ms(d, base_delay_ms, adjust_ms));
@@ -27,13 +29,13 @@ static uint32_t calc_effective_sub_delay_ms(const DelayStreamData *d,
 
 } // namespace
 
-void apply_sub_delay_to_buffer(DelayStreamData *d, int ch) {
+void apply_sub_delay_to_buffer(ods::plugin::DelayStreamData *d, int ch) {
 	if (!d || ch < 0 || ch >= MAX_SUB_CH) return;
 	d->sub[ch].buf.set_delay_ms(
 		calc_effective_sub_delay_ms(d, d->sub[ch].delay_ms, d->sub[ch].adjust_ms));
 }
 
-void ensure_audio_processing_initialized(DelayStreamData *d, uint32_t sr, uint32_t ch) {
+void ensure_audio_processing_initialized(ods::plugin::DelayStreamData *d, uint32_t sr, uint32_t ch) {
 	if (!d) return;
 	if (d->initialized && d->sample_rate == sr && d->channels == ch) return;
 	d->sample_rate = sr;
@@ -48,7 +50,7 @@ void ensure_audio_processing_initialized(DelayStreamData *d, uint32_t sr, uint32
 	d->initialized = true;
 }
 
-obs_audio_data *filter_audio_delay_stream(DelayStreamData *d, obs_audio_data *audio) {
+obs_audio_data *filter_audio_delay_stream(ods::plugin::DelayStreamData *d, obs_audio_data *audio) {
 	if (!d || !audio) return audio;
 	if (d->is_duplicate_instance) return audio;
 	if (audio->frames == 0) return audio;
@@ -101,4 +103,4 @@ obs_audio_data *filter_audio_delay_stream(DelayStreamData *d, obs_audio_data *au
 	return audio;
 }
 
-} // namespace plugin_main_audio_processing
+} // namespace ods::audio
