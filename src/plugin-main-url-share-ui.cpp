@@ -1,4 +1,4 @@
-#include "plugin-main-url-share-ui.hpp"
+#include "plugin-main-properties-ui.hpp"
 
 #include <QApplication>
 #include <QColor>
@@ -15,17 +15,13 @@
 
 #define T_(s) obs_module_text(s)
 
-namespace plugin_main_url_share_ui {
+namespace plugin_main_properties_ui {
 
 namespace {
 
 QColor pick_alt_row_color(const QColor& base, const QColor& alt_candidate) {
-    // テーマによっては AlternateBase が Base と逆極性になるため、
-    // 差が大きすぎる場合は Base を採用して見た目の反転を防ぐ。
     const double diff = std::abs(base.lightnessF() - alt_candidate.lightnessF());
-    if (diff > 0.18) {
-        return base;
-    }
+    if (diff > 0.18) return base;
     return alt_candidate;
 }
 
@@ -70,7 +66,9 @@ collect_sub_url_rows(DelayStreamData* d, obs_data_t* s) {
     return rows;
 }
 
-bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
+} // namespace
+
+bool PropertiesBuilder::cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
     obs_data_t* s = obs_source_get_settings(d->context);
@@ -83,17 +81,15 @@ bool cb_sub_copy_all(obs_properties_t*, obs_property_t*, void* priv) {
     return false;
 }
 
-} // namespace
-
-void add_url_share_group(obs_properties_t* props, DelayStreamData* d) {
-    if (!props || !d) return;
+void PropertiesBuilder::add_url_share_group() {
+    if (!props_ || !d_) return;
     obs_properties_t* grp = obs_properties_create();
-    TunnelState ts = d->tunnel.state();
-    bool via_tunnel = !d->tunnel.url().empty();
+    TunnelState ts = d_->tunnel.state();
+    bool via_tunnel = !d_->tunnel.url().empty();
     {
-        obs_data_t* s = obs_source_get_settings(d->context);
+        obs_data_t* s = obs_source_get_settings(d_->context);
         if (s) {
-            auto rows = collect_sub_url_rows(d, s);
+            auto rows = collect_sub_url_rows(d_, s);
             const QPalette pal = QApplication::palette();
             const QColor base_color = pal.color(QPalette::Base);
             const QColor alt_row_color = pick_alt_row_color(
@@ -130,11 +126,11 @@ void add_url_share_group(obs_properties_t* props, DelayStreamData* d) {
     char copy_label[192];
     snprintf(copy_label, sizeof(copy_label), "%s%s", T_("UrlShareCopyAll"), suffix);
     obs_property_t* copy_p =
-        obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d);
+        obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d_);
     if (ts == TunnelState::Starting) {
         obs_property_set_enabled(copy_p, false);
     }
-    obs_properties_add_group(props, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);
+    obs_properties_add_group(props_, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);
 }
 
-} // namespace plugin_main_url_share_ui
+} // namespace plugin_main_properties_ui

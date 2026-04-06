@@ -1,7 +1,6 @@
-#include "plugin-main-sub-channels-ui.hpp"
+#include "plugin-main-properties-ui.hpp"
 
 #include <cstdio>
-#include <mutex>
 #include <string>
 
 #include <obs-module.h>
@@ -9,7 +8,6 @@
 #include "constants.hpp"
 #include "plugin-main-audio-processing.hpp"
 #include "plugin-main-config.hpp"
-#include "plugin-main-props-refresh.hpp"
 #include "plugin-main-state.hpp"
 #include "plugin-main-sub-settings.hpp"
 #include "plugin-main-utils.hpp"
@@ -17,29 +15,9 @@
 
 #define T_(s) obs_module_text(s)
 
-namespace plugin_main_sub_channels_ui {
+namespace plugin_main_properties_ui {
 
-namespace {
-
-void clear_measure_state(MeasureState& ms) {
-    std::lock_guard<std::mutex> lk(ms.mtx);
-    ms.result = LatencyResult{};
-    ms.measuring = false;
-    ms.applied = false;
-    ms.last_error.clear();
-}
-
-void request_properties_refresh(DelayStreamData* d, const char* reason = nullptr) {
-    if (!d) return;
-    plugin_main_props_refresh::props_refresh_request(
-        d->context,
-        d->create_done.load(std::memory_order_acquire),
-        d->destroying.load(std::memory_order_acquire),
-        d->get_props_depth.load(std::memory_order_acquire),
-        reason);
-}
-
-bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
+bool PropertiesBuilder::cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
     auto* d = static_cast<DelayStreamData*>(priv);
     if (!d) return false;
     if (d->router_running.load()) return false;
@@ -75,11 +53,11 @@ bool cb_sub_add(obs_properties_t*, obs_property_t*, void* priv) {
     d->router.set_active_channels(next);
     d->flow.set_active_channels(next);
     d->flow.reset();
-    request_properties_refresh(d, "cb_sub_add");
+    d->request_props_refresh("cb_sub_add");
     return false;
 }
 
-bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
+bool PropertiesBuilder::cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
     auto* ctx = static_cast<ChCtx*>(priv);
     if (!ctx || !ctx->d) return false;
     auto* d = ctx->d;
@@ -131,61 +109,54 @@ bool cb_sub_remove(obs_properties_t*, obs_property_t*, void* priv) {
         d->sub[i].delay_ms = d->sub[i + 1].delay_ms;
         d->sub[i].adjust_ms = d->sub[i + 1].adjust_ms;
         plugin_main_audio_processing::apply_sub_delay_to_buffer(d, i);
-        clear_measure_state(d->sub[i].measure);
+        d->sub[i].measure.reset();
     }
     d->sub[MAX_SUB_CH - 1].delay_ms = 0.0f;
     d->sub[MAX_SUB_CH - 1].adjust_ms = 0.0f;
     plugin_main_audio_processing::apply_sub_delay_to_buffer(d, MAX_SUB_CH - 1);
-    clear_measure_state(d->sub[MAX_SUB_CH - 1].measure);
+    d->sub[MAX_SUB_CH - 1].measure.reset();
 
     d->sub_ch_count = next;
     d->router.set_active_channels(next);
     d->flow.set_active_channels(next);
     d->flow.reset();
-    request_properties_refresh(d, "cb_sub_remove");
+    d->request_props_refresh("cb_sub_remove");
     return false;
 }
 
-void add_sub_channel_item(obs_properties_t* grp, DelayStreamData* d, int i, int sub_count) {
-    if (!grp || !d) return;
-    d->btn_ctx[i] = { d, i };
-
-    const auto memo_key = plugin_main_sub_settings::make_sub_memo_key(i);
-    char lt[32];
-    snprintf(lt, sizeof(lt), "Ch.%d", i + 1);
-
-    const auto row_prop = plugin_main_sub_settings::make_sub_remove_row_key(i);
-    const bool input_enabled = !d->router_running.load();
-    const bool button_enabled = !(d->router_running.load() || sub_count <= 1);
-    obs_properties_add_text_button(
-        grp, row_prop.data(), lt, memo_key.data(), T_("SubRemove"),
-        cb_sub_remove, &d->btn_ctx[i], input_enabled, button_enabled);
-}
-
-} // namespace
-
-void add_sub_channels_group(obs_properties_t* props, DelayStreamData* d) {
-    if (!props || !d) return;
+void PropertiesBuilder::add_sub_channels_group() {
+    if (!props_ || !d_) return;
     obs_properties_t* grp = obs_properties_create();
-    int sub_count = d->sub_ch_count;
+    int sub_count = d_->sub_ch_count;
     for (int i = 0; i < sub_count; ++i) {
-        add_sub_channel_item(grp, d, i, sub_count);
+        d_->btn_ctx[i] = { d_, i };
+
+        const auto memo_key = plugin_main_sub_settings::make_sub_memo_key(i);
+        char lt[32];
+        snprintf(lt, sizeof(lt), "Ch.%d", i + 1);
+
+        const auto row_prop = plugin_main_sub_settings::make_sub_remove_row_key(i);
+        const bool input_enabled = !d_->router_running.load();
+        const bool button_enabled = !(d_->router_running.load() || sub_count <= 1);
+        obs_properties_add_text_button(
+            grp, row_prop.data(), lt, memo_key.data(), T_("SubRemove"),
+            cb_sub_remove, &d_->btn_ctx[i], input_enabled, button_enabled);
     }
     obs_property_t* spc_bottom = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
     obs_property_set_long_description(spc_bottom, " ");
     obs_property_text_set_info_word_wrap(spc_bottom, false);
     char add_label[64];
-    if (d->sub_ch_count >= MAX_SUB_CH) {
+    if (d_->sub_ch_count >= MAX_SUB_CH) {
         snprintf(add_label, sizeof(add_label), "%s", T_("SubAddLimitReached"));
     } else {
-        snprintf(add_label, sizeof(add_label), T_("SubAddFmt"), d->sub_ch_count + 1);
+        snprintf(add_label, sizeof(add_label), T_("SubAddFmt"), d_->sub_ch_count + 1);
     }
     obs_property_t* add_p =
-        obs_properties_add_button2(grp, "sub_add_btn", add_label, cb_sub_add, d);
-    if (d->router_running.load() || d->sub_ch_count >= MAX_SUB_CH) {
+        obs_properties_add_button2(grp, "sub_add_btn", add_label, cb_sub_add, d_);
+    if (d_->router_running.load() || d_->sub_ch_count >= MAX_SUB_CH) {
         obs_property_set_enabled(add_p, false);
     }
-    obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);
+    obs_properties_add_group(props_, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);
 }
 
-} // namespace plugin_main_sub_channels_ui
+} // namespace plugin_main_properties_ui
