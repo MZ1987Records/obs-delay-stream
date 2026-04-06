@@ -23,7 +23,7 @@ bool PropertiesBuilder::cb_sub_add(obs_properties_t*, obs_property_t*, void* pri
     if (d->router_running.load()) return false;
     int cur = d->sub_ch_count;
     if (cur >= MAX_SUB_CH) return false;
-    int next = plugin_main_utils::clamp_sub_ch_count(cur + 1);
+    int next = plugin_utils::clamp_sub_ch_count(cur + 1);
     int added_ch = next - 1;
     obs_data_t* s = obs_source_get_settings(d->context);
 
@@ -41,7 +41,7 @@ bool PropertiesBuilder::cb_sub_add(obs_properties_t*, obs_property_t*, void* pri
     }
     {
         const auto code_key = plugin_settings::make_sub_code_key(added_ch);
-        std::string code = plugin_main_utils::generate_stream_id(8);
+        std::string code = plugin_utils::generate_stream_id(8);
         obs_data_set_string(s, code_key.data(), code.c_str());
         d->router.set_sub_code(added_ch, code);
     }
@@ -66,7 +66,7 @@ bool PropertiesBuilder::cb_sub_remove(obs_properties_t*, obs_property_t*, void* 
     if (cur <= 1) return false;
     int ch = ctx->ch;
     if (ch < 0 || ch >= cur) return false;
-    int next = plugin_main_utils::clamp_sub_ch_count(cur - 1);
+    int next = plugin_utils::clamp_sub_ch_count(cur - 1);
     obs_data_t* s = obs_source_get_settings(d->context);
     for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
         const auto delay_from = plugin_settings::make_sub_delay_key(i + 1);

@@ -77,7 +77,7 @@ bool PropertiesBuilder::cb_sub_copy_all(obs_properties_t*, obs_property_t*, void
     std::string out = plugin_main_url_share_renderer::build_url_share_copy_text(
         rows, T_("NotConfigured"));
     obs_data_release(s);
-    if (!out.empty()) plugin_main_utils::copy_to_clipboard(out);
+    if (!out.empty()) plugin_utils::copy_to_clipboard(out);
     return false;
 }
 

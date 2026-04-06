@@ -22,17 +22,17 @@ std::string load_receiver_index_html() {
     std::string html;
     char* mod_path = obs_module_file("receiver/index.html");
     if (mod_path) {
-        html = plugin_main_utils::read_file_to_string(mod_path);
+        html = plugin_utils::read_file_to_string(mod_path);
         bfree(mod_path);
     }
     if (html.empty()) {
-        html = plugin_main_utils::read_file_to_string("receiver/index.html");
+        html = plugin_utils::read_file_to_string("receiver/index.html");
     }
     if (html.empty()) {
         html = std::string(kReceiverIndexHtml);
     }
-    plugin_main_utils::replace_all(html, "@PROJECT_VERSION@", PLUGIN_VERSION);
-    plugin_main_utils::replace_all(html, "@BUILD_TIMESTAMP@", kReceiverBuildTimestamp);
+    plugin_utils::replace_all(html, "@PROJECT_VERSION@", PLUGIN_VERSION);
+    plugin_utils::replace_all(html, "@BUILD_TIMESTAMP@", kReceiverBuildTimestamp);
     return html;
 }
 

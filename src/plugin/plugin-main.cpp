@@ -53,7 +53,7 @@ static std::mutex        g_singleton_mtx;
 static obs_source_t*     g_singleton_owner      = nullptr;
 static uint64_t          g_singleton_generation = 0;
 
-using plugin_main_utils::get_local_ip;
+using plugin_utils::get_local_ip;
 using plugin_settings::make_sub_delay_key;
 
 class DelayStreamFilter {

@@ -42,13 +42,13 @@ float calc_effective_sub_delay_value_ms(float base_delay_ms,
 
 namespace {
 
-using plugin_main_utils::clamp_sub_ch_count;
-using plugin_main_utils::normalize_opus_sample_rate;
-using plugin_main_utils::normalize_quantization_bits;
-using plugin_main_utils::normalize_pcm_downsample_ratio;
-using plugin_main_utils::normalize_playback_buffer_ms;
-using plugin_main_utils::sanitize_stream_id;
-using plugin_main_utils::generate_stream_id;
+using plugin_utils::clamp_sub_ch_count;
+using plugin_utils::normalize_opus_sample_rate;
+using plugin_utils::normalize_quantization_bits;
+using plugin_utils::normalize_pcm_downsample_ratio;
+using plugin_utils::normalize_playback_buffer_ms;
+using plugin_utils::sanitize_stream_id;
+using plugin_utils::generate_stream_id;
 using plugin_settings::make_sub_delay_key;
 using plugin_settings::make_sub_adjust_key;
 using plugin_settings::make_sub_memo_key;
@@ -134,8 +134,8 @@ private:
     }
 
     void apply_audio_codec_settings() {
-        int audio_codec = (int)obs_data_get_int(s_, "audio_codec");
-        d_->router.set_audio_codec(audio_codec);
+        AudioConfig audio_cfg{};
+        audio_cfg.audio_codec_mode = (int)obs_data_get_int(s_, "audio_codec");
         {
             int bitrate = (int)obs_data_get_int(s_, "opus_bitrate_kbps");
             if (bitrate < 6) {
@@ -145,7 +145,7 @@ private:
                 bitrate = 510;
                 obs_data_set_int(s_, "opus_bitrate_kbps", bitrate);
             }
-            d_->router.set_opus_bitrate_kbps(bitrate);
+            audio_cfg.opus_bitrate_kbps = bitrate;
         }
         {
             int sample_rate = normalize_opus_sample_rate(
@@ -153,7 +153,7 @@ private:
             if (sample_rate != (int)obs_data_get_int(s_, "opus_sample_rate")) {
                 obs_data_set_int(s_, "opus_sample_rate", sample_rate);
             }
-            d_->router.set_opus_target_sample_rate(sample_rate);
+            audio_cfg.opus_target_sample_rate = sample_rate;
         }
         {
             int quant_bits = normalize_quantization_bits(
@@ -161,15 +161,15 @@ private:
             if (quant_bits != (int)obs_data_get_int(s_, "quantization_bits")) {
                 obs_data_set_int(s_, "quantization_bits", quant_bits);
             }
-            d_->router.set_audio_quantization_bits(quant_bits);
+            audio_cfg.quantization_bits = quant_bits;
         }
-        d_->router.set_audio_mono(obs_data_get_bool(s_, "audio_mono"));
+        audio_cfg.mono = obs_data_get_bool(s_, "audio_mono");
         {
             int ratio = normalize_pcm_downsample_ratio(
                 (int)obs_data_get_int(s_, "pcm_downsample_ratio"));
             if (ratio != (int)obs_data_get_int(s_, "pcm_downsample_ratio"))
                 obs_data_set_int(s_, "pcm_downsample_ratio", ratio);
-            d_->router.set_pcm_downsample_ratio(ratio);
+            audio_cfg.pcm_downsample_ratio = ratio;
         }
         {
             int raw_pb_ms = (int)obs_data_get_int(s_, "playback_buffer_ms");
@@ -178,8 +178,9 @@ private:
                 obs_data_set_int(s_, "playback_buffer_ms", pb_ms);
             }
             d_->playback_buffer_ms = pb_ms;
-            d_->router.set_playback_buffer_ms(pb_ms);
+            audio_cfg.playback_buffer_ms = pb_ms;
         }
+        d_->router.set_audio_config(audio_cfg);
     }
 
     void apply_stream_endpoint_settings() {

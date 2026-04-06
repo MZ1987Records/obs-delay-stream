@@ -11,7 +11,7 @@ namespace plugin_main_config {
 std::string make_default_sub_memo(int counter) {
     const char* prefix = T_("SubDefaultMemoPrefix");
     if (!prefix || !*prefix) prefix = "Performer";
-    return std::string(prefix) + plugin_main_utils::make_alpha_counter_label(counter);
+    return std::string(prefix) + plugin_utils::make_alpha_counter_label(counter);
 }
 
 void apply_codec_option_visibility(obs_properties_t* props, obs_data_t* settings) {

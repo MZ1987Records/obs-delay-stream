@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <string>
 
-namespace plugin_main_utils {
+namespace plugin_utils {
 
 std::string trim_copy(std::string s);
 std::string extract_host_from_url(const std::string& url);
@@ -23,4 +23,4 @@ int normalize_playback_buffer_ms(int v);
 std::string read_file_to_string(const char* path);
 void replace_all(std::string& s, const std::string& from, const std::string& to);
 
-} // namespace plugin_main_utils
+} // namespace plugin_utils

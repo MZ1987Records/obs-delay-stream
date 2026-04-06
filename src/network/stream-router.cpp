@@ -392,53 +392,46 @@ std::string StreamRouter::make_url(const std::string& host, int ch_1indexed) con
     return buf;
 }
 
-void StreamRouter::set_audio_codec(int mode) {
+void StreamRouter::set_audio_config(const AudioConfig& cfg) {
+    int mode = cfg.audio_codec_mode;
     if (mode != 0 && mode != 1) mode = 0;
-    int prev = audio_codec_.exchange(mode, std::memory_order_relaxed);
-    if (prev != mode) {
-        opus_reset_pending_.store(true, std::memory_order_release);
-    }
-}
 
-void StreamRouter::set_opus_bitrate_kbps(int bitrate_kbps) {
+    int bitrate_kbps = cfg.opus_bitrate_kbps;
     if (bitrate_kbps < 6) bitrate_kbps = 6;
     if (bitrate_kbps > 510) bitrate_kbps = 510;
-    int prev = opus_bitrate_kbps_.exchange(bitrate_kbps, std::memory_order_relaxed);
-    if (prev != bitrate_kbps) {
+
+    int target_sample_rate = cfg.opus_target_sample_rate;
+    if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 0;
+
+    int quantization_bits = cfg.quantization_bits;
+    if (quantization_bits != 8 && quantization_bits != 16) quantization_bits = 16;
+
+    int downsample_ratio = cfg.pcm_downsample_ratio;
+    if (!is_valid_pcm_downsample_ratio(downsample_ratio)) downsample_ratio = 1;
+
+    int playback_ms = cfg.playback_buffer_ms;
+    if (playback_ms < PLAYBACK_BUFFER_MIN_MS) playback_ms = PLAYBACK_BUFFER_MIN_MS;
+    if (playback_ms > PLAYBACK_BUFFER_MAX_MS) playback_ms = PLAYBACK_BUFFER_MAX_MS;
+
+    bool reset_opus = false;
+    if (audio_codec_.exchange(mode, std::memory_order_relaxed) != mode) reset_opus = true;
+    if (opus_bitrate_kbps_.exchange(bitrate_kbps, std::memory_order_relaxed) != bitrate_kbps) {
+        reset_opus = true;
+    }
+    if (opus_target_sample_rate_.exchange(target_sample_rate, std::memory_order_relaxed) != target_sample_rate) {
+        reset_opus = true;
+    }
+    audio_quantization_bits_.store(quantization_bits, std::memory_order_relaxed);
+    if (audio_mono_.exchange(cfg.mono, std::memory_order_relaxed) != cfg.mono) {
+        reset_opus = true;
+    }
+    pcm_downsample_ratio_.store(downsample_ratio, std::memory_order_relaxed);
+
+    int prev_playback_ms = playback_buffer_ms_.exchange(playback_ms, std::memory_order_relaxed);
+    if (reset_opus) {
         opus_reset_pending_.store(true, std::memory_order_release);
     }
-}
-
-void StreamRouter::set_opus_target_sample_rate(int sample_rate) {
-    if (!is_valid_opus_sample_rate(sample_rate)) sample_rate = 0;
-    int prev = opus_target_sample_rate_.exchange(sample_rate, std::memory_order_relaxed);
-    if (prev != sample_rate) {
-        opus_reset_pending_.store(true, std::memory_order_release);
-    }
-}
-
-void StreamRouter::set_audio_quantization_bits(int bits) {
-    if (bits != 8 && bits != 16) bits = 16;
-    audio_quantization_bits_.store(bits, std::memory_order_relaxed);
-}
-
-void StreamRouter::set_audio_mono(bool mono) {
-    bool prev = audio_mono_.exchange(mono, std::memory_order_relaxed);
-    if (prev != mono) {
-        opus_reset_pending_.store(true, std::memory_order_release);
-    }
-}
-
-void StreamRouter::set_pcm_downsample_ratio(int ratio) {
-    if (!is_valid_pcm_downsample_ratio(ratio)) ratio = 1;
-    pcm_downsample_ratio_.store(ratio, std::memory_order_relaxed);
-}
-
-void StreamRouter::set_playback_buffer_ms(int ms) {
-    if (ms < PLAYBACK_BUFFER_MIN_MS) ms = PLAYBACK_BUFFER_MIN_MS;
-    if (ms > PLAYBACK_BUFFER_MAX_MS) ms = PLAYBACK_BUFFER_MAX_MS;
-    int prev = playback_buffer_ms_.exchange(ms, std::memory_order_relaxed);
-    if (prev == ms) return;
+    if (prev_playback_ms == playback_ms) return;
 
     // デバウンス: 値が安定するまで送信を遅延（スライダードラッグ中の連打を間引く）
     pb_debounce_seq_.fetch_add(1, std::memory_order_relaxed);
@@ -897,12 +890,26 @@ void StreamRouter::on_message(ConnHandle h, WsServer::message_ptr msg) {
         bool has_bitrate = parse_json_int("bitrate_kbps", req_bitrate);
         bool has_sample_rate = parse_json_int("sample_rate", req_sample_rate);
 
-        std::lock_guard<std::mutex> lk(mtx_);
-        auto it = conn_map_.find(h);
-        if (it == conn_map_.end()) return;
-        it->second.force_pcm = (mode == 1);
-        if (has_bitrate) set_opus_bitrate_kbps(req_bitrate);
-        if (has_sample_rate) set_opus_target_sample_rate(req_sample_rate);
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto it = conn_map_.find(h);
+            if (it == conn_map_.end()) return;
+            it->second.force_pcm = (mode == 1);
+        }
+
+        if (has_bitrate || has_sample_rate) {
+            AudioConfig cfg{};
+            cfg.audio_codec_mode = audio_codec_.load(std::memory_order_relaxed);
+            cfg.opus_bitrate_kbps = opus_bitrate_kbps_.load(std::memory_order_relaxed);
+            cfg.opus_target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
+            cfg.quantization_bits = audio_quantization_bits_.load(std::memory_order_relaxed);
+            cfg.mono = audio_mono_.load(std::memory_order_relaxed);
+            cfg.pcm_downsample_ratio = pcm_downsample_ratio_.load(std::memory_order_relaxed);
+            cfg.playback_buffer_ms = playback_buffer_ms_.load(std::memory_order_relaxed);
+            if (has_bitrate) cfg.opus_bitrate_kbps = req_bitrate;
+            if (has_sample_rate) cfg.opus_target_sample_rate = req_sample_rate;
+            set_audio_config(cfg);
+        }
     }
 }
 

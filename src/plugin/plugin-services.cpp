@@ -105,7 +105,7 @@ std::string get_obs_stream_url() {
     std::string url;
     std::string stream_key;
     if (service_get_url) {
-        url = plugin_main_utils::normalize_rtmp_url_candidate(service_get_url(service));
+        url = plugin_utils::normalize_rtmp_url_candidate(service_get_url(service));
     }
 
     obs_data_t* settings = service_get_settings(service);
@@ -120,7 +120,7 @@ std::string get_obs_stream_url() {
                 nullptr
             };
             for (int i = 0; keys[i]; ++i) {
-                url = plugin_main_utils::normalize_rtmp_url_candidate(
+                url = plugin_utils::normalize_rtmp_url_candidate(
                     obs_data_get_string(settings, keys[i]));
                 if (!url.empty()) break;
             }
@@ -135,7 +135,7 @@ std::string get_obs_stream_url() {
             nullptr
         };
         for (int i = 0; key_keys[i]; ++i) {
-            stream_key = plugin_main_utils::trim_copy(
+            stream_key = plugin_utils::trim_copy(
                 obs_data_get_string(settings, key_keys[i]));
             if (!stream_key.empty()) break;
         }
@@ -143,7 +143,7 @@ std::string get_obs_stream_url() {
     }
 
     if (!url.empty() && !stream_key.empty()) {
-        url = plugin_main_utils::join_rtmp_url_and_stream_key(url, stream_key);
+        url = plugin_utils::join_rtmp_url_and_stream_key(url, stream_key);
     }
 
     if (owned && service_release) {
@@ -156,7 +156,7 @@ void maybe_autofill_rtmp_url(obs_data_t* settings, bool force_refresh) {
     if (!settings) return;
     if (!obs_data_get_bool(settings, "rtmp_url_auto")) return;
     std::string configured =
-        plugin_main_utils::trim_copy(obs_data_get_string(settings, "rtmp_url"));
+        plugin_utils::trim_copy(obs_data_get_string(settings, "rtmp_url"));
     if (!force_refresh && !configured.empty()) return;
     std::string auto_url = get_obs_stream_url();
     if (auto_url.empty()) return;

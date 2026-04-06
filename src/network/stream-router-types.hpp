@@ -38,6 +38,19 @@ struct ConnInfo {
     bool        force_pcm = false;
 };
 
+struct AudioConfig {
+    // 0: Opus, 1: PCM
+    int audio_codec_mode = 0;
+    int opus_bitrate_kbps = 96;
+    // 0 は入力サンプルレートを使用
+    int opus_target_sample_rate = 0;
+    int quantization_bits = 8;
+    bool mono = true;
+    // 1: そのまま, 2: 1/2, 4: 1/4
+    int pcm_downsample_ratio = 4;
+    int playback_buffer_ms = 0;
+};
+
 struct ChannelState {
     std::set<ConnHandle, std::owner_less<ConnHandle>> conns;
 

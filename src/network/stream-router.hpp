@@ -131,14 +131,7 @@ public:
     bool     is_running() const { return running_; }
 
     // ----- 音声コーデック設定 -----
-    // 0: Opus, 1: PCM
-    void set_audio_codec(int mode);
-    void set_opus_bitrate_kbps(int bitrate_kbps);
-    void set_opus_target_sample_rate(int sample_rate);
-    void set_audio_quantization_bits(int bits);
-    void set_audio_mono(bool mono);
-    void set_pcm_downsample_ratio(int ratio);
-    void set_playback_buffer_ms(int ms);
+    void set_audio_config(const AudioConfig& cfg);
     void set_http_root_dir(std::string dir);
 
 private:

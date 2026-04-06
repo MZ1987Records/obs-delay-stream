@@ -22,7 +22,7 @@
 namespace plugin_main_properties_ui {
 
 namespace {
-using plugin_main_utils::extract_host_from_url;
+using plugin_utils::extract_host_from_url;
 using plugin_settings::make_sub_memo_key;
 
 static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
