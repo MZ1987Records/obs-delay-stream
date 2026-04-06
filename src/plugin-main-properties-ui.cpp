@@ -591,24 +591,22 @@ void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
         grp, "tunnel_controls_row", T_("TunnelControls"), tunnel_buttons,
         sizeof(tunnel_buttons) / sizeof(tunnel_buttons[0]));
 
-    if (cloudflared_downloading) {
-        obs_properties_add_text(grp, "tunnel_state_info",
-            T_("CloudflaredDownloading"), OBS_TEXT_INFO);
-    } else if (ts == TunnelState::Starting) {
-        obs_properties_add_text(grp, "tunnel_state_info",
-            T_("TunnelStarting"), OBS_TEXT_INFO);
-    }
     show_tunnel_start_note = (!ws_running && !tunnel_running && !tunnel_busy);
 
     std::string tunnel_domain = extract_host_from_url(turl);
-    if (!tunnel_domain.empty()) {
-        char db[320];
-        snprintf(db, sizeof(db), T_("TunnelAssignedDomainFmt"), tunnel_domain.c_str());
-        obs_properties_add_text(grp, "tunnel_domain_info", db, OBS_TEXT_INFO);
+    const char* tunnel_domain_text = nullptr;
+    if (cloudflared_downloading) {
+        tunnel_domain_text = T_("CloudflaredDownloading");
+    } else if (ts == TunnelState::Starting) {
+        tunnel_domain_text = T_("TunnelStarting");
+    } else if (!tunnel_domain.empty()) {
+        tunnel_domain_text = tunnel_domain.c_str();
     } else {
-        obs_properties_add_text(grp, "tunnel_domain_info",
-            T_("TunnelUnassignedDomain"), OBS_TEXT_INFO);
+        tunnel_domain_text = T_("TunnelUnassignedDomain");
     }
+    char db[320];
+    snprintf(db, sizeof(db), T_("TunnelAssignedDomainFmt"), tunnel_domain_text);
+    obs_properties_add_text(grp, "tunnel_domain_info", db, OBS_TEXT_INFO);
 
     if (show_tunnel_start_note) {
         obs_properties_add_text(grp, "tunnel_start_note",
@@ -616,7 +614,7 @@ void add_tunnel_group(obs_properties_t* props, DelayStreamData* d) {
     }
 
     if (ts == TunnelState::Running && !turl.empty()) {
-        // URL 表示は「演者別チャンネル」に集約
+        // URL 表示は「出演者別チャンネル」に集約
     } else if (ts == TunnelState::Error && !terr.empty()) {
         char eb[256];
         snprintf(eb, sizeof(eb), T_("TunnelErrorFmt"), terr.c_str());
