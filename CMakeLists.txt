@@ -52,31 +52,30 @@ endif()
 
 # ---- Plugin target ----
 add_library(obs-delay-stream MODULE
-  src/plugin-main.cpp
-  src/plugin-main-utils.cpp
-  src/plugin-main-obs-services.cpp
-  src/plugin-main-receiver-assets.cpp
-  src/plugin-main-release-check.cpp
-  src/plugin-main-props-refresh.cpp
-  src/plugin-main-config.cpp
-  src/plugin-main-audio-processing.cpp
-  src/plugin-main-update.cpp
-  src/plugin-main-settings-helpers.cpp
-  src/plugin-main-sub-settings.cpp
-  src/plugin-main-url-share-renderer.cpp
-  src/plugin-main-url-share-ui.cpp
-  src/plugin-main-sub-channels-ui.cpp
-  src/plugin-main-delay-ui.cpp
-  src/plugin-main-properties-ui.cpp
-  src/stepper-widget.cpp
-  src/text-button-widget.cpp
-  src/color-buttons-widget.cpp
-  src/delay-table-widget.cpp
-  src/flow-progress-widget.cpp
-  src/stream-router.cpp
-  src/rtmp-prober.cpp
-  src/tunnel-manager.cpp
-  src/sync-flow.cpp
+  src/plugin/plugin-main.cpp
+  src/plugin/plugin-utils.cpp
+  src/plugin/plugin-services.cpp
+  src/plugin/plugin-assets.cpp
+  src/plugin/release-check.cpp
+  src/plugin/plugin-config.cpp
+  src/plugin/plugin-settings.cpp
+  src/plugin/plugin-helpers.cpp
+  src/audio/audio-processor.cpp
+  src/ui/props-refresh.cpp
+  src/ui/url-share-renderer.cpp
+  src/ui/properties-url-share.cpp
+  src/ui/properties-channels.cpp
+  src/ui/properties-delay.cpp
+  src/ui/properties-builder.cpp
+  src/widgets/stepper-widget.cpp
+  src/widgets/text-button-widget.cpp
+  src/widgets/color-buttons-widget.cpp
+  src/widgets/delay-table-widget.cpp
+  src/widgets/flow-progress-widget.cpp
+  src/network/stream-router.cpp
+  src/network/rtmp-prober.cpp
+  src/tunnel/tunnel-manager.cpp
+  src/sync/sync-flow.cpp
 )
 
 # ---- Build receiver assets with npm ----
