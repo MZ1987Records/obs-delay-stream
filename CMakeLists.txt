@@ -72,7 +72,10 @@ add_library(obs-delay-stream MODULE
   src/widgets/color-buttons-widget.cpp
   src/widgets/delay-table-widget.cpp
   src/widgets/flow-progress-widget.cpp
+  src/widgets/widget-payload-utils.cpp
+  src/network/opus-encoder.cpp
   src/network/stream-router.cpp
+  src/network/stream-router-utils.cpp
   src/network/rtmp-prober.cpp
   src/tunnel/tunnel-manager.cpp
   src/sync/sync-flow.cpp

@@ -5,24 +5,28 @@
 
 namespace ods::plugin {
 
-struct DelayStreamData;
+	struct DelayStreamData;
 
-using SubSettingKey = std::array<char, 32>;
+	using SubSettingKey = std::array<char, 32>;
 
-SubSettingKey make_sub_key(const char *suffix, int ch);
-SubSettingKey make_sub_delay_key(int ch);
-SubSettingKey make_sub_adjust_key(int ch);
-SubSettingKey make_sub_memo_key(int ch);
-SubSettingKey make_sub_code_key(int ch);
-SubSettingKey make_sub_remove_row_key(int ch);
+	SubSettingKey make_sub_key(const char *suffix, int ch); ///< `sub{ch}_{suffix}` 形式の設定キーを生成する
+	SubSettingKey make_sub_delay_key(int ch);               ///< `sub{ch}_delay_ms` キーを生成する
+	SubSettingKey make_sub_adjust_key(int ch);              ///< `sub{ch}_adjust_ms` キーを生成する
+	SubSettingKey make_sub_memo_key(int ch);                ///< `sub{ch}_memo` キーを生成する
+	SubSettingKey make_sub_code_key(int ch);                ///< `sub{ch}_code` キーを生成する
+	SubSettingKey make_sub_remove_row_key(int ch);          ///< `sub{ch}_remove_row` キーを生成する
 
-float calc_sub_delay_raw_value_ms(float base_delay_ms,
-								  float adjust_ms,
-								  float global_offset_ms);
-float calc_effective_sub_delay_value_ms(float base_delay_ms,
-										float adjust_ms,
-										float global_offset_ms);
+	/// 補正前のサブ遅延値（0 未満許容）を計算する
+	float calc_sub_delay_raw_value_ms(float base_delay_ms,
+									  float adjust_ms,
+									  float global_offset_ms);
 
-void apply_settings(DelayStreamData *d, obs_data_t *settings);
+	/// 実適用するサブ遅延値（下限考慮後）を計算する
+	float calc_effective_sub_delay_value_ms(float base_delay_ms,
+											float adjust_ms,
+											float global_offset_ms);
+
+	/// OBS 設定値を `DelayStreamData` に反映する
+	void apply_settings(DelayStreamData *d, obs_data_t *settings);
 
 } // namespace ods::plugin

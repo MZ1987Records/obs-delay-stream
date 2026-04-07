@@ -1,0 +1,43 @@
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "obs-delay-stream"
+PROJECT_BRIEF          = "OBS delay stream plugin API documentation"
+OUTPUT_DIRECTORY       = build/docs
+CREATE_SUBDIRS         = NO
+ALLOW_UNICODE_NAMES    = YES
+OUTPUT_LANGUAGE        = Japanese
+
+OPTIMIZE_OUTPUT_FOR_C  = NO
+TYPEDEF_HIDES_STRUCT   = NO
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+
+INPUT                  = src
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.h *.hpp
+RECURSIVE              = YES
+EXCLUDE                = third_party receiver build
+EXCLUDE_PATTERNS       = */build/* */third_party/*
+
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+QT_AUTOBRIEF           = NO
+MULTILINE_CPP_IS_BRIEF = NO
+
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = api
+GENERATE_TREEVIEW      = YES
+FULL_SIDEBAR           = NO
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO

@@ -5,9 +5,16 @@
 
 namespace ods::plugin {
 
-bool        is_obs_source_removed(obs_source_t *source);
-std::string get_obs_stream_url();
-void        maybe_autofill_rtmp_url(obs_data_t *settings, bool force_refresh);
-void        maybe_autofill_rtmp_url_from_source(obs_source_t *source, bool force_refresh);
+	/// OBS ソースが削除済みか判定する
+	bool is_obs_source_removed(obs_source_t *source);
+
+	/// OBS の出力設定から RTMP URL を取得する
+	std::string get_obs_stream_url();
+
+	/// 設定に RTMP URL を自動補完する
+	void maybe_autofill_rtmp_url(obs_data_t *settings, bool force_refresh);
+
+	/// ソース設定に RTMP URL を自動補完する
+	void maybe_autofill_rtmp_url_from_source(obs_source_t *source, bool force_refresh);
 
 } // namespace ods::plugin

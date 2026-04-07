@@ -1,13 +1,11 @@
 #pragma once
 
-/*
- * tunnel-manager.hpp
- *
+/**
  * cloudflared を子プロセスとして起動し、
- * 取得したパブリックURL (wss://) を返す。
+ * 取得したパブリック URL (wss://) を返す。
  */
 
-// HANDLE メンバーのために最小限の Windows ヘッダーが必要
+// HANDLE メンバー利用に必要な最小限の Windows ヘッダーだけを有効化する。
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -26,90 +24,116 @@
 
 namespace ods::tunnel {
 
-using ods::core::WS_PORT;
-using ods::core::CLOUDFLARED_URL_TIMEOUT_S;
-using ods::core::CLOUDFLARED_POLL_INTV_MS;
-using ods::core::TUNNEL_KILL_TIMEOUT_MS;
+	using ods::core::WS_PORT;
+	using ods::core::CLOUDFLARED_URL_TIMEOUT_S;
+	using ods::core::CLOUDFLARED_POLL_INTV_MS;
+	using ods::core::TUNNEL_KILL_TIMEOUT_MS;
 
-// ============================================================
-// TunnelState
-// ============================================================
-enum class TunnelState {
-	Idle,     // 未起動
-	Starting, // 起動中 (URL取得待ち)
-	Running,  // 動作中
-	Stopped,  // 停止済み
-	Error,    // エラー
-};
+	/**
+	 * トンネル実行状態。
+	 */
+	enum class TunnelState {
+		Idle,     ///< 未起動
+		Starting, ///< 起動中（URL 取得待ち）
+		Running,  ///< 動作中
+		Stopped,  ///< 停止済み
+		Error,    ///< エラー
+	};
 
-// ============================================================
-// TunnelManager
-// ============================================================
-class TunnelManager {
+	/**
+	 * cloudflared プロセスを管理して公開 URL を取得する。
+	 */
+	class TunnelManager {
 	public:
-	// URL取得完了 / エラー コールバック
-	std::function<void(const std::string &url)>    on_url_ready;
-	std::function<void(const std::string &reason)> on_error;
-	std::function<void()>                          on_stopped;
-	std::function<void(bool downloading)>          on_download_state;
 
-	static bool        get_auto_cloudflared_path_if_exists(std::string &out);
-	static std::string to_localappdata_env_path(const std::string &path);
-	bool               cloudflared_downloading() const;
+		std::function<void(const std::string &url)>    on_url_ready;      ///< URL 取得完了コールバック
+		std::function<void(const std::string &reason)> on_error;          ///< エラー通知コールバック
+		std::function<void()>                          on_stopped;        ///< 停止通知コールバック
+		std::function<void(bool downloading)>          on_download_state; ///< cloudflared ダウンロード状態通知
 
-	TunnelManager() = default;
-	~TunnelManager();
+		/// インスタンスを初期化する。
+		TunnelManager() = default;
+		/// 管理中の child process を停止して破棄する。
+		~TunnelManager();
 
-	// exe_path: cloudflared.exe のフルパス（"auto" または空で自動取得）
-	bool start(const std::string &exe_path, int ws_port);
-	void stop();
+		/// 自動配置先に cloudflared.exe が存在する場合のみパスを返す。
+		static bool get_auto_cloudflared_path_if_exists(std::string &out);
+		/// パスを `%LOCALAPPDATA%` 基準の環境変数表現へ正規化する。
+		static std::string to_localappdata_env_path(const std::string &path);
+		/// cloudflared の自動ダウンロード処理が進行中かを返す。
+		bool cloudflared_downloading() const;
 
-	TunnelState state() const;
-	std::string url() const;
-	std::string error() const;
+		/// cloudflared を起動する。
+		/// @param exe_path cloudflared.exe のフルパス（"auto" または空で自動取得）
+		bool start(const std::string &exe_path, int ws_port);
+		/// 起動中の cloudflared を停止する。
+		void stop();
 
-	// 各chの受信URL生成（wss://host/stream_id/ch）
-	std::string make_ch_url(const std::string &stream_id, int ch_1idx) const;
+		/// 現在のトンネル状態を返す。
+		TunnelState state() const;
+		/// 取得済み公開 URL（未取得時は空）を返す。
+		std::string url() const;
+		/// 最後に発生したエラー文字列を返す。
+		std::string error() const;
+
+		std::string make_ch_url(const std::string &stream_id, int ch_1idx) const; ///< 各チャンネルの受信 URL（wss://host/stream_id/ch）を生成する
 
 	private:
-	void set_cloudflared_downloading(bool v);
-	void set_url(const std::string &u);
-	void set_error(const std::string &e);
-	bool launch_process(const std::string &exe_path, const std::string &args);
-	void kill_child();
-	void run_loop();
-	bool run_cloudflared();
 
-	static std::string get_local_appdata_dir();
-	static std::string get_temp_dir();
-	static std::string get_allowed_env_value(const std::string &name);
-	static std::string expand_allowed_env_vars(const std::string &path);
-	static bool        file_exists(const std::string &path);
-	static std::string get_default_cloudflared_path();
-	static bool        download_cloudflared(const std::string &path, std::string &err);
-	static bool        resolve_cloudflared_path(const std::string &requested,
-												std::string       &out,
-												std::string       &err);
-	static bool        extract_cloudflared_error(const std::string &text, std::string &out);
+		std::string log_file_path_;      ///< cloudflared ログ出力先
+		std::string exe_path_;           ///< 実行中に使用する cloudflared パス
+		std::string requested_exe_path_; ///< ユーザー指定の元パス
+		int         ws_port_ = WS_PORT;  ///< トンネル転送先 WebSocket ポート
 
-	std::string log_file_path_;
-	std::string exe_path_;
-	std::string requested_exe_path_;
-	int         ws_port_ = WS_PORT;
+		std::string        url_;               ///< 取得済み公開 URL
+		std::string        error_;             ///< 公開用エラー文字列
+		std::string        last_launch_error_; ///< 起動失敗時の内部エラー詳細
+		mutable std::mutex mtx_;               ///< URL/エラー等の排他制御
 
-	std::string        url_;
-	std::string        error_;
-	std::string        last_launch_error_;
-	mutable std::mutex mtx_;
+		std::atomic<TunnelState> state_{TunnelState::Idle};       ///< トンネル状態
+		std::atomic<bool>        stop_requested_{false};          ///< 停止要求フラグ
+		std::atomic<bool>        downloading_cloudflared_{false}; ///< ダウンロード進行中フラグ
+		std::thread              worker_;                         ///< 監視ワーカースレッド
 
-	std::atomic<TunnelState> state_{TunnelState::Idle};
-	std::atomic<bool>        stop_requested_{false};
-	std::atomic<bool>        downloading_cloudflared_{false};
-	std::thread              worker_;
+		std::mutex proc_mtx_;                             ///< プロセス HANDLE の排他制御
+		HANDLE     proc_handle_   = INVALID_HANDLE_VALUE; ///< cloudflared プロセス HANDLE
+		HANDLE     thread_handle_ = INVALID_HANDLE_VALUE; ///< cloudflared スレッド HANDLE
 
-	std::mutex proc_mtx_;
-	HANDLE     proc_handle_   = INVALID_HANDLE_VALUE;
-	HANDLE     thread_handle_ = INVALID_HANDLE_VALUE;
-};
+		/// ダウンロード中フラグを更新し、必要に応じて通知する。
+		void set_cloudflared_downloading(bool v);
+		/// 公開 URL を更新する。
+		void set_url(const std::string &u);
+		/// エラー文字列を更新する。
+		void set_error(const std::string &e);
+		/// child process を起動する。
+		bool launch_process(const std::string &exe_path, const std::string &args);
+		/// 起動済み child process を終了させる。
+		void kill_child();
+		/// 監視スレッド本体。
+		void run_loop();
+		/// cloudflared 起動と URL 取得処理を実行する。
+		bool run_cloudflared();
+
+		/// `%LOCALAPPDATA%` の実体パスを取得する。
+		static std::string get_local_appdata_dir();
+		/// 一時ディレクトリの実体パスを取得する。
+		static std::string get_temp_dir();
+		/// 許可済み環境変数のみ展開用に取得する。
+		static std::string get_allowed_env_value(const std::string &name);
+		/// 許可済み環境変数だけを展開したパスを返す。
+		static std::string expand_allowed_env_vars(const std::string &path);
+		/// ファイル存在確認。
+		static bool file_exists(const std::string &path);
+		/// 既定の cloudflared 配置先パスを返す。
+		static std::string get_default_cloudflared_path();
+		/// cloudflared を指定パスへダウンロードする。
+		static bool download_cloudflared(const std::string &path, std::string &err);
+		/// 要求文字列から利用可能な cloudflared 実行パスを解決する。
+		static bool resolve_cloudflared_path(const std::string &requested,
+											 std::string       &out,
+											 std::string       &err);
+		/// cloudflared 出力ログから要約エラーを抽出する。
+		static bool extract_cloudflared_error(const std::string &text, std::string &out);
+	};
 
 } // namespace ods::tunnel

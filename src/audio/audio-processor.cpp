@@ -5,102 +5,109 @@
 
 namespace ods::audio {
 
-using namespace ods::core;
+	using namespace ods::core;
 
-namespace {
+	namespace {
 
-static float calc_effective_sub_delay_value_ms(const ods::plugin::DelayStreamData *d,
-											   float                               base_delay_ms,
-											   float                               adjust_ms) {
-	if (!d) return 0.0f;
-	return ods::plugin::calc_effective_sub_delay_value_ms(
-		base_delay_ms,
-		adjust_ms,
-		d->sub_offset_ms);
-}
+		/// サブチャンネル遅延（基準+調整+共通オフセット）の実効値を計算する。
+		static float calc_effective_sub_delay_value_ms(const ods::plugin::DelayStreamData *d,
+													   float                               base_delay_ms,
+													   float                               adjust_ms) {
+			if (!d) return 0.0f;
+			return ods::plugin::calc_effective_sub_delay_value_ms(
+				base_delay_ms,
+				adjust_ms,
+				d->sub_offset_ms);
+		}
 
-static uint32_t calc_effective_sub_delay_ms(const ods::plugin::DelayStreamData *d,
-											float                               base_delay_ms,
-											float                               adjust_ms) {
-	if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
-	return static_cast<uint32_t>(
-		calc_effective_sub_delay_value_ms(d, base_delay_ms, adjust_ms));
-}
+		/// バッファ設定向けに実効遅延をミリ秒整数へ正規化する。
+		static uint32_t calc_effective_sub_delay_ms(const ods::plugin::DelayStreamData *d,
+													float                               base_delay_ms,
+													float                               adjust_ms) {
+			if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
+			return static_cast<uint32_t>(
+				calc_effective_sub_delay_value_ms(d, base_delay_ms, adjust_ms));
+		}
 
-} // namespace
+	} // namespace
 
-void apply_sub_delay_to_buffer(ods::plugin::DelayStreamData *d, int ch) {
-	if (!d || ch < 0 || ch >= MAX_SUB_CH) return;
-	d->sub[ch].buf.set_delay_ms(
-		calc_effective_sub_delay_ms(d, d->sub[ch].delay_ms, d->sub[ch].adjust_ms));
-}
-
-void ensure_audio_processing_initialized(ods::plugin::DelayStreamData *d, uint32_t sr, uint32_t ch) {
-	if (!d) return;
-	if (d->initialized && d->sample_rate == sr && d->channels == ch) return;
-	d->sample_rate = sr;
-	d->channels    = ch;
-	d->master_buf.init(sr, ch);
-	d->master_buf.set_delay_ms((uint32_t)d->master_delay_ms);
-	for (int i = 0; i < MAX_SUB_CH; ++i) {
-		d->sub[i].buf.init(sr, ch);
-		apply_sub_delay_to_buffer(d, i);
+	void apply_sub_delay_to_buffer(ods::plugin::DelayStreamData *d, int ch) {
+		if (!d || ch < 0 || ch >= MAX_SUB_CH) return;
+		d->sub_channels[ch].buf.set_delay_ms(
+			calc_effective_sub_delay_ms(d, d->sub_channels[ch].delay_ms, d->sub_channels[ch].adjust_ms));
 	}
-	d->work_buf.resize(65536 * ch, 0.0f);
-	d->initialized = true;
-}
 
-obs_audio_data *filter_audio_delay_stream(ods::plugin::DelayStreamData *d, obs_audio_data *audio) {
-	if (!d || !audio) return audio;
-	if (d->is_duplicate_instance) return audio;
-	if (audio->frames == 0) return audio;
-
-	const audio_output_info *info = audio_output_get_info(obs_get_audio());
-	uint32_t                 sr   = info ? info->samples_per_sec : 48000;
-	uint32_t                 ch   = (uint32_t)audio_output_get_channels(obs_get_audio());
-	if (ch < 1) ch = 2;
-	ensure_audio_processing_initialized(d, sr, ch);
-
-	size_t frames = audio->frames;
-	size_t total  = frames * ch;
-	if (d->work_buf.size() < total * 3) d->work_buf.resize(total * 3, 0.0f);
-	float *in  = d->work_buf.data();
-	float *out = d->work_buf.data() + total;
-	float *sub = d->work_buf.data() + total * 2;
-	for (uint32_t c = 0; c < ch; ++c) {
-		if (!audio->data[c]) continue;
-		const float *src = reinterpret_cast<const float *>(audio->data[c]);
-		for (size_t f = 0; f < frames; ++f)
-			in[f * ch + c] = src[f];
+	void ensure_audio_processing_initialized(ods::plugin::DelayStreamData *d,
+											 uint32_t                      sample_rate,
+											 uint32_t                      num_channels) {
+		if (!d) return;
+		if (d->initialized &&
+			d->sample_rate == sample_rate &&
+			d->channels == num_channels)
+			return;
+		d->sample_rate = sample_rate;
+		d->channels    = num_channels;
+		d->master_buf.init(sample_rate, num_channels);
+		d->master_buf.set_delay_ms((uint32_t)d->master_delay_ms);
+		for (int i = 0; i < MAX_SUB_CH; ++i) {
+			d->sub_channels[i].buf.init(sample_rate, num_channels);
+			apply_sub_delay_to_buffer(d, i);
+		}
+		d->work_buf.resize(65536 * num_channels, 0.0f);
+		d->initialized = true;
 	}
-	bool en        = d->enabled.load(std::memory_order_relaxed);
-	bool ws        = d->ws_send_enabled.load(std::memory_order_relaxed);
-	bool rr        = d->router_running.load(std::memory_order_relaxed);
-	bool has_sid   = !d->get_stream_id().empty();
-	int  sub_count = d->sub_ch_count;
 
-	if (en) {
-		d->master_buf.process(in, out, frames);
-		for (uint32_t c = 0; c < ch; ++c) {
+	obs_audio_data *filter_audio_delay_stream(ods::plugin::DelayStreamData *d, obs_audio_data *audio) {
+		if (!d || !audio) return audio;
+		if (d->is_duplicate_instance) return audio;
+		if (audio->frames == 0) return audio;
+
+		const audio_output_info *info         = audio_output_get_info(obs_get_audio());
+		uint32_t                 sample_rate  = info ? info->samples_per_sec : 48000;
+		uint32_t                 num_channels = (uint32_t)audio_output_get_channels(obs_get_audio());
+		if (num_channels < 1) num_channels = 2;
+		ensure_audio_processing_initialized(d, sample_rate, num_channels);
+
+		size_t frames = audio->frames;
+		size_t total  = frames * num_channels;
+		if (d->work_buf.size() < total * 3) d->work_buf.resize(total * 3, 0.0f);
+		float *in      = d->work_buf.data();
+		float *out     = d->work_buf.data() + total;
+		float *sub_buf = d->work_buf.data() + total * 2;
+		for (uint32_t c = 0; c < num_channels; ++c) {
 			if (!audio->data[c]) continue;
-			float *dst = reinterpret_cast<float *>(audio->data[c]);
+			const float *src = reinterpret_cast<const float *>(audio->data[c]);
 			for (size_t f = 0; f < frames; ++f)
-				dst[f] = out[f * ch + c];
+				in[f * num_channels + c] = src[f];
 		}
-		if (ws && rr && has_sid) {
-			for (int i = 0; i < sub_count; ++i) {
-				d->sub[i].buf.process(in, sub, frames);
-				d->router.send_audio(i, sub, frames, sr, ch);
+		bool is_enabled      = d->enabled.load(std::memory_order_relaxed);
+		bool ws_send_enabled = d->ws_send_enabled.load(std::memory_order_relaxed);
+		bool router_running  = d->router_running.load(std::memory_order_relaxed);
+		bool has_sid         = !d->get_stream_id().empty();
+		int  sub_count       = d->sub_ch_count;
+
+		if (is_enabled) {
+			d->master_buf.process(in, out, frames);
+			for (uint32_t c = 0; c < num_channels; ++c) {
+				if (!audio->data[c]) continue;
+				float *dst = reinterpret_cast<float *>(audio->data[c]);
+				for (size_t f = 0; f < frames; ++f)
+					dst[f] = out[f * num_channels + c];
+			}
+			if (ws_send_enabled && router_running && has_sid) {
+				for (int i = 0; i < sub_count; ++i) {
+					d->sub_channels[i].buf.process(in, sub_buf, frames);
+					d->router.send_audio(i, sub_buf, frames, sample_rate, num_channels);
+				}
+			}
+		} else {
+			if (ws_send_enabled && router_running && has_sid) {
+				for (int i = 0; i < sub_count; ++i) {
+					d->router.send_audio(i, in, frames, sample_rate, num_channels);
+				}
 			}
 		}
-	} else {
-		if (ws && rr && has_sid) {
-			for (int i = 0; i < sub_count; ++i) {
-				d->router.send_audio(i, in, frames, sr, ch);
-			}
-		}
+		return audio;
 	}
-	return audio;
-}
 
 } // namespace ods::audio

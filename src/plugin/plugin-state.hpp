@@ -17,239 +17,313 @@
 #include <string>
 #include <vector>
 
+/**
+ * OBS フィルタのプラグイン本体。状態管理・設定・ヘルパーを含む。
+ */
 namespace ods::plugin {
 
-using ods::core::DelayBuffer;
-using ods::core::MAX_SUB_CH;
-using ods::core::WS_PORT;
-using ods::core::DEFAULT_PING_COUNT;
-using ods::core::PLAYBACK_BUFFER_DEFAULT_MS;
+	using ods::core::DelayBuffer;
+	using ods::core::MAX_SUB_CH;
+	using ods::core::WS_PORT;
+	using ods::core::DEFAULT_PING_COUNT;
+	using ods::core::PLAYBACK_BUFFER_DEFAULT_MS;
 
-using ods::network::LatencyResult;
-using ods::network::RtmpProber;
-using ods::network::RtmpProbeResult;
-using ods::network::StreamRouter;
-using ods::network::AudioConfig;
-using ods::sync::SyncFlow;
-using ods::sync::FlowPhase;
-using ods::sync::FlowResult;
-using ods::tunnel::TunnelManager;
-using ods::tunnel::TunnelState;
+	using ods::network::LatencyResult;
+	using ods::network::RtmpProber;
+	using ods::network::RtmpProbeResult;
+	using ods::network::StreamRouter;
+	using ods::network::AudioConfig;
+	using ods::sync::SyncFlow;
+	using ods::sync::FlowPhase;
+	using ods::sync::FlowResult;
+	using ods::tunnel::TunnelManager;
+	using ods::tunnel::TunnelState;
 
-// スレッドセーフな計測状態管理クラス。
-// mutex を外部から直接触らずに済む操作インターフェースを提供する。
-class MeasureState {
+	/**
+	 * スレッドセーフな計測状態管理クラス。
+	 *
+	 * mutex を外部公開せず、状態更新 API のみ提供する。
+	 */
+	class MeasureState {
 	public:
-	// 計測開始 (measuring=true、result/error をクリア)
-	void start() {
-		std::lock_guard<std::mutex> lk(mtx_);
-		measuring_ = true;
-		result_    = LatencyResult{};
-		last_error_.clear();
-	}
-	// 計測完了 (measuring=false、結果とエラー文字列を設定)
-	void set_result(const LatencyResult &r, const std::string &error = "") {
-		std::lock_guard<std::mutex> lk(mtx_);
-		result_     = r;
-		measuring_  = false;
-		applied_    = r.valid;
-		last_error_ = error;
-	}
-	// 全状態リセット
-	void reset() {
-		std::lock_guard<std::mutex> lk(mtx_);
-		result_    = LatencyResult{};
-		measuring_ = false;
-		applied_   = false;
-		last_error_.clear();
-	}
-	bool is_measuring() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return measuring_;
-	}
-	LatencyResult result() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return result_;
-	}
-	bool is_applied() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return applied_;
-	}
-	std::string last_error() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return last_error_;
-	}
+
+		/// 計測開始状態へ遷移し、結果とエラーをクリアする。
+		void start() {
+			std::lock_guard<std::mutex> lk(mtx_);
+			measuring_ = true;
+			result_    = LatencyResult{};
+			last_error_.clear();
+		}
+
+		/// 計測完了状態へ遷移し、結果とエラーを反映する。
+		void set_result(const LatencyResult &r, const std::string &error = "") {
+			std::lock_guard<std::mutex> lk(mtx_);
+			result_     = r;
+			measuring_  = false;
+			applied_    = r.valid;
+			last_error_ = error;
+		}
+
+		/// 内部状態を初期化する。
+		void reset() {
+			std::lock_guard<std::mutex> lk(mtx_);
+			result_    = LatencyResult{};
+			measuring_ = false;
+			applied_   = false;
+			last_error_.clear();
+		}
+
+		/// 計測中か否かを返す。スレッドセーフ。
+		bool is_measuring() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return measuring_;
+		}
+
+		/// 直近の計測結果を返す。スレッドセーフ。
+		LatencyResult result() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return result_;
+		}
+
+		/// 結果が適用済みか返す。スレッドセーフ。
+		bool is_applied() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return applied_;
+		}
+
+		/// 直近のエラー文字列を返す。スレッドセーフ。
+		std::string last_error() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return last_error_;
+		}
 
 	private:
-	mutable std::mutex mtx_;
-	LatencyResult      result_;
-	bool               measuring_ = false;
-	bool               applied_   = false;
-	std::string        last_error_;
-};
 
-// RtmpProber と計測結果をまとめたクラス。
-// prober の on_result コールバックは外部から直接設定すること。
-class RtmpMeasureState {
-	public:
-	RtmpProber prober; // on_result は外部 (plugin-main.cpp) で設定
-
-	// 計測結果をスレッドセーフに記録する (prober.on_result コールバックから呼ぶ)
-	void apply_result(const RtmpProbeResult &r) {
-		std::lock_guard<std::mutex> lk(mtx_);
-		result_  = r;
-		applied_ = false;
-	}
-	RtmpProbeResult result() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return result_;
-	}
-	bool is_applied() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return applied_;
-	}
-	void set_applied(bool v) {
-		std::lock_guard<std::mutex> lk(mtx_);
-		applied_ = v;
-	}
-	std::string cached_url() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return cached_url_;
-	}
-	void set_cached_url(const std::string &url) {
-		std::lock_guard<std::mutex> lk(mtx_);
-		cached_url_ = url;
-	}
-
-	private:
-	mutable std::mutex mtx_;
-	RtmpProbeResult    result_;
-	bool               applied_ = false;
-	std::string        cached_url_;
-};
-
-struct DelayStreamData;
-struct ChCtx {
-	DelayStreamData *d;
-	int              ch;
-};
-
-enum class UpdateCheckStatus {
-	Unknown = 0,
-	Checking,
-	UpToDate,
-	UpdateAvailable,
-	Error,
-};
-
-// 更新確認状態をまとめたクラス。
-// status / inflight はアトミック操作が必要なため public。
-// 文字列フィールドはミューテックスで保護したアクセサ経由で読み書きする。
-class UpdateCheckState {
-	public:
-	std::atomic<UpdateCheckStatus> status{UpdateCheckStatus::Unknown};
-	std::atomic<bool>              inflight{false};
-
-	// 文字列フィールドをまとめて書き込む (ワーカースレッドから呼ぶ)
-	void set_strings(const std::string &version, const std::string &url, const std::string &error) {
-		std::lock_guard<std::mutex> lk(mtx_);
-		latest_version_ = version;
-		latest_url_     = url;
-		error_          = error;
-	}
-	std::string latest_version() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return latest_version_;
-	}
-	std::string latest_url() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return latest_url_;
-	}
-	std::string error() const {
-		std::lock_guard<std::mutex> lk(mtx_);
-		return error_;
-	}
-
-	private:
-	mutable std::mutex mtx_;
-	std::string        latest_version_;
-	std::string        latest_url_;
-	std::string        error_;
-};
-
-struct DelayStreamData {
-	obs_source_t                      *context               = nullptr;
-	bool                               is_duplicate_instance = false;
-	bool                               owns_singleton_slot   = false;
-	uint64_t                           singleton_generation  = 0;
-	std::atomic<bool>                  destroying{false};
-	std::atomic<bool>                  enabled{true};
-	std::atomic<bool>                  ws_send_enabled{true};
-	std::shared_ptr<std::atomic<bool>> life_token =
-		std::make_shared<std::atomic<bool>>(true);
-	mutable std::mutex            stream_id_mtx;
-	std::string                   stream_id;
-	std::string                   host_ip;
-	std::string                   auto_ip;
-	std::atomic<int>              ws_port{WS_PORT};
-	std::atomic<int>              ping_count_setting{DEFAULT_PING_COUNT};
-	int                           playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS;
-	float                         master_delay_ms    = 0.0f;
-	float                         sub_offset_ms      = 0.0f;
-	int                           sub_ch_count       = 1;
-	DelayBuffer                   master_buf;
-	RtmpMeasureState              rtmp;
-	StreamRouter                  router;
-	std::atomic<bool>             router_running{false};
-	std::array<ChCtx, MAX_SUB_CH> btn_ctx;
-	struct SubChannel {
-		float        delay_ms  = 0.0f;
-		float        adjust_ms = 0.0f;
-		DelayBuffer  buf;
-		MeasureState measure;
+		mutable std::mutex mtx_;               ///< メンバアクセスを保護する mutex
+		LatencyResult      result_;            ///< 直近の計測結果
+		bool               measuring_ = false; ///< 計測中フラグ
+		bool               applied_   = false; ///< 結果適用済みフラグ
+		std::string        last_error_;        ///< 直近のエラー文字列
 	};
-	std::array<SubChannel, MAX_SUB_CH> sub;
-	SyncFlow                           flow;
-	TunnelManager                      tunnel;
-	uint32_t                           sample_rate = 48000;
-	uint32_t                           channels    = 2;
-	bool                               initialized = false;
-	std::atomic<bool>                  create_done{false};
-	std::atomic<int>                   get_props_depth{0};
-	std::atomic<int64_t>               last_rendered_audio_sync_offset_ns{INT64_MIN};
-	UpdateCheckState                   update_check;
-	std::atomic<bool>                  sid_autofill_guard{false};
-	std::atomic<bool>                  rtmp_url_auto{true};
-	bool                               prev_stream_id_has_user_value = false;
-	std::vector<float>                 work_buf;
 
-	std::string get_stream_id() const {
-		std::lock_guard<std::mutex> lk(stream_id_mtx);
-		return stream_id;
-	}
-	void set_stream_id(const std::string &id) {
-		std::lock_guard<std::mutex> lk(stream_id_mtx);
-		stream_id = id;
-	}
-	std::string get_host_ip() const {
-		std::lock_guard<std::mutex> lk(stream_id_mtx);
-		return host_ip;
-	}
-	// manual_override が空なら auto_ip にフォールバックする
-	void set_host_ip(const char *manual_override) {
-		std::lock_guard<std::mutex> lk(stream_id_mtx);
-		host_ip = (manual_override && *manual_override) ? manual_override : auto_ip;
-	}
-	// プロパティUI の再描画を依頼する。
-	// create_done / destroying / get_props_depth を自動参照するため呼び出し側で展開不要。
-	void request_props_refresh(const char *reason = nullptr) const {
-		ods::ui::props_refresh_request(
-			context,
-			create_done.load(std::memory_order_acquire),
-			destroying.load(std::memory_order_acquire),
-			get_props_depth.load(std::memory_order_acquire),
-			reason);
-	}
-};
+	/**
+	 * RtmpProber と計測結果をまとめた状態クラス。
+	 *
+	 * `prober.on_result` は外部で設定する。
+	 */
+	class RtmpMeasureState {
+	public:
+
+		RtmpProber prober; ///< on_result は外部（plugin-main.cpp）で設定
+
+		/// 計測結果をスレッドセーフに記録する。
+		void apply_result(const RtmpProbeResult &r) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			result_  = r;
+			applied_ = false;
+		}
+
+		/// 直近の RTMP 計測結果を返す。スレッドセーフ。
+		RtmpProbeResult result() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return result_;
+		}
+
+		/// 結果が適用済みか返す。スレッドセーフ。
+		bool is_applied() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return applied_;
+		}
+
+		/// 適用済みフラグを設定する。スレッドセーフ。
+		void set_applied(bool v) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			applied_ = v;
+		}
+
+		/// キャッシュ済み RTMP URL を返す。スレッドセーフ。
+		std::string cached_url() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return cached_url_;
+		}
+
+		/// RTMP URL をキャッシュする。スレッドセーフ。
+		void set_cached_url(const std::string &url) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			cached_url_ = url;
+		}
+
+	private:
+
+		mutable std::mutex mtx_;             ///< メンバアクセスを保護する mutex
+		RtmpProbeResult    result_;          ///< 直近の RTMP 計測結果
+		bool               applied_ = false; ///< 結果適用済みフラグ
+		std::string        cached_url_;      ///< 直近の計測対象 URL
+	};
+
+	struct DelayStreamData;
+
+	/**
+	 * チャンネル番号付きコールバック引数。
+	 */
+	struct SubChannelCtx {
+		DelayStreamData *d;  ///< 対象データ
+		int              ch; ///< 0-indexed チャンネル番号
+	};
+
+	/**
+	 * 更新確認の状態種別。
+	 */
+	enum class UpdateCheckStatus {
+		Unknown = 0,     ///< 未確認
+		Checking,        ///< 確認中
+		UpToDate,        ///< 最新
+		UpdateAvailable, ///< 更新あり
+		Error,           ///< 取得失敗
+	};
+
+	/**
+	 * 更新確認状態を保持するクラス。
+	 *
+	 * `status` / `inflight` はアトミック運用のため public、
+	 * 文字列フィールドはミューテックス保護アクセサ経由で扱う。
+	 */
+	class UpdateCheckState {
+	public:
+
+		std::atomic<UpdateCheckStatus> status{UpdateCheckStatus::Unknown}; ///< 更新確認の現在状態
+		std::atomic<bool>              inflight{false};                    ///< HTTP リクエスト処理中フラグ
+
+		/// 文字列フィールドをまとめて書き込む。スレッドセーフ。
+		void set_strings(const std::string &version, const std::string &url, const std::string &error) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			latest_version_ = version;
+			latest_url_     = url;
+			error_          = error;
+		}
+
+		/// 取得した最新バージョン文字列を返す。スレッドセーフ。
+		std::string latest_version() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return latest_version_;
+		}
+
+		/// 取得した最新版ダウンロード URL を返す。スレッドセーフ。
+		std::string latest_url() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return latest_url_;
+		}
+
+		/// 取得失敗時のエラー文字列を返す。スレッドセーフ。
+		std::string error() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return error_;
+		}
+
+	private:
+
+		mutable std::mutex mtx_;            ///< 文字列フィールドを保護する mutex
+		std::string        latest_version_; ///< 取得した最新バージョン文字列
+		std::string        latest_url_;     ///< 取得した最新版ダウンロード URL
+		std::string        error_;          ///< 取得失敗時のエラー文字列
+	};
+
+	/**
+	 * OBS フィルタ全体の実行状態。
+	 */
+	struct DelayStreamData {
+		obs_source_t     *context               = nullptr; ///< OBS フィルタコンテキスト
+		bool              is_duplicate_instance = false;   ///< 二重起動されたインスタンスか
+		bool              owns_singleton_slot   = false;   ///< シングルトンスロットを確保しているか
+		uint64_t          singleton_generation  = 0;       ///< シングルトン世代番号（重複判定用）
+		std::atomic<bool> destroying{false};               ///< デストラクタ実行中フラグ
+		std::atomic<bool> enabled{true};                   ///< フィルタ有効フラグ
+		std::atomic<bool> ws_send_enabled{true};           ///< WebSocket 音声送信有効フラグ
+
+		/// 非同期タスクがフィルタ生存中かチェックするトークン
+		std::shared_ptr<std::atomic<bool>> life_token =
+			std::make_shared<std::atomic<bool>>(true);
+
+		mutable std::mutex stream_id_mtx;                                   ///< stream_id / host_ip / auto_ip を保護する mutex
+		std::string        stream_id;                                       ///< 配信 ID（例: "myshow2024"）
+		std::string        host_ip;                                         ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
+		std::string        auto_ip;                                         ///< 自動取得したローカル IP
+		std::atomic<int>   ws_port{WS_PORT};                                ///< WebSocket ポート番号
+		std::atomic<int>   ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
+		int                playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
+		float              master_delay_ms    = 0.0f;                       ///< マスターチャンネルの遅延量 (ms)
+		float              sub_offset_ms      = 0.0f;                       ///< 全サブチャンネル共通のオフセット (ms)
+		int                sub_ch_count       = 1;                          ///< アクティブなサブチャンネル数
+		DelayBuffer        master_buf;                                      ///< マスターチャンネルの遅延バッファ
+		RtmpMeasureState   rtmp_measure;                                    ///< RTMP 計測状態
+		StreamRouter       router;                                          ///< WebSocket ルーター
+		std::atomic<bool>  router_running{false};                           ///< WebSocket ルーター起動中フラグ
+
+		/// サブチャンネルボタンのコールバック引数
+		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
+
+		/**
+		 * サブチャンネルの遅延状態。
+		 */
+		struct SubChannel {
+			float        delay_ms  = 0.0f; ///< ベース遅延 (ms)
+			float        adjust_ms = 0.0f; ///< 手動補正遅延 (ms)
+			DelayBuffer  buf;              ///< 音声遅延バッファ
+			MeasureState measure;          ///< 計測状態
+		};
+
+		std::array<SubChannel, MAX_SUB_CH> sub_channels; ///< サブチャンネルの状態配列
+
+		SyncFlow          flow;                ///< 3ステップ同期フロー
+		TunnelManager     tunnel;              ///< cloudflared トンネルマネージャー
+		uint32_t          sample_rate = 48000; ///< 音声サンプルレート (Hz)
+		uint32_t          channels    = 2;     ///< 音声チャンネル数
+		bool              initialized = false; ///< 音声処理の初期化完了フラグ
+		std::atomic<bool> create_done{false};  ///< obs_source_create 完了フラグ
+		std::atomic<int>  get_props_depth{0};  ///< obs_get_properties の再入深度
+
+		/// 最後にレンダリングした音声同期オフセット (ns)
+		std::atomic<int64_t> last_rendered_audio_sync_offset_ns{INT64_MIN};
+
+		UpdateCheckState   update_check;                          ///< 更新確認状態
+		std::atomic<bool>  sid_autofill_guard{false};             ///< stream_id 自動補完の二重実行防止フラグ
+		std::atomic<bool>  rtmp_url_auto{true};                   ///< RTMP URL 自動補完を有効にするフラグ
+		bool               prev_stream_id_has_user_value = false; ///< 直前の stream_id にユーザー設定値があったか（デフォルトリセット検出用）
+		std::vector<float> work_buf;                              ///< 音声処理用ワークバッファ
+
+		/// stream_id をスレッドセーフに取得する。
+		std::string get_stream_id() const {
+			std::lock_guard<std::mutex> lk(stream_id_mtx);
+			return stream_id;
+		}
+
+		/// stream_id をスレッドセーフに設定する。
+		void set_stream_id(const std::string &id) {
+			std::lock_guard<std::mutex> lk(stream_id_mtx);
+			stream_id = id;
+		}
+
+		/// host_ip をスレッドセーフに取得する。
+		std::string get_host_ip() const {
+			std::lock_guard<std::mutex> lk(stream_id_mtx);
+			return host_ip;
+		}
+
+		/// manual_override が空なら auto_ip を使う。スレッドセーフ。
+		void set_host_ip(const char *manual_override) {
+			std::lock_guard<std::mutex> lk(stream_id_mtx);
+			host_ip = (manual_override && *manual_override) ? manual_override : auto_ip;
+		}
+
+		/// create_done / destroying / get_props_depth を参照してプロパティ再描画を要求する。
+		void request_props_refresh(const char *reason = nullptr) const {
+			ods::ui::props_refresh_request(
+				context,
+				create_done.load(std::memory_order_acquire),
+				destroying.load(std::memory_order_acquire),
+				get_props_depth.load(std::memory_order_acquire),
+				reason);
+		}
+	};
 
 } // namespace ods::plugin

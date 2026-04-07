@@ -1,0 +1,37 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# C++
+[*.{cpp,hpp}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+# Web / config
+[*.{ts,js,mjs,json,yml,yaml,html,css,svg}]
+indent_style = space
+indent_size = 2
+
+# CMake
+[CMakeLists.txt]
+indent_style = space
+indent_size = 2
+
+[*.cmake]
+indent_style = space
+indent_size = 2
+
+# Windows batch
+[*.bat]
+end_of_line = crlf
+indent_style = space
+indent_size = 4
+
+# Markdown (trailing spaces are meaningful line breaks)
+[*.md]
+trim_trailing_whitespace = false

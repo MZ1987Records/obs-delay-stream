@@ -1,14 +1,21 @@
 # please use clang-format version 16 or later
 
 Standard: c++17
-AccessModifierOffset: -8
+AccessModifierOffset: -4
+EmptyLineBeforeAccessModifier: Always
+EmptyLineAfterAccessModifier: Always
 AlignAfterOpenBracket: Align
 AlignConsecutiveAssignments:
   Enabled: true
   AcrossEmptyLines: false
   AcrossComments: false
   PadOperators: true
-AlignConsecutiveDeclarations: true
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+  AlignFunctionDeclarations: false
+  AlignFunctionPointers: false
 AlignEscapedNewlines: Left
 AlignOperands: true
 AlignTrailingComments: true
@@ -70,7 +77,7 @@ IndentWrappedFunctionNames: false
 # InsertBraces: true
 KeepEmptyLinesAtTheStartOfBlocks: true
 MaxEmptyLinesToKeep: 1
-NamespaceIndentation: None
+NamespaceIndentation: All
 
 PenaltyBreakAssignment: 10
 PenaltyBreakBeforeFirstCallParameter: 30
@@ -81,7 +88,7 @@ PenaltyExcessCharacter: 100
 PenaltyReturnTypeOnItsOwnLine: 60
 
 PointerAlignment: Right
-ReflowComments: false
+ReflowComments: true
 SkipMacroDefinitionBody: true
 SortIncludes: false
 SortUsingDeclarations: false
