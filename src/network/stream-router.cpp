@@ -396,8 +396,8 @@ namespace ods::network {
 		if (mode != 0 && mode != 1) mode = 0;
 
 		int bitrate_kbps = cfg.opus_bitrate_kbps;
-		if (bitrate_kbps < 6) bitrate_kbps = 6;
-		if (bitrate_kbps > 510) bitrate_kbps = 510;
+		if (bitrate_kbps < 24) bitrate_kbps = 24;
+		if (bitrate_kbps > 320) bitrate_kbps = 320;
 
 		int target_sample_rate = cfg.opus_target_sample_rate;
 		if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 0;

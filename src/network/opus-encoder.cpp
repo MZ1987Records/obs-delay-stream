@@ -54,8 +54,8 @@ namespace ods::network {
 		int actual_sample_rate = is_valid_opus_sample_rate(target_sample_rate)
 									 ? target_sample_rate
 									 : 48000;
-		if (bitrate_kbps < 6) bitrate_kbps = 6;
-		if (bitrate_kbps > 510) bitrate_kbps = 510;
+		if (bitrate_kbps < 24) bitrate_kbps = 24;
+		if (bitrate_kbps > 320) bitrate_kbps = 320;
 
 		ctx->sample_rate = actual_sample_rate;
 		av_channel_layout_default(&ctx->ch_layout, num_channels);

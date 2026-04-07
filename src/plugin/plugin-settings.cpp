@@ -149,11 +149,11 @@ namespace ods::plugin {
 				audio_cfg.codec = (int)obs_data_get_int(settings_, "audio_codec");
 				{
 					int bitrate = (int)obs_data_get_int(settings_, "opus_bitrate_kbps");
-					if (bitrate < 6) {
-						bitrate = 6;
+					if (bitrate < 24) {
+						bitrate = 24;
 						obs_data_set_int(settings_, "opus_bitrate_kbps", bitrate);
-					} else if (bitrate > 510) {
-						bitrate = 510;
+					} else if (bitrate > 320) {
+						bitrate = 320;
 						obs_data_set_int(settings_, "opus_bitrate_kbps", bitrate);
 					}
 					audio_cfg.opus_bitrate_kbps = bitrate;
