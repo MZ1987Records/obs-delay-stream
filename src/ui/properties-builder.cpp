@@ -249,7 +249,12 @@ namespace ods::ui {
 			if (is_rtmp_measuring) {
 				snprintf(step3_status, sizeof(step3_status), "%s", T_("FlowRtmpMeasureProgress"));
 			} else if ((is_rtmp_done || is_complete) && res.rtmp_valid) {
-				snprintf(step3_status, sizeof(step3_status), T_("FlowRtmpMeasureResultFmt"), res.rtmp_latency_ms, res.max_latency_ms, res.master_base_delay_ms);
+				snprintf(step3_status,
+						 sizeof(step3_status),
+						 T_("FlowRtmpMeasureResultFmt"),
+						 res.rtmp_latency_ms,
+						 res.max_latency_ms(),
+						 res.proposed_master_delay_ms());
 			} else if (is_rtmp_done && !res.rtmp_valid) {
 				snprintf(step3_status, sizeof(step3_status), T_("FlowRtmpFailedFmt"), res.rtmp_error.c_str());
 			} else {
@@ -376,7 +381,7 @@ namespace ods::ui {
 				cb_flow_retry_failed,
 				d);
 			obs_property_set_enabled(retry_failed_btn,
-									 is_ws_done && (res.measured_count < res.connected_count));
+									 is_ws_done && (res.measured_count() < res.connected_count()));
 
 			if (s) obs_data_release(s);
 		}

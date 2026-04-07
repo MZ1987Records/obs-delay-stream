@@ -7,8 +7,8 @@ namespace ods::plugin {
 
 	struct DelayStreamData;
 
-	inline constexpr char kMasterBaseDelayKey[]       = "master_base_delay_ms";
-	inline constexpr char kMasterOffsetKey[]          = "master_offset_ms";
+	inline constexpr char kMasterBaseDelayKey[] = "master_base_delay_ms";
+	inline constexpr char kMasterOffsetKey[]    = "master_offset_ms";
 
 	using SubSettingKey = std::array<char, 32>;
 

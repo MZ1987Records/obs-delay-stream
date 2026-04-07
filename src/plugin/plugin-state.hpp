@@ -252,20 +252,20 @@ namespace ods::plugin {
 		std::shared_ptr<std::atomic<bool>> life_token =
 			std::make_shared<std::atomic<bool>>(true);
 
-		mutable std::mutex stream_id_mtx;                                   ///< stream_id / host_ip / auto_ip を保護する mutex
-		std::string        stream_id;                                       ///< 配信 ID（例: "myshow2024"）
-		std::string        host_ip;                                         ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
-		std::string        auto_ip;                                         ///< 自動取得したローカル IP
-		std::atomic<int>   ws_port{WS_PORT};                                ///< WebSocket ポート番号
-		std::atomic<int>   ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
-		int                playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		float              master_base_delay_ms = 0.0f;                     ///< マスターチャンネルの基準遅延量 (ms)
-		float              master_offset_ms     = 0.0f;                     ///< 全サブチャンネル共通のオフセット (ms)
-		int                sub_ch_count       = 1;                          ///< アクティブなサブチャンネル数
-		DelayBuffer        master_buf;                                      ///< マスターチャンネルの遅延バッファ
-		RtmpMeasureState   rtmp_measure;                                    ///< RTMP 計測状態
-		StreamRouter       router;                                          ///< WebSocket ルーター
-		std::atomic<bool>  router_running{false};                           ///< WebSocket ルーター起動中フラグ
+		mutable std::mutex stream_id_mtx;                                     ///< stream_id / host_ip / auto_ip を保護する mutex
+		std::string        stream_id;                                         ///< 配信 ID（例: "myshow2024"）
+		std::string        host_ip;                                           ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
+		std::string        auto_ip;                                           ///< 自動取得したローカル IP
+		std::atomic<int>   ws_port{WS_PORT};                                  ///< WebSocket ポート番号
+		std::atomic<int>   ping_count_setting{DEFAULT_PING_COUNT};            ///< WebSocket 計測の ping 送信回数
+		int                playback_buffer_ms   = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
+		float              master_base_delay_ms = 0.0f;                       ///< マスターチャンネルの基準遅延量 (ms)
+		float              master_offset_ms     = 0.0f;                       ///< 全サブチャンネル共通のオフセット (ms)
+		int                sub_ch_count         = 1;                          ///< アクティブなサブチャンネル数
+		DelayBuffer        master_buf;                                        ///< マスターチャンネルの遅延バッファ
+		RtmpMeasureState   rtmp_measure;                                      ///< RTMP 計測状態
+		StreamRouter       router;                                            ///< WebSocket ルーター
+		std::atomic<bool>  router_running{false};                             ///< WebSocket ルーター起動中フラグ
 
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;

@@ -52,7 +52,6 @@ namespace ods::sync {
 		bool   connected;          ///< 接続中か
 		bool   measured;           ///< 計測成功か
 		double one_way_latency_ms; ///< 片道レイテンシ推定値
-		double proposed_delay;     ///< 提案遅延設定値
 	};
 
 	/**
@@ -61,17 +60,50 @@ namespace ods::sync {
 	struct FlowResult {
 		std::array<ChSummary, MAX_SUB_CH> channels{}; ///< CH ごとの計測結果
 
-		int    connected_count  = 0;   ///< 接続中 CH 数
-		int    completed_count  = 0;   ///< 成功/失敗を問わず計測処理が完了した件数
-		int    measured_count   = 0;   ///< 計測成功 CH 数
-		int    ping_sent_count  = 0;   ///< 送信済み ping 合計
-		int    ping_total_count = 0;   ///< 予定 ping 総数（connected_count × ping_count）
-		double max_latency_ms   = 0.0; ///< 基準（最大片道レイテンシ）
+		int completed_count  = 0; ///< 成功/失敗を問わず計測処理が完了した件数
+		int ping_sent_count  = 0; ///< 送信済み ping 合計
+		int ping_total_count = 0; ///< 予定 ping 総数
 
 		double      rtmp_latency_ms = 0.0;   ///< RTMP 計測で得た平均レイテンシ
-		double      master_base_delay_ms = 0.0;   ///< = max_latency + rtmp_latency
 		bool        rtmp_valid      = false; ///< RTMP 計測結果が有効か
 		std::string rtmp_error;              ///< RTMP 計測失敗時の理由
+
+		int connected_count() const {
+			int count = 0;
+			for (const auto &ch : channels) {
+				if (ch.connected) ++count;
+			}
+			return count;
+		}
+
+		int measured_count() const {
+			int count = 0;
+			for (const auto &ch : channels) {
+				if (ch.measured) ++count;
+			}
+			return count;
+		}
+
+		double max_latency_ms() const {
+			double max_ow = 0.0;
+			for (const auto &ch : channels) {
+				if (ch.measured && ch.one_way_latency_ms > max_ow) {
+					max_ow = ch.one_way_latency_ms;
+				}
+			}
+			return max_ow;
+		}
+
+		double proposed_sub_delay_ms(int ch_index) const {
+			if (ch_index < 0 || ch_index >= MAX_SUB_CH) return 0.0;
+			const auto &ch = channels[ch_index];
+			if (!ch.measured) return 0.0;
+			return max_latency_ms() - ch.one_way_latency_ms;
+		}
+
+		double proposed_master_delay_ms() const {
+			return max_latency_ms() + rtmp_latency_ms;
+		}
 	};
 
 	/**
@@ -80,11 +112,11 @@ namespace ods::sync {
 	class SyncFlow {
 	public:
 
-		std::function<void()>                      on_update;           ///< GUI 再描画要求コールバック
-		std::function<void()>                      on_progress;         ///< ping 送信ごとの軽量進捗通知（再構築不要）
-		std::function<void(int ch, LatencyResult)> on_ch_measured;      ///< 各 CH 計測完了通知
-		std::function<void(double master_ms)>      on_apply_master;     ///< マスター遅延書き込み要求
-		std::function<void(const FlowResult &)>    on_apply_sub_delays; ///< WebSocket 計測完了時の全 CH 遅延書き込み要求
+		std::function<void()>                      on_update;                ///< GUI 再描画要求コールバック
+		std::function<void()>                      on_progress;              ///< ping 送信ごとの軽量進捗通知（再構築不要）
+		std::function<void(int ch, LatencyResult)> on_ch_measured;           ///< 各 CH 計測完了通知
+		std::function<void(double master_ms)>      on_apply_master;          ///< マスター遅延書き込み要求
+		std::function<void(const FlowResult &)>    on_apply_sub_base_delays; ///< WebSocket 計測完了時の全 CH 遅延書き込み要求
 
 		/// 初期状態へリセットして構築する。
 		SyncFlow();
@@ -125,8 +157,6 @@ namespace ods::sync {
 
 		/// 各 CH 計測完了時の集計処理。
 		void on_ch_result(int i, LatencyResult r);
-		/// WebSocket 計測値から提案遅延を算出する。
-		void compute_proposals();
 	};
 
 } // namespace ods::sync

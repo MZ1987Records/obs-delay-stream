@@ -60,6 +60,7 @@ namespace ods::sync {
 			active = active_ch_;
 		}
 		reset();
+		int connected_count = 0;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			phase_ = FlowPhase::WsMeasuring;
@@ -67,12 +68,12 @@ namespace ods::sync {
 				result_.channels[i].ch        = i;
 				result_.channels[i].connected = (router.client_count(i) > 0);
 				result_.channels[i].measured  = false;
-				if (result_.channels[i].connected) ++result_.connected_count;
+				if (result_.channels[i].connected) ++connected_count;
 			}
-			result_.ping_total_count = result_.connected_count * ping_count_;
+			result_.ping_total_count = connected_count * ping_count_;
 		}
 
-		if (result_.connected_count == 0) {
+		if (connected_count == 0) {
 			std::lock_guard<std::mutex> lk(mtx_);
 			phase_ = FlowPhase::Idle;
 			return false;
@@ -83,7 +84,7 @@ namespace ods::sync {
 			if (on_progress) on_progress();
 		};
 
-		pending_count_ = result_.connected_count;
+		pending_count_ = connected_count;
 		int ch_index   = 0;
 		for (int i = 0; i < active; ++i) {
 			if (!result_.channels[i].connected) continue;
@@ -114,7 +115,7 @@ namespace ods::sync {
 			if (retry_count == 0) return false;
 
 			// 進捗表示は「成功済み + 今回の再計測完了数」で更新する。
-			result_.completed_count  = result_.measured_count;
+			result_.completed_count  = result_.measured_count();
 			result_.ping_total_count = retry_count * ping_count_;
 			phase_                   = FlowPhase::WsMeasuring;
 		}
@@ -161,7 +162,6 @@ namespace ods::sync {
 				if (r.valid) {
 					result_.rtmp_valid      = true;
 					result_.rtmp_latency_ms = r.avg_latency_ms;
-					result_.master_base_delay_ms = result_.max_latency_ms + r.avg_latency_ms;
 					should_auto_apply       = true;
 				} else {
 					result_.rtmp_valid = false;
@@ -184,7 +184,7 @@ namespace ods::sync {
 			std::lock_guard<std::mutex> lk(mtx_);
 			if (phase_ != FlowPhase::RtmpDone) return false;
 			if (!result_.rtmp_valid) return false;
-			ms     = result_.master_base_delay_ms;
+			ms     = result_.proposed_master_delay_ms();
 			phase_ = FlowPhase::Complete;
 		}
 		if (on_apply_master) on_apply_master(ms);
@@ -215,33 +215,16 @@ namespace ods::sync {
 			ch.measured           = r.valid;
 			ch.one_way_latency_ms = r.valid ? r.avg_latency_ms : 0.0;
 			++result_.completed_count;
-			if (r.valid) ++result_.measured_count;
 
 			if (--pending_count_ == 0) {
-				compute_proposals();
 				phase_          = FlowPhase::WsDone;
 				all_done        = true;
 				result_snapshot = result_;
 			}
 		}
-		if (all_done && on_apply_sub_delays) on_apply_sub_delays(result_snapshot);
+		if (all_done && on_apply_sub_base_delays) on_apply_sub_base_delays(result_snapshot);
 		if (on_ch_measured) on_ch_measured(i, r);
 		if (on_update) on_update();
-	}
-
-	void SyncFlow::compute_proposals() {
-		double max_ow = 0.0;
-		for (int i = 0; i < active_ch_; ++i) {
-			auto &ch = result_.channels[i];
-			if (ch.measured && ch.one_way_latency_ms > max_ow)
-				max_ow = ch.one_way_latency_ms;
-		}
-		result_.max_latency_ms = max_ow;
-
-		for (int i = 0; i < active_ch_; ++i) {
-			auto &ch          = result_.channels[i];
-			ch.proposed_delay = ch.measured ? (max_ow - ch.one_way_latency_ms) : 0.0;
-		}
 	}
 
 } // namespace ods::sync

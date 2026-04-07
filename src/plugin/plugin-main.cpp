@@ -97,8 +97,8 @@ private:
 
 	static bool cb_measure_subchannel(obs_properties_t *, obs_property_t *, void *);
 
-	static void apply_sub_delay(DelayStreamData *, int, double);
-	static void write_master_base_delay(DelayStreamData *, double);
+	static void apply_sub_base_delay(DelayStreamData *, int, double);
+	static void apply_master_base_delay(DelayStreamData *, double);
 	static void queue_ui_safe(DelayStreamData *, std::function<void(DelayStreamData *)>);
 	static void setup_event_callbacks(DelayStreamData *);
 	static void clear_event_callbacks(DelayStreamData *);
@@ -108,7 +108,7 @@ private:
 };
 
 // マスター遅延を設定へ書き戻し、必要ならバッファへ反映する。
-void DelayStreamFilter::write_master_base_delay(DelayStreamData *d, double ms) {
+void DelayStreamFilter::apply_master_base_delay(DelayStreamData *d, double ms) {
 	obs_data_t *settings = obs_source_get_settings(d->context);
 	obs_data_set_double(settings, ods::plugin::kMasterBaseDelayKey, ms);
 	d->master_base_delay_ms = (float)ms;
@@ -264,18 +264,18 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	};
 	d->flow.on_apply_master = [d](double ms) {
 		queue_ui_safe(d, [ms](DelayStreamData *d) {
-			write_master_base_delay(d, ms);
+			apply_master_base_delay(d, ms);
 			d->request_props_refresh("flow.on_apply_master");
 		});
 	};
-	d->flow.on_apply_sub_delays = [d](const FlowResult &res) {
+	d->flow.on_apply_sub_base_delays = [d](const FlowResult &res) {
 		queue_ui_safe(d, [res](DelayStreamData *d) {
 			for (int i = 0; i < MAX_SUB_CH; ++i) {
 				const auto &ch = res.channels[i];
 				if (!ch.measured) continue;
-				apply_sub_delay(d, i, ch.proposed_delay);
+				apply_sub_base_delay(d, i, res.proposed_sub_delay_ms(i));
 			}
-			d->request_props_refresh("flow.on_apply_sub_delays");
+			d->request_props_refresh("flow.on_apply_sub_base_delays");
 		});
 	};
 	d->rtmp_measure.prober.on_result = [d](RtmpProbeResult r) {
@@ -315,7 +315,7 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 		d->sub_channels[ch].measure.set_result(r, r.valid ? "" : T_("MeasureFailed"));
 		if (r.valid) {
 			queue_ui_safe(d, [ch, ms_val = r.avg_latency_ms](DelayStreamData *d) {
-				apply_sub_delay(d, ch, ms_val);
+				apply_sub_base_delay(d, ch, ms_val);
 				d->request_props_refresh("router.on_any_latency_result.apply");
 			});
 		} else {
@@ -330,7 +330,7 @@ void DelayStreamFilter::clear_event_callbacks(DelayStreamData *d) {
 	d->flow.on_progress              = nullptr;
 	d->flow.on_ch_measured           = nullptr;
 	d->flow.on_apply_master          = nullptr;
-	d->flow.on_apply_sub_delays      = nullptr;
+	d->flow.on_apply_sub_base_delays = nullptr;
 	d->rtmp_measure.prober.on_result = nullptr;
 	d->tunnel.on_url_ready           = nullptr;
 	d->tunnel.on_error               = nullptr;
@@ -461,7 +461,7 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 }
 
 // 指定チャンネルの遅延を設定値と実バッファへ反映する。
-void DelayStreamFilter::apply_sub_delay(DelayStreamData *d, int i, double ms) {
+void DelayStreamFilter::apply_sub_base_delay(DelayStreamData *d, int i, double ms) {
 	if (!d || i < 0 || i >= MAX_SUB_CH) return;
 	obs_data_t *settings  = obs_source_get_settings(d->context);
 	const auto  delay_key = make_sub_delay_key(i);
