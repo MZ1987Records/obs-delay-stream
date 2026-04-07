@@ -386,6 +386,9 @@ void *DelayStreamFilter::create(obs_data_t *settings, obs_source_t *source) {
 	for (int i = 0; i < MAX_SUB_CH; ++i) {
 		d->sub_btn_ctx[i] = {d, i};
 	}
+	for (int i = 0; i < 6; ++i) {
+		d->tab_btn_ctx[i] = {d, i};
+	}
 	setup_event_callbacks(d);
 
 	update(d, settings);
@@ -497,15 +500,43 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 
 	ods::ui::add_plugin_group(props, d);
 	if (!d->is_duplicate_instance) {
-		ods::ui::channels::add_sub_channels_group(props, d);
-		ods::ui::add_stream_group(props, d);
-		ods::ui::add_ws_group(props, d, has_sid);
-		ods::ui::add_tunnel_group(props, d);
-		ods::ui::url_share::add_url_share_group(props, d);
-		ods::ui::add_flow_group(props, d);
-		ods::ui::add_master_group(props, d);
-		ods::ui::delay::add_sub_offset_group(props, d);
-		ods::ui::delay::add_delay_summary_group(props, d);
+		int active_tab = 0;
+		if (d->context) {
+			obs_data_t *tab_s = obs_source_get_settings(d->context);
+			if (tab_s) {
+				active_tab = (int)obs_data_get_int(tab_s, "active_tab");
+				obs_data_release(tab_s);
+			}
+		}
+		if (active_tab < 0 || active_tab >= 6) active_tab = 0;
+
+		ods::ui::add_tab_selector_row(props, d, active_tab);
+
+		switch (active_tab) {
+		case 0:
+			ods::ui::channels::add_sub_channels_group(props, d);
+			break;
+		case 1:
+			ods::ui::add_stream_group(props, d);
+			ods::ui::add_ws_group(props, d, has_sid);
+			break;
+		case 2:
+			ods::ui::add_tunnel_group(props, d);
+			ods::ui::url_share::add_url_share_group(props, d);
+			break;
+		case 3:
+			ods::ui::add_flow_group(props, d);
+			break;
+		case 4:
+			ods::ui::add_master_group(props, d);
+			break;
+		case 5:
+			ods::ui::delay::add_sub_offset_group(props, d);
+			ods::ui::delay::add_delay_summary_group(props, d);
+			break;
+		default:
+			break;
+		}
 	}
 
 	if (d->context) {

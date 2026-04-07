@@ -23,6 +23,7 @@
 namespace ods::ui {
 
 	using ods::plugin::DelayStreamData;
+	using ods::plugin::TabCtx;
 	using ods::plugin::UpdateCheckStatus;
 	using ods::sync::FlowPhase;
 	using ods::sync::FlowResult;
@@ -184,6 +185,20 @@ namespace ods::ui {
 				schedule_delay_table_inject(d->context);
 			});
 			return true;
+		}
+
+		/// タブ選択を設定へ反映し、プロパティを再描画する。
+		bool cb_select_tab(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *ctx = static_cast<TabCtx *>(priv);
+			if (!ctx || !ctx->d || !ctx->d->context) return false;
+			obs_data_t *s = obs_source_get_settings(ctx->d->context);
+			if (s) {
+				obs_data_set_int(s, "active_tab", ctx->tab);
+				obs_source_update(ctx->d->context, s);
+				obs_data_release(s);
+			}
+			ctx->d->request_props_refresh("cb_select_tab");
+			return false;
 		}
 
 		// ============================================================
@@ -371,6 +386,48 @@ namespace ods::ui {
 	// ============================================================
 	// public add_* 関数
 	// ============================================================
+
+	void add_tab_selector_row(obs_properties_t *props, DelayStreamData *d, int active_tab) {
+		if (!props || !d) return;
+		static const char *const kActionNames[] = {
+			"tab_act_0",
+			"tab_act_1",
+			"tab_act_2",
+			"tab_act_3",
+			"tab_act_4",
+			"tab_act_5",
+		};
+		static const char *const kLocaleKeys[] = {
+			"TabPerformers",
+			"TabWebSocket",
+			"TabTunnel",
+			"TabSyncLatency",
+			"TabRtmpLatency",
+			"TabFineAdjust",
+		};
+		constexpr int kTabCount   = 6;
+		const char   *kInactiveBg = "auto";
+		if (active_tab < 0 || active_tab >= kTabCount) active_tab = 0;
+
+		ObsColorButtonSpec buttons[kTabCount];
+		for (int i = 0; i < kTabCount; ++i) {
+			buttons[i] = {
+				kActionNames[i],
+				T_(kLocaleKeys[i]),
+				cb_select_tab,
+				&d->tab_btn_ctx[i],
+				true,
+				(i == active_tab) ? nullptr : kInactiveBg,
+				nullptr,
+			};
+		}
+		obs_properties_add_color_button_row(
+			props,
+			"tab_selector_row",
+			"",
+			buttons,
+			kTabCount);
+	}
 
 	void add_plugin_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;

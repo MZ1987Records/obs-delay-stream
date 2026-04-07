@@ -172,6 +172,14 @@ namespace ods::plugin {
 	};
 
 	/**
+	 * タブ番号付きコールバック引数。
+	 */
+	struct TabCtx {
+		DelayStreamData *d;   ///< 対象データ
+		int              tab; ///< 0-indexed タブ番号
+	};
+
+	/**
 	 * 更新確認の状態種別。
 	 */
 	enum class UpdateCheckStatus {
@@ -261,6 +269,8 @@ namespace ods::plugin {
 
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
+		/// タブ選択ボタンのコールバック引数
+		std::array<TabCtx, 6> tab_btn_ctx;
 
 		/**
 		 * サブチャンネルの遅延状態。

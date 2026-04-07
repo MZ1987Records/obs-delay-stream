@@ -4,14 +4,17 @@
 #include "widgets/widget-payload-utils.hpp"
 
 #include <QApplication>
+#include <QColor>
 #include <QEvent>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPalette>
 #include <QPushButton>
 #include <QStringList>
 #include <QTimer>
 #include <QWidget>
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <mutex>
@@ -41,18 +44,54 @@ namespace ods::widgets {
 		std::mutex                                                     g_color_button_action_props_mutex;
 		std::atomic<uint64_t>                                          g_color_button_binding_seq{1};
 
+		/// タブ選択行の binding_id か判定する。
+		bool is_tab_selector_binding_id(const std::string &binding_id) {
+			return binding_id.rfind("tab_selector_row#", 0) == 0;
+		}
+
+		/// 2色の中間色を返す。
+		QColor mix_color(const QColor &a, const QColor &b, int ratio_b_percent) {
+			const int rb = std::clamp(ratio_b_percent, 0, 100);
+			const int ra = 100 - rb;
+			return QColor(
+				(a.red() * ra + b.red() * rb) / 100,
+				(a.green() * ra + b.green() * rb) / 100,
+				(a.blue() * ra + b.blue() * rb) / 100,
+				255);
+		}
+
 		/// ボタン色指定を含むスタイルシート文字列を組み立てる。
 		QString make_button_style_sheet(const QString &bg_color,
-										const QString &text_color) {
+										const QString &text_color,
+										bool           tab_mode,
+										bool           active_tab) {
 			QStringList styles;
-			styles.push_back(QStringLiteral(
-				"QPushButton { padding-left: 3px; padding-right: 3px; }"));
+			if (tab_mode) {
+				styles.push_back(QStringLiteral(
+					"QPushButton { "
+					"padding-left: 8px; padding-right: 8px; "
+					"padding-top: 3px; padding-bottom: 3px; "
+					"border: 1px solid palette(mid); "
+					"border-bottom-color: palette(mid); "
+					"border-top-left-radius: 6px; border-top-right-radius: 6px; "
+					"border-bottom-left-radius: 0px; border-bottom-right-radius: 0px; "
+					"}"));
+			} else {
+				styles.push_back(QStringLiteral(
+					"QPushButton { padding-left: 3px; padding-right: 3px; }"));
+			}
 
 			QStringList enabled_styles;
 			if (!bg_color.isEmpty())
 				enabled_styles.push_back(QStringLiteral("background-color: ") + bg_color);
 			if (!text_color.isEmpty())
 				enabled_styles.push_back(QStringLiteral("color: ") + text_color);
+			if (tab_mode && active_tab) {
+				enabled_styles.push_back(QStringLiteral("border-color: palette(mid)"));
+				enabled_styles.push_back(QStringLiteral("border-bottom-color: transparent"));
+				enabled_styles.push_back(QStringLiteral("margin-bottom: -6px"));
+				enabled_styles.push_back(QStringLiteral("padding-bottom: 9px"));
+			}
 			if (!enabled_styles.isEmpty()) {
 				styles.push_back(QStringLiteral("QPushButton:enabled { ") +
 								 enabled_styles.join(QStringLiteral("; ")) +
@@ -79,15 +118,40 @@ namespace ods::widgets {
 				: QWidget(parent),
 				  source_(source ? obs_source_get_ref(source) : nullptr),
 				  binding_id_(binding_id ? binding_id : "") {
-				auto *lay = new QHBoxLayout(this);
-				lay->setContentsMargins(0, 0, 0, 0);
+				const bool tab_mode = is_tab_selector_binding_id(binding_id_);
+				auto      *lay      = new QHBoxLayout(this);
+				if (tab_mode) {
+					// 先頭タブが直下グループの左上角丸に重ならないように左余白を確保する。
+					lay->setContentsMargins(8, 0, 0, 0);
+				} else {
+					lay->setContentsMargins(0, 0, 0, 0);
+				}
 				lay->setSpacing(4);
 
 				for (size_t i = 0; i < buttons.size(); ++i) {
 					const auto &spec   = buttons[i];
 					auto       *button = new QPushButton(spec.label);
+					const bool  active_tab =
+						tab_mode && spec.bg_color.isEmpty() && spec.text_color.isEmpty();
+					QString effective_bg   = spec.bg_color;
+					QString effective_text = spec.text_color;
+					if (tab_mode && !active_tab) {
+						// 非アクティブタブは「背景色」と「ボタン色」の中間色を使う。
+						const QColor window_color = button->palette().color(QPalette::Window);
+						const QColor button_color = button->palette().color(QPalette::Button);
+						const QColor mixed_bg     = mix_color(window_color, button_color, 50);
+						effective_bg              = mixed_bg.name(QColor::HexRgb);
+						// 文字色はテーマ文字色に非アクティブ背景色を 30% 混ぜて少しだけ薄くする。
+						const QColor base_text_color = button->palette().color(QPalette::ButtonText);
+						const QColor mixed_text      = mix_color(base_text_color, mixed_bg, 30);
+						effective_text               = mixed_text.name(QColor::HexRgb);
+					}
 					button->setStyleSheet(
-						make_button_style_sheet(spec.bg_color, spec.text_color));
+						make_button_style_sheet(
+							effective_bg,
+							effective_text,
+							tab_mode,
+							active_tab));
 					button->setEnabled(spec.enabled);
 					connect(button, &QPushButton::clicked, this, [this, i]() {
 						onButtonClicked(i);
@@ -278,6 +342,10 @@ namespace ods::widgets {
 					form->insertRow(row, row_label, row_widget);
 				else
 					form->insertRow(row, row_widget);
+				if (is_tab_selector_binding_id(binding_id.toStdString())) {
+					// タブ行と表示中グループの行間を詰める。
+					form->setVerticalSpacing(0);
+				}
 				++replaced_count;
 			}
 

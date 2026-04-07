@@ -11,6 +11,9 @@ namespace ods::ui {
 	/// プラグイン情報 UI グループを追加する
 	void add_plugin_group(obs_properties_t *props, ods::plugin::DelayStreamData *d);
 
+	/// タブ選択ボタン行を追加する
+	void add_tab_selector_row(obs_properties_t *props, ods::plugin::DelayStreamData *d, int active_tab);
+
 	/// 配信情報 UI グループを追加する
 	void add_stream_group(obs_properties_t *props, ods::plugin::DelayStreamData *d);
 
