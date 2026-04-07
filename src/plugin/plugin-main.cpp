@@ -517,8 +517,8 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			ods::ui::channels::add_sub_channels_group(props, d);
 			break;
 		case 1:
-			ods::ui::add_stream_group(props, d);
 			ods::ui::add_ws_group(props, d, has_sid);
+			ods::ui::add_stream_group(props, d);
 			break;
 		case 2:
 			ods::ui::add_tunnel_group(props, d);

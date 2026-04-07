@@ -93,6 +93,16 @@ namespace ods::ui::url_share {
 		obs_properties_t *grp        = obs_properties_create();
 		TunnelState       ts         = d->tunnel.state();
 		bool              via_tunnel = !d->tunnel.url().empty();
+		const char       *suffix     = (ts == TunnelState::Starting)
+										   ? T_("UrlShareStartingSuffix")
+										   : (via_tunnel ? T_("UrlShareTunnelSuffix") : T_("UrlShareDirectSuffix"));
+		char              copy_label[192];
+		snprintf(copy_label, sizeof(copy_label), "%s%s", T_("UrlShareCopyAll"), suffix);
+		obs_property_t *copy_p =
+			obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d);
+		if (ts == TunnelState::Starting) {
+			obs_property_set_enabled(copy_p, false);
+		}
 		{
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (s) {
@@ -133,16 +143,6 @@ namespace ods::ui::url_share {
 					OBS_TEXT_INFO);
 				obs_property_text_set_info_word_wrap(list_info_p, false);
 			}
-		}
-		const char *suffix = (ts == TunnelState::Starting)
-								 ? T_("UrlShareStartingSuffix")
-								 : (via_tunnel ? T_("UrlShareTunnelSuffix") : T_("UrlShareDirectSuffix"));
-		char        copy_label[192];
-		snprintf(copy_label, sizeof(copy_label), "%s%s", T_("UrlShareCopyAll"), suffix);
-		obs_property_t *copy_p =
-			obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d);
-		if (ts == TunnelState::Starting) {
-			obs_property_set_enabled(copy_p, false);
 		}
 		obs_properties_add_group(props, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);
 	}

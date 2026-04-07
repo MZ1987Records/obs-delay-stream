@@ -398,9 +398,9 @@ namespace ods::ui {
 			"tab_act_5",
 		};
 		static const char *const kLocaleKeys[] = {
-			"TabPerformers",
-			"TabWebSocket",
-			"TabTunnel",
+			"TabPerformerNames",
+			"TabAudioStreaming",
+			"TabUrlSharing",
 			"TabSyncLatency",
 			"TabRtmpLatency",
 			"TabFineAdjust",
@@ -539,24 +539,33 @@ namespace ods::ui {
 		obs_property_list_add_int(codec_p, "Opus", 0);
 		obs_property_list_add_int(codec_p, T_("CodecPcm"), 1);
 
-		obs_property_t *opus_bitrate_p = obs_properties_add_int(
+		obs_property_t *opus_bitrate_p = obs_properties_add_list(
 			grp,
 			"opus_bitrate_kbps",
-			T_("OpusBitrateKbps"),
-			6,
-			510,
-			1);
+			T_("OpusBitrate"),
+			OBS_COMBO_TYPE_LIST,
+			OBS_COMBO_FORMAT_INT);
+		obs_property_list_add_int(opus_bitrate_p, "24 kbps", 24);
+		obs_property_list_add_int(opus_bitrate_p, "32 kbps", 32);
+		obs_property_list_add_int(opus_bitrate_p, "48 kbps", 48);
+		obs_property_list_add_int(opus_bitrate_p, "64 kbps", 64);
+		obs_property_list_add_int(opus_bitrate_p, "96 kbps", 96);
+		obs_property_list_add_int(opus_bitrate_p, "128 kbps", 128);
+		obs_property_list_add_int(opus_bitrate_p, "160 kbps", 160);
+		obs_property_list_add_int(opus_bitrate_p, "192 kbps", 192);
+		obs_property_list_add_int(opus_bitrate_p, "256 kbps", 256);
+		obs_property_list_add_int(opus_bitrate_p, "320 kbps", 320);
 		obs_property_t *opus_sample_rate_p = obs_properties_add_list(
 			grp,
 			"opus_sample_rate",
 			T_("OpusSampleRate"),
 			OBS_COMBO_TYPE_LIST,
 			OBS_COMBO_FORMAT_INT);
-		obs_property_list_add_int(opus_sample_rate_p, "8000", 8000);
-		obs_property_list_add_int(opus_sample_rate_p, "12000", 12000);
-		obs_property_list_add_int(opus_sample_rate_p, "16000", 16000);
-		obs_property_list_add_int(opus_sample_rate_p, "24000", 24000);
-		obs_property_list_add_int(opus_sample_rate_p, "48000", 48000);
+		obs_property_list_add_int(opus_sample_rate_p, "8000 Hz", 8000);
+		obs_property_list_add_int(opus_sample_rate_p, "12000 Hz", 12000);
+		obs_property_list_add_int(opus_sample_rate_p, "16000 Hz", 16000);
+		obs_property_list_add_int(opus_sample_rate_p, "24000 Hz", 24000);
+		obs_property_list_add_int(opus_sample_rate_p, "48000 Hz", 48000);
 		uint32_t input_sr = d->sample_rate > 0 ? d->sample_rate : 48000;
 		char     pcm_sr_info[128];
 		snprintf(pcm_sr_info, sizeof(pcm_sr_info), T_("PcmInputSampleRateFmt"), input_sr);
@@ -588,7 +597,7 @@ namespace ods::ui {
 		obs_properties_add_stepper(
 			grp,
 			"playback_buffer_ms_stepper",
-			T_("PlaybackBufferMs"),
+			T_("PlaybackBuffer"),
 			"playback_buffer_ms",
 			PLAYBACK_BUFFER_MIN_MS,
 			PLAYBACK_BUFFER_MAX_MS,
