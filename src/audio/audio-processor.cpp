@@ -17,7 +17,7 @@ namespace ods::audio {
 			return ods::plugin::calc_effective_sub_delay_value_ms(
 				base_delay_ms,
 				adjust_ms,
-				d->sub_offset_ms);
+				d->master_offset_ms);
 		}
 
 		/// バッファ設定向けに実効遅延をミリ秒整数へ正規化する。
@@ -48,7 +48,7 @@ namespace ods::audio {
 		d->sample_rate = sample_rate;
 		d->channels    = num_channels;
 		d->master_buf.init(sample_rate, num_channels);
-		d->master_buf.set_delay_ms((uint32_t)d->master_delay_ms);
+		d->master_buf.set_delay_ms((uint32_t)d->master_base_delay_ms);
 		for (int i = 0; i < MAX_SUB_CH; ++i) {
 			d->sub_channels[i].buf.init(sample_rate, num_channels);
 			apply_sub_delay_to_buffer(d, i);

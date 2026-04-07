@@ -7,6 +7,9 @@ namespace ods::plugin {
 
 	struct DelayStreamData;
 
+	inline constexpr char kMasterBaseDelayKey[]       = "master_base_delay_ms";
+	inline constexpr char kMasterOffsetKey[]          = "master_offset_ms";
+
 	using SubSettingKey = std::array<char, 32>;
 
 	SubSettingKey make_sub_key(const char *suffix, int ch); ///< `sub{ch}_{suffix}` 形式の設定キーを生成する
@@ -19,12 +22,12 @@ namespace ods::plugin {
 	/// 補正前のサブ遅延値（0 未満許容）を計算する
 	float calc_sub_delay_raw_value_ms(float base_delay_ms,
 									  float adjust_ms,
-									  float global_offset_ms);
+									  float master_offset_ms);
 
 	/// 実適用するサブ遅延値（下限考慮後）を計算する
 	float calc_effective_sub_delay_value_ms(float base_delay_ms,
 											float adjust_ms,
-											float global_offset_ms);
+											float master_offset_ms);
 
 	/// OBS 設定値を `DelayStreamData` に反映する
 	void apply_settings(DelayStreamData *d, obs_data_t *settings);

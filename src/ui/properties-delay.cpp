@@ -15,27 +15,27 @@ namespace ods::ui::delay {
 	using ods::sync::FlowResult;
 	using namespace ods::widgets;
 
-	void add_sub_offset_group(obs_properties_t *props, DelayStreamData *d) {
+	void add_master_offset_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
 		obs_properties_t *grp = obs_properties_create();
 		{
 			char offset_info[256];
 			snprintf(offset_info, sizeof(offset_info), "%s", T_("GlobalOffsetInfoFmt"));
 			obs_property_t *offset_info_p =
-				obs_properties_add_text(grp, "sub_offset_info", offset_info, OBS_TEXT_INFO);
+				obs_properties_add_text(grp, "master_offset_info", offset_info, OBS_TEXT_INFO);
 			obs_property_text_set_info_word_wrap(offset_info_p, false);
 		}
 		obs_properties_add_stepper(
 			grp,
-			"sub_offset_ms_stepper",
+			"master_offset_ms_stepper",
 			T_("GlobalOffsetLabel"),
-			"sub_offset_ms",
+			ods::plugin::kMasterOffsetKey,
 			-2000.0,
 			5000.0,
 			0.0,
 			0,
 			" ms");
-		obs_properties_add_group(props, "grp_offset", T_("GroupGlobalOffset"), OBS_GROUP_NORMAL, grp);
+		obs_properties_add_group(props, "grp_master_offset", T_("GroupGlobalOffset"), OBS_GROUP_NORMAL, grp);
 	}
 
 	void add_delay_summary_group(obs_properties_t *props, DelayStreamData *d) {
@@ -62,11 +62,11 @@ namespace ods::ui::delay {
 										  : -1.0f;
 			channels[i].base_ms     = d->sub_channels[i].delay_ms;
 			channels[i].adjust_ms   = d->sub_channels[i].adjust_ms;
-			channels[i].global_ms   = d->sub_offset_ms;
+			channels[i].global_ms   = d->master_offset_ms;
 			const float raw         = ods::plugin::calc_sub_delay_raw_value_ms(
 				d->sub_channels[i].delay_ms,
 				d->sub_channels[i].adjust_ms,
-				d->sub_offset_ms);
+				d->master_offset_ms);
 			channels[i].warn     = raw < 0.0f;
 			const float latency  = flow_res.channels[i].measured
 									   ? (float)flow_res.channels[i].one_way_latency_ms
@@ -74,7 +74,7 @@ namespace ods::ui::delay {
 			channels[i].total_ms = latency + ods::plugin::calc_effective_sub_delay_value_ms(
 												 d->sub_channels[i].delay_ms,
 												 d->sub_channels[i].adjust_ms,
-												 d->sub_offset_ms);
+												 d->master_offset_ms);
 		}
 
 		if (settings) obs_data_release(settings);

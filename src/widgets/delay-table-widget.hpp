@@ -12,7 +12,7 @@ namespace ods::widgets {
 		float       measured_ms; ///< 計測値（片道）。未計測は -1.0f
 		float       base_ms;     ///< ベース（proposed_delay）
 		float       adjust_ms;   ///< アジャスト（adjust_ms）
-		float       global_ms;   ///< 共通オフセット（sub_offset_ms）
+		float       global_ms;   ///< 共通オフセット（master_offset_ms）
 		float       total_ms;    ///< 合計 = max(0, base + adjust + global)
 		bool        warn;        ///< 生値 total が 0 未満なら true
 	};

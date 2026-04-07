@@ -249,7 +249,7 @@ namespace ods::ui {
 			if (is_rtmp_measuring) {
 				snprintf(step3_status, sizeof(step3_status), "%s", T_("FlowRtmpMeasureProgress"));
 			} else if ((is_rtmp_done || is_complete) && res.rtmp_valid) {
-				snprintf(step3_status, sizeof(step3_status), T_("FlowRtmpMeasureResultFmt"), res.rtmp_latency_ms, res.max_latency_ms, res.master_delay_ms);
+				snprintf(step3_status, sizeof(step3_status), T_("FlowRtmpMeasureResultFmt"), res.rtmp_latency_ms, res.max_latency_ms, res.master_base_delay_ms);
 			} else if (is_rtmp_done && !res.rtmp_valid) {
 				snprintf(step3_status, sizeof(step3_status), T_("FlowRtmpFailedFmt"), res.rtmp_error.c_str());
 			} else {
@@ -772,14 +772,14 @@ namespace ods::ui {
 
 	void add_master_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
-		obs_properties_t *grp             = obs_properties_create();
-		bool              auto_mode       = true;
-		double            master_delay_ms = 0.0;
+		obs_properties_t *grp                  = obs_properties_create();
+		bool              auto_mode            = true;
+		double            master_base_delay_ms = 0.0;
 		{
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (s) {
-				auto_mode       = obs_data_get_bool(s, "rtmp_url_auto");
-				master_delay_ms = obs_data_get_double(s, "master_delay_ms");
+				auto_mode            = obs_data_get_bool(s, "rtmp_url_auto");
+				master_base_delay_ms = obs_data_get_double(s, ods::plugin::kMasterBaseDelayKey);
 				obs_data_release(s);
 			}
 		}
@@ -790,8 +790,8 @@ namespace ods::ui {
 		obs_property_set_enabled(url_p, !auto_mode);
 		add_flow_rtmp_measure_section(grp, d);
 		char master_delay_text[128];
-		snprintf(master_delay_text, sizeof(master_delay_text), T_("MasterDelayFmt"), master_delay_ms);
-		obs_properties_add_text(grp, "master_delay_display", master_delay_text, OBS_TEXT_INFO);
+		snprintf(master_delay_text, sizeof(master_delay_text), T_("MasterDelayFmt"), master_base_delay_ms);
+		obs_properties_add_text(grp, "master_base_delay_display", master_delay_text, OBS_TEXT_INFO);
 		obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
 	}
 

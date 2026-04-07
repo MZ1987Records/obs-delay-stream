@@ -60,8 +60,8 @@ namespace ods::plugin {
 		obs_data_set_default_int(settings, "ping_count", DEFAULT_PING_COUNT);
 		obs_data_set_default_string(settings, "stream_id", "");
 		obs_data_set_default_string(settings, "host_ip_manual", "");
-		obs_data_set_default_double(settings, "master_delay_ms", 0.0);
-		obs_data_set_default_double(settings, "sub_offset_ms", 0.0);
+		obs_data_set_default_double(settings, kMasterBaseDelayKey, 0.0);
+		obs_data_set_default_double(settings, kMasterOffsetKey, 0.0);
 		obs_data_set_default_int(settings, "delay_table_selected_ch", 0);
 		obs_data_set_default_int(settings, "active_tab", 0);
 		obs_data_set_default_bool(settings, "rtmp_url_auto", true);

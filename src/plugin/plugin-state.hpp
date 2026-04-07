@@ -259,8 +259,8 @@ namespace ods::plugin {
 		std::atomic<int>   ws_port{WS_PORT};                                ///< WebSocket ポート番号
 		std::atomic<int>   ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
 		int                playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		float              master_delay_ms    = 0.0f;                       ///< マスターチャンネルの遅延量 (ms)
-		float              sub_offset_ms      = 0.0f;                       ///< 全サブチャンネル共通のオフセット (ms)
+		float              master_base_delay_ms = 0.0f;                     ///< マスターチャンネルの基準遅延量 (ms)
+		float              master_offset_ms     = 0.0f;                     ///< 全サブチャンネル共通のオフセット (ms)
 		int                sub_ch_count       = 1;                          ///< アクティブなサブチャンネル数
 		DelayBuffer        master_buf;                                      ///< マスターチャンネルの遅延バッファ
 		RtmpMeasureState   rtmp_measure;                                    ///< RTMP 計測状態

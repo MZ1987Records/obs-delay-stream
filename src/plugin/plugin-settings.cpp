@@ -40,14 +40,14 @@ namespace ods::plugin {
 
 	float calc_sub_delay_raw_value_ms(float base_delay_ms,
 									  float adjust_ms,
-									  float global_offset_ms) {
-		return base_delay_ms + adjust_ms + global_offset_ms;
+									  float master_offset_ms) {
+		return base_delay_ms + adjust_ms + master_offset_ms;
 	}
 
 	float calc_effective_sub_delay_value_ms(float base_delay_ms,
 											float adjust_ms,
-											float global_offset_ms) {
-		float effective = calc_sub_delay_raw_value_ms(base_delay_ms, adjust_ms, global_offset_ms);
+											float master_offset_ms) {
+		float effective = calc_sub_delay_raw_value_ms(base_delay_ms, adjust_ms, master_offset_ms);
 		if (effective < 0.0f) effective = 0.0f;
 		return effective;
 	}
@@ -227,11 +227,12 @@ namespace ods::plugin {
 
 			/// マスター/サブ遅延を反映し、実効値変化の有無を返す。
 			bool apply_delay_settings() {
-				data_->master_delay_ms = (float)obs_data_get_double(settings_, "master_delay_ms");
-				data_->master_buf.set_delay_ms(data_->enabled.load() ? (uint32_t)data_->master_delay_ms : 0);
+				data_->master_base_delay_ms = (float)obs_data_get_double(settings_, kMasterBaseDelayKey);
+				data_->master_buf.set_delay_ms(
+					data_->enabled.load() ? (uint32_t)data_->master_base_delay_ms : 0);
 
-				const float prev_sub_offset = data_->sub_offset_ms;
-				data_->sub_offset_ms        = (float)obs_data_get_double(settings_, "sub_offset_ms");
+				const float prev_master_offset = data_->master_offset_ms;
+				data_->master_offset_ms        = (float)obs_data_get_double(settings_, kMasterOffsetKey);
 
 				bool effective_delay_changed = false;
 				for (int i = 0; i < MAX_SUB_CH; ++i) {
@@ -267,13 +268,13 @@ namespace ods::plugin {
 					ods::audio::apply_sub_delay_to_buffer(data_, i);
 
 					const float prev_raw =
-						calc_sub_delay_raw_value_ms(prev_delay, prev_adjust, prev_sub_offset);
+						calc_sub_delay_raw_value_ms(prev_delay, prev_adjust, prev_master_offset);
 					const float new_raw =
-						calc_sub_delay_raw_value_ms(data_->sub_channels[i].delay_ms, data_->sub_channels[i].adjust_ms, data_->sub_offset_ms);
+						calc_sub_delay_raw_value_ms(data_->sub_channels[i].delay_ms, data_->sub_channels[i].adjust_ms, data_->master_offset_ms);
 					const float prev_effective =
-						calc_effective_sub_delay_value_ms(prev_delay, prev_adjust, prev_sub_offset);
+						calc_effective_sub_delay_value_ms(prev_delay, prev_adjust, prev_master_offset);
 					const float new_effective =
-						calc_effective_sub_delay_value_ms(data_->sub_channels[i].delay_ms, data_->sub_channels[i].adjust_ms, data_->sub_offset_ms);
+						calc_effective_sub_delay_value_ms(data_->sub_channels[i].delay_ms, data_->sub_channels[i].adjust_ms, data_->master_offset_ms);
 					if (std::fabs(prev_effective - new_effective) > 0.01f) {
 						data_->router.notify_apply_delay(i, new_effective, "manual_adjust");
 						effective_delay_changed = true;

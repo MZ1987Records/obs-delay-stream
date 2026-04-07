@@ -161,7 +161,7 @@ namespace ods::sync {
 				if (r.valid) {
 					result_.rtmp_valid      = true;
 					result_.rtmp_latency_ms = r.avg_latency_ms;
-					result_.master_delay_ms = result_.max_latency_ms + r.avg_latency_ms;
+					result_.master_base_delay_ms = result_.max_latency_ms + r.avg_latency_ms;
 					should_auto_apply       = true;
 				} else {
 					result_.rtmp_valid = false;
@@ -184,7 +184,7 @@ namespace ods::sync {
 			std::lock_guard<std::mutex> lk(mtx_);
 			if (phase_ != FlowPhase::RtmpDone) return false;
 			if (!result_.rtmp_valid) return false;
-			ms     = result_.master_delay_ms;
+			ms     = result_.master_base_delay_ms;
 			phase_ = FlowPhase::Complete;
 		}
 		if (on_apply_master) on_apply_master(ms);

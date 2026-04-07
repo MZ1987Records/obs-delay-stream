@@ -69,7 +69,7 @@ namespace ods::sync {
 		double max_latency_ms   = 0.0; ///< 基準（最大片道レイテンシ）
 
 		double      rtmp_latency_ms = 0.0;   ///< RTMP 計測で得た平均レイテンシ
-		double      master_delay_ms = 0.0;   ///< = max_latency + rtmp_latency
+		double      master_base_delay_ms = 0.0;   ///< = max_latency + rtmp_latency
 		bool        rtmp_valid      = false; ///< RTMP 計測結果が有効か
 		std::string rtmp_error;              ///< RTMP 計測失敗時の理由
 	};

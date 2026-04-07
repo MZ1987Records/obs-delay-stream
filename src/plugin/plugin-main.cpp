@@ -98,7 +98,7 @@ private:
 	static bool cb_measure_subchannel(obs_properties_t *, obs_property_t *, void *);
 
 	static void apply_sub_delay(DelayStreamData *, int, double);
-	static void write_master_delay(DelayStreamData *, double);
+	static void write_master_base_delay(DelayStreamData *, double);
 	static void queue_ui_safe(DelayStreamData *, std::function<void(DelayStreamData *)>);
 	static void setup_event_callbacks(DelayStreamData *);
 	static void clear_event_callbacks(DelayStreamData *);
@@ -108,10 +108,10 @@ private:
 };
 
 // マスター遅延を設定へ書き戻し、必要ならバッファへ反映する。
-void DelayStreamFilter::write_master_delay(DelayStreamData *d, double ms) {
+void DelayStreamFilter::write_master_base_delay(DelayStreamData *d, double ms) {
 	obs_data_t *settings = obs_source_get_settings(d->context);
-	obs_data_set_double(settings, "master_delay_ms", ms);
-	d->master_delay_ms = (float)ms;
+	obs_data_set_double(settings, ods::plugin::kMasterBaseDelayKey, ms);
+	d->master_base_delay_ms = (float)ms;
 	if (d->enabled.load()) d->master_buf.set_delay_ms((uint32_t)ms);
 	obs_data_release(settings);
 }
@@ -264,7 +264,7 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	};
 	d->flow.on_apply_master = [d](double ms) {
 		queue_ui_safe(d, [ms](DelayStreamData *d) {
-			write_master_delay(d, ms);
+			write_master_base_delay(d, ms);
 			d->request_props_refresh("flow.on_apply_master");
 		});
 	};
@@ -531,7 +531,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			ods::ui::add_master_group(props, d);
 			break;
 		case 5:
-			ods::ui::delay::add_sub_offset_group(props, d);
+			ods::ui::delay::add_master_offset_group(props, d);
 			ods::ui::delay::add_delay_summary_group(props, d);
 			break;
 		default:
