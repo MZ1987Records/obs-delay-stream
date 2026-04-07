@@ -516,18 +516,6 @@ namespace ods::ui {
 							  ? (int)d->router.port()
 							  : d->ws_port.load(std::memory_order_relaxed);
 
-		char        ws_title_buf[96];
-		std::string ws_title;
-		if (ws_running) {
-			snprintf(ws_title_buf, sizeof(ws_title_buf), T_("WsRunningFmt"), ws_port);
-			ws_title = ws_title_buf;
-		} else {
-			ws_title = T_("WsStopped");
-		}
-		if (ws_running && !d->ws_send_enabled.load()) {
-			ws_title += T_("WsPausedSuffix");
-		}
-
 		obs_properties_t *grp     = obs_properties_create();
 		obs_property_t   *codec_p = obs_properties_add_list(
 			grp,
@@ -666,7 +654,7 @@ namespace ods::ui {
 		if (!ws_running) {
 			obs_property_set_enabled(delay_p, false);
 		}
-		obs_properties_add_group(props, "grp_ws", ws_title.c_str(), OBS_GROUP_NORMAL, grp);
+		obs_properties_add_group(props, "grp_ws", T_("WsGroupTitle"), OBS_GROUP_NORMAL, grp);
 	}
 
 	void add_tunnel_group(obs_properties_t *props, DelayStreamData *d) {
@@ -674,10 +662,6 @@ namespace ods::ui {
 		TunnelState ts   = d->tunnel.state();
 		std::string turl = d->tunnel.url();
 		std::string terr = d->tunnel.error();
-		const char *tunnel_title =
-			(ts == TunnelState::Running)
-				? T_("TunnelRunning")
-				: T_("TunnelStopped");
 
 		obs_properties_t *grp = obs_properties_create();
 		obs_properties_add_text(grp, "cloudflared_exe_path", T_("CloudflaredExePath"), OBS_TEXT_DEFAULT);
@@ -742,7 +726,7 @@ namespace ods::ui {
 			snprintf(eb, sizeof(eb), T_("TunnelErrorFmt"), terr.c_str());
 			obs_properties_add_text(grp, "tunnel_error", eb, OBS_TEXT_INFO);
 		}
-		obs_properties_add_group(props, "grp_tunnel", tunnel_title, OBS_GROUP_NORMAL, grp);
+		obs_properties_add_group(props, "grp_tunnel", T_("TunnelGroupTitle"), OBS_GROUP_NORMAL, grp);
 	}
 
 	void add_flow_group(obs_properties_t *props, DelayStreamData *d) {
@@ -783,14 +767,7 @@ namespace ods::ui {
 				OBS_TEXT_INFO);
 			obs_property_text_set_info_word_wrap(warn_p, true);
 		}
-		int active_channels    = d->sub_ch_count;
-		int connected_channels = 0;
-		for (int i = 0; i < active_channels; ++i) {
-			if (d->router.client_count(i) > 0) ++connected_channels;
-		}
-		char flow_title[192];
-		snprintf(flow_title, sizeof(flow_title), T_("GroupSyncFlowWithConn"), T_("GroupSyncFlow"), connected_channels, active_channels);
-		obs_properties_add_group(props, "grp_flow", flow_title, OBS_GROUP_NORMAL, grp);
+		obs_properties_add_group(props, "grp_flow", T_("GroupSyncFlow"), OBS_GROUP_NORMAL, grp);
 	}
 
 	void add_master_group(obs_properties_t *props, DelayStreamData *d) {
