@@ -47,7 +47,6 @@ classDiagram
         +ping_times : map~int, Clock::time_point~
         +rtt_samples : vector~double~
         +measuring : bool (atomic)
-        +last_result : LatencyResult
         +last_applied_delay : double
         +last_applied_reason : string
     }
@@ -60,7 +59,6 @@ classDiagram
     }
 
     class FlowResult {
-        +channels : array~ChSummary, MAX_SUB_CH~
         +completed_count : int
         +ping_sent_count : int
         +ping_total_count : int
@@ -73,7 +71,6 @@ classDiagram
     }
 
     class MeasureState {
-        +result_ : LatencyResult
         +measuring_ : bool
         +applied_ : bool
         +last_error_ : string
@@ -81,27 +78,19 @@ classDiagram
 
     class RtmpMeasureState {
         +prober : RtmpProber
-        +result_ : RtmpProbeResult
         +applied_ : bool
         +cached_url_ : string
     }
 
     class SubChannel {
-        +delay_ms : float
-        +adjust_ms : float
-        +buf : DelayBuffer
-        +measure : MeasureState
+        +base_delay_ms : float
+        +offset_ms : float
     }
 
     class DelayStreamData {
         +playback_buffer_ms : int
         +master_base_delay_ms : float
         +master_offset_ms : float
-        +master_buf : DelayBuffer
-        +sub_channels : array~SubChannel, MAX_SUB_CH~
-        +rtmp_measure : RtmpMeasureState
-        +flow : SyncFlow
-        +router : StreamRouter
     }
 
     class AudioConfig {
@@ -111,34 +100,32 @@ classDiagram
     class SyncFlow {
         +phase_ : FlowPhase
         +ping_count_ : int
-        +result_ : FlowResult
         +prober_ : RtmpProber
     }
 
     class StreamRouter {
         +playback_buffer_ms_ : int (atomic)
-        +ch_map_ : map~string, ChannelState~
         +set_audio_config(cfg)
         +start_measurement(ch, num_pings, interval_ms, start_delay_ms)
     }
 
     DelayStreamData *-- DelayBuffer : master_buf
-    DelayStreamData *-- "MAX_SUB_CH" SubChannel
-    DelayStreamData *-- RtmpMeasureState
-    DelayStreamData *-- SyncFlow
-    DelayStreamData *-- StreamRouter
+    DelayStreamData *-- "MAX_SUB_CH" SubChannel : sub_channels
+    DelayStreamData *-- RtmpMeasureState : rtmp_measure
+    DelayStreamData *-- SyncFlow : flow
+    DelayStreamData *-- StreamRouter : router
 
-    SubChannel *-- DelayBuffer
-    SubChannel *-- MeasureState
-    MeasureState *-- LatencyResult
+    SubChannel *-- DelayBuffer : buf
+    SubChannel *-- MeasureState : measure
+    MeasureState --> LatencyResult : result_
 
-    RtmpMeasureState *-- RtmpProbeResult
+    RtmpMeasureState --> RtmpProbeResult : result_
 
-    FlowResult *-- "MAX_SUB_CH" ChSummary
-    SyncFlow *-- FlowResult
+    FlowResult *-- "MAX_SUB_CH" ChSummary : channels
+    SyncFlow --> FlowResult : result_
 
-    StreamRouter *-- "sid/chごと" ChannelState
-    ChannelState *-- LatencyResult
+    StreamRouter o-- "sid/chごと" ChannelState : ch_map_
+    ChannelState --> LatencyResult : last_result
     StreamRouter ..> AudioConfig
 ```
 

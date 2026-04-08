@@ -8,13 +8,14 @@ namespace ods::widgets {
 	 * 遅延テーブルウィジェットに渡す 1 チャンネル分の情報。
 	 */
 	struct DelayTableChannelInfo {
-		const char *name;        ///< メモ名（空文字列可）
-		float       measured_ms; ///< 計測値（片道）。未計測は -1.0f
-		float       base_ms;     ///< ベース（proposed_delay）
-		float       adjust_ms;   ///< アジャスト（adjust_ms）
-		float       global_ms;   ///< 共通オフセット（master_offset_ms）
-		float       total_ms;    ///< 合計 = max(0, base + adjust + global)
-		bool        warn;        ///< 生値 total が 0 未満なら true
+		const char *name;                 ///< メモ名（空文字列可）
+		float       measured_ms;          ///< 計測値（片道）。未計測は -1.0f
+		float       base_delay_ms;        ///< サブチャンネル基準遅延
+		float       offset_ms;            ///< サブチャンネル補正オフセット
+		float       master_base_delay_ms; ///< 全サブに加算するマスターベース遅延
+		float       master_offset_ms;     ///< 共通オフセット（master_offset_ms）
+		float       total_ms;             ///< 合計 = max(0, base + offset + master_base + master_offset)
+		bool        warn;                 ///< 生値 total が 0 未満なら true
 	};
 
 	/**
@@ -23,14 +24,17 @@ namespace ods::widgets {
 	 * plugin-main.cpp 側で `obs_module_text()` (`T_()`) を使って渡す。
 	 */
 	struct DelayTableLabels {
-		const char *hdr_ch       = nullptr; ///< "Ch" 列ヘッダー
-		const char *hdr_name     = nullptr; ///< "名前" 列ヘッダー
-		const char *hdr_measured = nullptr; ///< "計測" 列ヘッダー
-		const char *hdr_base     = nullptr; ///< "ベース" 列ヘッダー
-		const char *hdr_adjust   = nullptr; ///< "アジャスト" 列ヘッダー
-		const char *hdr_global   = nullptr; ///< "共通" 列ヘッダー
-		const char *hdr_total    = nullptr; ///< "合計 ms" 列ヘッダー
-		const char *lbl_editor   = nullptr; ///< エディタ行ラベル（"アジャスト"）
+		const char *hdr_ch          = nullptr; ///< "Ch" 列ヘッダー
+		const char *hdr_name        = nullptr; ///< "名前" 列ヘッダー
+		const char *hdr_measured    = nullptr; ///< "計測" 列ヘッダー
+		const char *hdr_base        = nullptr; ///< "Sub Base" 列ヘッダー
+		const char *hdr_adjust      = nullptr; ///< "Sub Offset" 列ヘッダー
+		const char *hdr_master_base = nullptr; ///< "Master Base" 列ヘッダー
+		const char *hdr_global      = nullptr; ///< "Master Offset" 列ヘッダー
+		const char *hdr_total       = nullptr; ///< "合計 ms" 列ヘッダー
+		const char *lbl_editor      = nullptr; ///< エディタ行ラベル（"Sub Offset"）
+		const char *grp_sub         = nullptr; ///< グループ見出し（Sub チャンネル値）
+		const char *grp_master      = nullptr; ///< グループ見出し（Master 値）
 	};
 
 	obs_property_t *obs_properties_add_delay_table(

@@ -54,40 +54,46 @@ namespace ods::ui::delay {
 		const FlowResult                   flow_res = d->flow.result();
 		std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
 		for (int i = 0; i < sub_count; ++i) {
-			const auto  memo_key    = ods::plugin::make_sub_memo_key(i);
-			const char *memo        = settings ? obs_data_get_string(settings, memo_key.data()) : "";
-			channels[i].name        = (memo && *memo) ? memo : "";
-			channels[i].measured_ms = flow_res.channels[i].measured
-										  ? (float)flow_res.channels[i].one_way_latency_ms
-										  : -1.0f;
-			channels[i].base_ms     = d->sub_channels[i].delay_ms;
-			channels[i].adjust_ms   = d->sub_channels[i].adjust_ms;
-			channels[i].global_ms   = d->master_offset_ms;
-			const float raw         = ods::plugin::calc_sub_delay_raw_value_ms(
-				d->sub_channels[i].delay_ms,
-				d->sub_channels[i].adjust_ms,
-				d->master_offset_ms);
+			const auto  memo_key             = ods::plugin::make_sub_memo_key(i);
+			const char *memo                 = settings ? obs_data_get_string(settings, memo_key.data()) : "";
+			channels[i].name                 = (memo && *memo) ? memo : "";
+			channels[i].measured_ms          = flow_res.channels[i].measured
+												   ? (float)flow_res.channels[i].one_way_latency_ms
+												   : -1.0f;
+			channels[i].base_delay_ms        = d->sub_channels[i].base_delay_ms;
+			channels[i].offset_ms            = d->sub_channels[i].offset_ms;
+			channels[i].master_base_delay_ms = d->master_base_delay_ms;
+			channels[i].master_offset_ms     = d->master_offset_ms;
+			const float raw                  = ods::plugin::calc_sub_delay_raw_value_ms(
+				d->sub_channels[i].base_delay_ms,
+				d->sub_channels[i].offset_ms,
+				d->master_offset_ms,
+				d->master_base_delay_ms);
 			channels[i].warn     = raw < 0.0f;
 			const float latency  = flow_res.channels[i].measured
 									   ? (float)flow_res.channels[i].one_way_latency_ms
 									   : 0.0f;
 			channels[i].total_ms = latency + ods::plugin::calc_effective_sub_delay_value_ms(
-												 d->sub_channels[i].delay_ms,
-												 d->sub_channels[i].adjust_ms,
-												 d->master_offset_ms);
+												 d->sub_channels[i].base_delay_ms,
+												 d->sub_channels[i].offset_ms,
+												 d->master_offset_ms,
+												 d->master_base_delay_ms);
 		}
 
 		if (settings) obs_data_release(settings);
 
 		DelayTableLabels labels;
-		labels.hdr_ch       = T_("DelayTableColCh");
-		labels.hdr_name     = T_("DelayTableColName");
-		labels.hdr_measured = T_("DelayTableColMeasured");
-		labels.hdr_base     = T_("DelayTableColBase");
-		labels.hdr_adjust   = T_("DelayTableColAdjust");
-		labels.hdr_global   = T_("DelayTableColGlobal");
-		labels.hdr_total    = T_("DelayTableColTotal");
-		labels.lbl_editor   = T_("DelayTableAdjustLabel");
+		labels.hdr_ch          = T_("DelayTableColCh");
+		labels.hdr_name        = T_("DelayTableColName");
+		labels.hdr_measured    = T_("DelayTableColMeasured");
+		labels.hdr_base        = T_("DelayTableColBase");
+		labels.hdr_adjust      = T_("DelayTableColAdjust");
+		labels.hdr_master_base = T_("DelayTableColMasterBase");
+		labels.hdr_global      = T_("DelayTableColGlobal");
+		labels.hdr_total       = T_("DelayTableColTotal");
+		labels.lbl_editor      = T_("DelayTableAdjustLabel");
+		labels.grp_sub         = T_("DelayTableGroupSub");
+		labels.grp_master      = T_("DelayTableGroupMaster");
 		obs_properties_add_delay_table(
 			grp,
 			"delay_table",

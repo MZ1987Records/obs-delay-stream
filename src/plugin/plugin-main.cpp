@@ -54,7 +54,7 @@ static obs_source_t *g_singleton_owner      = nullptr;
 static uint64_t      g_singleton_generation = 0;
 
 using ods::plugin::get_local_ip;
-using ods::plugin::make_sub_delay_key;
+using ods::plugin::make_sub_base_delay_key;
 using ods::plugin::DelayStreamData;
 using ods::plugin::UpdateCheckStatus;
 using ods::plugin::SubChannelCtx;
@@ -97,7 +97,16 @@ void DelayStreamFilter::apply_master_base_delay(DelayStreamData *d, double ms) {
 	obs_data_t *settings = obs_source_get_settings(d->context);
 	obs_data_set_double(settings, ods::plugin::kMasterBaseDelayKey, ms);
 	d->master_base_delay_ms = (float)ms;
-	if (d->enabled.load()) d->master_buf.set_delay_ms((uint32_t)ms);
+	d->master_buf.set_delay_ms(0);
+	for (int i = 0; i < MAX_SUB_CH; ++i) {
+		ods::audio::apply_sub_delay_to_buffer(d, i);
+		const float effective = ods::plugin::calc_effective_sub_delay_value_ms(
+			d->sub_channels[i].base_delay_ms,
+			d->sub_channels[i].offset_ms,
+			d->master_offset_ms,
+			d->master_base_delay_ms);
+		d->router.notify_apply_delay(i, effective, "manual_adjust");
+	}
 	obs_data_release(settings);
 }
 
@@ -479,13 +488,18 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 
 void DelayStreamFilter::apply_sub_base_delay(DelayStreamData *d, int i, double ms) {
 	if (!d || i < 0 || i >= MAX_SUB_CH) return;
-	obs_data_t *settings  = obs_source_get_settings(d->context);
-	const auto  delay_key = make_sub_delay_key(i);
-	obs_data_set_double(settings, delay_key.data(), ms);
+	obs_data_t *settings       = obs_source_get_settings(d->context);
+	const auto  base_delay_key = make_sub_base_delay_key(i);
+	obs_data_set_double(settings, base_delay_key.data(), ms);
 	obs_data_release(settings);
-	d->sub_channels[i].delay_ms = (float)ms;
+	d->sub_channels[i].base_delay_ms = (float)ms;
 	ods::audio::apply_sub_delay_to_buffer(d, i);
-	d->router.notify_apply_delay(i, d->sub_channels[i].delay_ms, "auto_measure");
+	const float effective = ods::plugin::calc_effective_sub_delay_value_ms(
+		d->sub_channels[i].base_delay_ms,
+		d->sub_channels[i].offset_ms,
+		d->master_offset_ms,
+		d->master_base_delay_ms);
+	d->router.notify_apply_delay(i, effective, "auto_measure");
 }
 
 obs_properties_t *DelayStreamFilter::get_properties(void *data) {

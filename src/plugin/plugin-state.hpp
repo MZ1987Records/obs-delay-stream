@@ -278,10 +278,10 @@ namespace ods::plugin {
 		 * サブチャンネルの遅延状態。
 		 */
 		struct SubChannel {
-			float        delay_ms  = 0.0f; ///< ベース遅延 (ms)
-			float        adjust_ms = 0.0f; ///< 手動補正遅延 (ms)
-			DelayBuffer  buf;              ///< 音声遅延バッファ
-			MeasureState measure;          ///< 計測状態
+			float        base_delay_ms = 0.0f; ///< ベース遅延 (ms)
+			float        offset_ms     = 0.0f; ///< 手動補正オフセット (ms)
+			DelayBuffer  buf;                  ///< 音声遅延バッファ
+			MeasureState measure;              ///< 計測状態
 		};
 
 		std::array<SubChannel, MAX_SUB_CH> sub_channels; ///< サブチャンネルの状態配列

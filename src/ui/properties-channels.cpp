@@ -77,15 +77,15 @@ namespace ods::ui::channels {
 			int         next = ods::plugin::clamp_sub_ch_count(cur - 1);
 			obs_data_t *s    = obs_source_get_settings(d->context);
 			for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
-				const auto delay_from = ods::plugin::make_sub_delay_key(i + 1);
-				const auto delay_to   = ods::plugin::make_sub_delay_key(i);
+				const auto delay_from = ods::plugin::make_sub_base_delay_key(i + 1);
+				const auto delay_to   = ods::plugin::make_sub_base_delay_key(i);
 				double     v          = obs_data_get_double(s, delay_from.data());
 				obs_data_set_double(s, delay_to.data(), v);
 
-				const auto adjust_from = ods::plugin::make_sub_adjust_key(i + 1);
-				const auto adjust_to   = ods::plugin::make_sub_adjust_key(i);
-				double     av          = obs_data_get_double(s, adjust_from.data());
-				obs_data_set_double(s, adjust_to.data(), av);
+				const auto offset_from = ods::plugin::make_sub_offset_key(i + 1);
+				const auto offset_to   = ods::plugin::make_sub_offset_key(i);
+				double     ov          = obs_data_get_double(s, offset_from.data());
+				obs_data_set_double(s, offset_to.data(), ov);
 
 				const auto  memo_from = ods::plugin::make_sub_memo_key(i + 1);
 				const auto  memo_to   = ods::plugin::make_sub_memo_key(i);
@@ -100,10 +100,10 @@ namespace ods::ui::channels {
 				d->router.set_sub_code(i, c ? c : "");
 			}
 			{
-				const auto delay_last = ods::plugin::make_sub_delay_key(MAX_SUB_CH - 1);
+				const auto delay_last = ods::plugin::make_sub_base_delay_key(MAX_SUB_CH - 1);
 				obs_data_set_double(s, delay_last.data(), 0.0);
-				const auto adjust_last = ods::plugin::make_sub_adjust_key(MAX_SUB_CH - 1);
-				obs_data_set_double(s, adjust_last.data(), 0.0);
+				const auto offset_last = ods::plugin::make_sub_offset_key(MAX_SUB_CH - 1);
+				obs_data_set_double(s, offset_last.data(), 0.0);
 				const auto code_last = ods::plugin::make_sub_code_key(MAX_SUB_CH - 1);
 				obs_data_set_string(s, code_last.data(), "");
 				d->router.set_sub_code(MAX_SUB_CH - 1, "");
@@ -113,13 +113,13 @@ namespace ods::ui::channels {
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_remove sub_ch_count %d -> %d (remove ch=%d)", cur, next, ch + 1);
 
 			for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
-				d->sub_channels[i].delay_ms  = d->sub_channels[i + 1].delay_ms;
-				d->sub_channels[i].adjust_ms = d->sub_channels[i + 1].adjust_ms;
+				d->sub_channels[i].base_delay_ms = d->sub_channels[i + 1].base_delay_ms;
+				d->sub_channels[i].offset_ms     = d->sub_channels[i + 1].offset_ms;
 				ods::audio::apply_sub_delay_to_buffer(d, i);
 				d->sub_channels[i].measure.reset();
 			}
-			d->sub_channels[MAX_SUB_CH - 1].delay_ms  = 0.0f;
-			d->sub_channels[MAX_SUB_CH - 1].adjust_ms = 0.0f;
+			d->sub_channels[MAX_SUB_CH - 1].base_delay_ms = 0.0f;
+			d->sub_channels[MAX_SUB_CH - 1].offset_ms     = 0.0f;
 			ods::audio::apply_sub_delay_to_buffer(d, MAX_SUB_CH - 1);
 			d->sub_channels[MAX_SUB_CH - 1].measure.reset();
 
@@ -144,10 +144,10 @@ namespace ods::ui::channels {
 
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (!s) return false;
-			const auto prev_delay_key = ods::plugin::make_sub_delay_key(prev);
-			const auto ch_delay_key   = ods::plugin::make_sub_delay_key(ch);
-			const auto prev_adj_key   = ods::plugin::make_sub_adjust_key(prev);
-			const auto ch_adj_key     = ods::plugin::make_sub_adjust_key(ch);
+			const auto prev_delay_key = ods::plugin::make_sub_base_delay_key(prev);
+			const auto ch_delay_key   = ods::plugin::make_sub_base_delay_key(ch);
+			const auto prev_adj_key   = ods::plugin::make_sub_offset_key(prev);
+			const auto ch_adj_key     = ods::plugin::make_sub_offset_key(ch);
 			const auto prev_memo_key  = ods::plugin::make_sub_memo_key(prev);
 			const auto ch_memo_key    = ods::plugin::make_sub_memo_key(ch);
 			const auto prev_code_key  = ods::plugin::make_sub_code_key(prev);
@@ -176,8 +176,8 @@ namespace ods::ui::channels {
 			obs_data_set_string(s, ch_code_key.data(), prev_code.c_str());
 			obs_data_release(s);
 
-			std::swap(d->sub_channels[prev].delay_ms, d->sub_channels[ch].delay_ms);
-			std::swap(d->sub_channels[prev].adjust_ms, d->sub_channels[ch].adjust_ms);
+			std::swap(d->sub_channels[prev].base_delay_ms, d->sub_channels[ch].base_delay_ms);
+			std::swap(d->sub_channels[prev].offset_ms, d->sub_channels[ch].offset_ms);
 			ods::audio::apply_sub_delay_to_buffer(d, prev);
 			ods::audio::apply_sub_delay_to_buffer(d, ch);
 			d->sub_channels[prev].measure.reset();

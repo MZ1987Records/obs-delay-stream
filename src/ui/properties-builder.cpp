@@ -350,7 +350,7 @@ namespace ods::ui {
 								"\n  Ch.%d %s : %.1f ms",
 								i + 1,
 								name.c_str(),
-								d->sub_channels[i].delay_ms);
+								d->sub_channels[i].base_delay_ms);
 						} else {
 							step1_status_text +=
 								"\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");

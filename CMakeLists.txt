@@ -62,6 +62,7 @@ add_library(obs-delay-stream MODULE
   src/plugin/plugin-helpers.cpp
   src/audio/audio-processor.cpp
   src/ui/props-refresh.cpp
+  src/ui/table-theme.cpp
   src/ui/url-share-renderer.cpp
   src/ui/properties-url-share.cpp
   src/ui/properties-channels.cpp

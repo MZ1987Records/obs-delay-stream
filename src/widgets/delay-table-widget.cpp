@@ -1,18 +1,23 @@
 #include "widgets/delay-table-widget.hpp"
 
+#include "ui/table-theme.hpp"
 #include "widgets/focus-spin-box.hpp"
 #include "widgets/widget-inject-utils.hpp"
 #include "widgets/widget-payload-utils.hpp"
 
 #include <QAbstractScrollArea>
 #include <QApplication>
+#include <QColor>
 #include <QFontMetrics>
+#include <QFrame>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QPainter>
 #include <QPushButton>
 #include <QSizePolicy>
+#include <QStyledItemDelegate>
 #include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -32,13 +37,58 @@ namespace ods::widgets {
 		constexpr int  kDelayTableInjectRetryMax = 40;
 		constexpr int  kDelayTableInjectRetryMs  = 5;
 
+		// 2段ヘッダー行を確実に塗り分けるための専用 delegate。
+		class DelayTableItemDelegate : public QStyledItemDelegate {
+		public:
+
+			DelayTableItemDelegate(const QColor &header_bg, const QColor &header_text, QObject *parent = nullptr)
+				: QStyledItemDelegate(parent), header_bg_(header_bg), header_text_(header_text) {
+			}
+
+			void paint(QPainter                   *painter,
+					   const QStyleOptionViewItem &option,
+					   const QModelIndex          &index) const override {
+				if (!painter || !index.isValid()) {
+					QStyledItemDelegate::paint(painter, option, index);
+					return;
+				}
+				if (index.row() >= 2) {
+					QStyledItemDelegate::paint(painter, option, index);
+					return;
+				}
+
+				painter->save();
+				painter->fillRect(option.rect, header_bg_);
+				painter->setPen(header_text_);
+				QFont f = option.font;
+				f.setBold(true);
+				painter->setFont(f);
+
+				int            align      = Qt::AlignCenter;
+				const QVariant align_role = index.data(Qt::TextAlignmentRole);
+				if (align_role.isValid()) {
+					align = align_role.toInt();
+				}
+				const QString text = index.data(Qt::DisplayRole).toString();
+				const QRect   r    = option.rect.adjusted(4, 0, -4, 0);
+				painter->drawText(r, align | Qt::TextSingleLine, text);
+				painter->restore();
+			}
+
+		private:
+
+			QColor header_bg_;
+			QColor header_text_;
+		};
+
 		// ペイロードをパースしたチャンネル情報。
 		struct ParsedChannel {
 			QString name;
 			double  measured_ms; // -1 if not measured
-			double  base_ms;
-			double  adjust_ms;
-			double  global_ms;
+			double  base_delay_ms;
+			double  offset_ms;
+			double  master_base_delay_ms;
+			double  master_offset_ms;
 			double  total_ms;
 			bool    warn;
 		};
@@ -52,33 +102,62 @@ namespace ods::widgets {
 			DelayTableWidget(obs_source_t                     *source,
 							 int                               selected_ch,
 							 const std::vector<ParsedChannel> &channels,
-							 const QStringList                &labels, // hdr_ch,name,measured,base,adjust,global,total,lbl_editor
+							 const QStringList                &labels, // hdr_ch,name,measured,base,offset,master_base,master_offset,total,lbl_editor,grp_sub,grp_master
 							 QWidget                          *parent = nullptr)
 				: QWidget(parent), source_(source ? obs_source_get_ref(source) : nullptr), ch_count_(static_cast<int>(channels.size())), selected_ch_(selected_ch >= 0 && selected_ch < static_cast<int>(channels.size()) ? selected_ch : 0) {
 				auto *vlay = new QVBoxLayout(this);
 				vlay->setContentsMargins(0, 2, 0, 2);
 				vlay->setSpacing(6);
+				setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
-				// テーブル
-				table_ = new QTableWidget(ch_count_, 7, this);
-				table_->setHorizontalHeaderLabels({
-					labels.value(0),
-					labels.value(1),
-					labels.value(2),
-					labels.value(3),
-					labels.value(4),
-					labels.value(5),
-					labels.value(6),
-				});
+				// テーブル（ヘッダー2段 + データ行）
+				table_ = new QTableWidget(ch_count_ + 2, 8, this);
 				table_->setSelectionBehavior(QAbstractItemView::SelectRows);
 				table_->setSelectionMode(QAbstractItemView::SingleSelection);
 				table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+				table_->setFrameShape(QFrame::NoFrame);
+				table_->setLineWidth(0);
 				table_->verticalHeader()->hide();
 				table_->setShowGrid(true);
-				table_->setAlternatingRowColors(true);
+				table_->setAlternatingRowColors(false);
 				table_->setFocusPolicy(Qt::NoFocus);
 				table_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 				table_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+				table_->horizontalHeader()->hide();
+				{
+					const auto    theme      = ods::ui::make_table_theme_colors(QApplication::palette());
+					const QString border     = theme.border.name(QColor::HexRgb);
+					const QString table_bg   = theme.row_bg.name(QColor::HexRgb);
+					const QString normal_txt = theme.text.name(QColor::HexRgb);
+					table_->setStyleSheet(
+						QStringLiteral(
+							"QTableWidget {"
+							" border:1px solid %1;"
+							" border-radius:0px;"
+							" background-color:%2;"
+							" gridline-color:%1;"
+							" color:%3;"
+							"}"
+							"QTableWidget::item {"
+							" border:0px;"
+							" border-radius:0px;"
+							" margin:0px;"
+							" padding-top:0px;"
+							" padding-bottom:0px;"
+							" padding-left:4px;"
+							" padding-right:4px;"
+							"}"
+							"QTableWidget::item:selected {"
+							" border:0px;"
+							" border-radius:0px;"
+							" margin:0px;"
+							" padding-top:0px;"
+							" padding-bottom:0px;"
+							" background-color:palette(highlight);"
+							" color:palette(highlighted-text);"
+							"}")
+							.arg(border, table_bg, normal_txt));
+				}
 
 				{
 					auto *hdr = table_->horizontalHeader();
@@ -86,27 +165,67 @@ namespace ods::widgets {
 					hdr->setSectionResizeMode(1, QHeaderView::Stretch);          // 名前
 					hdr->setSectionResizeMode(2, QHeaderView::ResizeToContents); // 計測
 					hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents); // ベース
-					hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents); // アジャスト
-					hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents); // 共通
-					hdr->setSectionResizeMode(6, QHeaderView::ResizeToContents); // 合計
+					hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents); // 補正
+					hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents); // Master Base
+					hdr->setSectionResizeMode(6, QHeaderView::ResizeToContents); // Master Offset
+					hdr->setSectionResizeMode(7, QHeaderView::ResizeToContents); // 合計
 				}
 
-				for (int i = 0; i < ch_count_; ++i) {
-					const auto &ch = channels[i];
+				const auto theme = ods::ui::make_table_theme_colors(QApplication::palette());
+				table_->setItemDelegate(new DelayTableItemDelegate(theme.header_bg, theme.header_text, table_));
 
-					auto makeItem = [](const QString &text,
-									   Qt::Alignment  align = Qt::AlignRight | Qt::AlignVCenter) {
+				auto makeHeaderItem = [&theme](const QString &text) {
+					auto *item = new QTableWidgetItem(text);
+					item->setTextAlignment(Qt::AlignCenter);
+					item->setFlags(Qt::ItemIsEnabled);
+					QFont f = item->font();
+					f.setBold(true);
+					item->setFont(f);
+					return item;
+				};
+
+				// 1段目: Ch/名前/Total は rowspan、Channel/Master は colspan
+				table_->setSpan(0, 0, 2, 1);
+				table_->setItem(0, 0, makeHeaderItem(labels.value(0)));
+				table_->setSpan(0, 1, 2, 1);
+				table_->setItem(0, 1, makeHeaderItem(labels.value(1)));
+				table_->setSpan(0, 2, 1, 3);
+				table_->setItem(0, 2, makeHeaderItem(labels.value(9)));
+				table_->setSpan(0, 5, 1, 2);
+				table_->setItem(0, 5, makeHeaderItem(labels.value(10)));
+				table_->setSpan(0, 7, 2, 1);
+				table_->setItem(0, 7, makeHeaderItem(labels.value(7)));
+
+				// 2段目: Channel/Master のサブヘッダー
+				table_->setItem(1, 2, makeHeaderItem(labels.value(2)));
+				table_->setItem(1, 3, makeHeaderItem(labels.value(3)));
+				table_->setItem(1, 4, makeHeaderItem(labels.value(4)));
+				table_->setItem(1, 5, makeHeaderItem(labels.value(5)));
+				table_->setItem(1, 6, makeHeaderItem(labels.value(6)));
+
+				for (int i = 0; i < ch_count_; ++i) {
+					const auto  &ch  = channels[i];
+					const int    row = i + 2;
+					const bool   alt = (i % 2) != 0;
+					const QColor row_bg =
+						alt ? theme.alt_row_bg : theme.row_bg;
+
+					auto makeItem = [&theme, &row_bg](const QString &text,
+													  Qt::Alignment  align = Qt::AlignRight | Qt::AlignVCenter) {
 						auto *item = new QTableWidgetItem(text);
 						item->setTextAlignment(align);
+						item->setBackground(row_bg);
+						item->setForeground(theme.text);
 						return item;
 					};
 
-					table_->setItem(i, 0, makeItem(QString::number(i + 1)));
-					table_->setItem(i, 1, makeItem(ch.name.isEmpty() ? QStringLiteral("—") : ch.name, Qt::AlignLeft | Qt::AlignVCenter));
-					table_->setItem(i, 2, makeItem(ch.measured_ms < 0.0 ? QStringLiteral("—") : QString::number(ch.measured_ms, 'f', 1)));
-					table_->setItem(i, 3, makeItem(QString::number(ch.base_ms, 'f', 1)));
-					table_->setItem(i, 4, makeItem(QString::number(ch.adjust_ms, 'f', 0)));
-					table_->setItem(i, 5, makeItem(QString::number(ch.global_ms, 'f', 0)));
+					table_->setItem(row, 0, makeItem(QString::number(i + 1)));
+					table_->setItem(row, 1, makeItem(ch.name.isEmpty() ? QStringLiteral("—") : ch.name, Qt::AlignLeft | Qt::AlignVCenter));
+					table_->setItem(row, 2, makeItem(ch.measured_ms < 0.0 ? QStringLiteral("—") : QString::number(ch.measured_ms, 'f', 1)));
+					table_->setItem(row, 3, makeItem(QString::number(ch.base_delay_ms, 'f', 1)));
+					table_->setItem(row, 4, makeItem(QString::number(ch.offset_ms, 'f', 0)));
+					table_->setItem(row, 5, makeItem(QString::number(ch.master_base_delay_ms, 'f', 1)));
+					table_->setItem(row, 6, makeItem(QString::number(ch.master_offset_ms, 'f', 0)));
 
 					auto *total_item = makeItem(QString::number(ch.total_ms, 'f', 1));
 					if (ch.warn) {
@@ -115,14 +234,16 @@ namespace ods::widgets {
 						f.setBold(true);
 						total_item->setFont(f);
 					}
-					table_->setItem(i, 6, total_item);
+					table_->setItem(row, 7, total_item);
 				}
 
 				// 行の上下パディングを詰めて固定する。
 				table_->verticalHeader()->setDefaultSectionSize(22);
+				table_->setRowHeight(0, 20);
+				table_->setRowHeight(1, 20);
 				{
 					int h = table_->horizontalHeader()->height() + 4;
-					for (int i = 0; i < ch_count_; ++i)
+					for (int i = 0; i < ch_count_ + 2; ++i)
 						h += table_->rowHeight(i);
 					table_->setFixedHeight(h);
 				}
@@ -133,14 +254,19 @@ namespace ods::widgets {
 
 				// 選択チャンネルの「アジャスト」エディタ
 				// 順序は StepperRow に合わせる: [ラベル] [Reset] [Spin] [デルタボタン群]
-				auto *hlay = new QHBoxLayout();
+				auto *editor_row = new QWidget(this);
+				editor_row->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+				auto *hlay = new QHBoxLayout(editor_row);
 				hlay->setContentsMargins(0, 0, 0, 0);
 				hlay->setSpacing(4);
 				hlay->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
-				auto *adj_label = new QLabel(labels.value(7), this);
-				adj_label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-				hlay->addWidget(adj_label);
+				editor_label_base_ = labels.value(8).trimmed();
+				if (editor_label_base_.isEmpty())
+					editor_label_base_ = QStringLiteral("Offset");
+				editor_label_ = new QLabel(this);
+				editor_label_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+				hlay->addWidget(editor_label_);
 
 				auto *reset_btn = new QPushButton(QStringLiteral("Reset"), this);
 				reset_btn->setStyleSheet(
@@ -189,15 +315,16 @@ namespace ods::widgets {
 					hlay->addWidget(btn);
 				}
 
-				vlay->addLayout(hlay);
+				vlay->addWidget(editor_row, 0, Qt::AlignLeft | Qt::AlignTop);
 
 				connect(spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &DelayTableWidget::onValueChanged);
 
 				// 初期行を選択してスピンを同期する。
 				table_->blockSignals(true);
 				if (ch_count_ > 0)
-					table_->selectRow(selected_ch_);
+					table_->selectRow(selected_ch_ + 2);
 				table_->blockSignals(false);
+				updateEditorLabel();
 				loadCurrentChannelValue();
 			}
 
@@ -215,14 +342,28 @@ namespace ods::widgets {
 				const QList<QTableWidgetItem *> sel = table_->selectedItems();
 				if (!sel.isEmpty()) {
 					const int row = table_->row(sel.first());
-					if (row >= 0 && row < ch_count_)
-						selected_ch_ = row;
+					if (row > 1 && row <= ch_count_ + 1)
+						selected_ch_ = row - 2;
 				}
+				updateEditorLabel();
 				saveSelectedChannel();
 				loadCurrentChannelValue();
 			}
 
-			// OBS設定から選択中チャンネルの adjust_ms を読んでスピンに反映する。
+			// 選択中チャンネルに追従してエディタ左ラベルを更新する。
+			void updateEditorLabel() {
+				if (!editor_label_) return;
+				if (selected_ch_ >= 0 && selected_ch_ < ch_count_) {
+					editor_label_->setText(
+						QStringLiteral("Ch.%1 %2")
+							.arg(selected_ch_ + 1)
+							.arg(editor_label_base_));
+					return;
+				}
+				editor_label_->setText(editor_label_base_);
+			}
+
+			// OBS設定から選択中チャンネルの offset を読んでスピンに反映する。
 			void loadCurrentChannelValue() {
 				if (!source_ || selected_ch_ < 0 || selected_ch_ >= ch_count_)
 					return;
@@ -265,8 +406,10 @@ namespace ods::widgets {
 			obs_source_t *source_      = nullptr;
 			int           ch_count_    = 0;
 			int           selected_ch_ = 0;
-			QTableWidget *table_       = nullptr;
-			FocusSpinBox *spin_        = nullptr;
+			QString       editor_label_base_;
+			QTableWidget *table_        = nullptr;
+			QLabel       *editor_label_ = nullptr;
+			FocusSpinBox *spin_         = nullptr;
 		};
 
 		// ============================================================
@@ -287,8 +430,8 @@ namespace ods::widgets {
 		};
 
 		// ペイロード文字列をパースしてラベル・チャンネルリストを返す。
-		// 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_measured|hdr_base|hdr_adjust|hdr_global|hdr_total|lbl_editor
-		//            |ch0_name|ch0_measured|ch0_base|ch0_adjust|ch0_global|ch0_total|ch0_warn|...
+		// 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_measured|hdr_base|hdr_offset|hdr_master_base|hdr_master_offset|hdr_total|lbl_editor|grp_sub|grp_master
+		//            |ch0_name|ch0_measured|ch0_base|ch0_offset|ch0_master_base|ch0_master_offset|ch0_total|ch0_warn|...
 		bool parse_delay_table_payload(const QString              &text,
 									   int                        &selected_ch,
 									   QStringList                &labels,
@@ -308,24 +451,25 @@ namespace ods::widgets {
 			const int n = fields[2].toInt(&ok);
 			if (!ok || n <= 0) return false;
 
-			// [3..10] = 8 label fields, [11..] = n*7 channel fields
-			if (static_cast<int>(fields.size()) < 11 + n * 7)
+			// [3..13] = 11 label fields, [14..] = n*8 channel fields
+			if (static_cast<int>(fields.size()) < 14 + n * 8)
 				return false;
 
-			labels = fields.mid(3, 8);
+			labels = fields.mid(3, 11);
 
 			channels.clear();
 			channels.reserve(static_cast<size_t>(n));
-			int idx = 11;
+			int idx = 14;
 			for (int i = 0; i < n; ++i) {
 				ParsedChannel ch;
-				ch.name        = fields[idx++];
-				ch.measured_ms = fields[idx++].toDouble();
-				ch.base_ms     = fields[idx++].toDouble();
-				ch.adjust_ms   = fields[idx++].toDouble();
-				ch.global_ms   = fields[idx++].toDouble();
-				ch.total_ms    = fields[idx++].toDouble();
-				ch.warn        = (fields[idx++] == QLatin1String("1"));
+				ch.name                 = fields[idx++];
+				ch.measured_ms          = fields[idx++].toDouble();
+				ch.base_delay_ms        = fields[idx++].toDouble();
+				ch.offset_ms            = fields[idx++].toDouble();
+				ch.master_base_delay_ms = fields[idx++].toDouble();
+				ch.master_offset_ms     = fields[idx++].toDouble();
+				ch.total_ms             = fields[idx++].toDouble();
+				ch.warn                 = (fields[idx++] == QLatin1String("1"));
 				channels.push_back(ch);
 			}
 			return true;
@@ -413,28 +557,29 @@ namespace ods::widgets {
 		if (!props || !prop_name || !*prop_name || ch_count <= 0 || !channels)
 			return nullptr;
 
-		// 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_measured|hdr_base|hdr_adjust|hdr_global|hdr_total|lbl_editor
-		//            |ch0_name|ch0_measured|ch0_base|ch0_adjust|ch0_global|ch0_total|ch0_warn|...
+		// 書式: DTABLE|selected_ch|N|hdr_ch|hdr_name|hdr_measured|hdr_base|hdr_offset|hdr_master_base|hdr_master_offset|hdr_total|lbl_editor|grp_sub|grp_master
+		//            |ch0_name|ch0_measured|ch0_base|ch0_offset|ch0_master_base|ch0_master_offset|ch0_total|ch0_warn|...
 		std::string payload = "DTABLE";
 		{
 			char buf[16];
 			std::snprintf(buf, sizeof(buf), "|%d|%d", selected_ch, ch_count);
 			payload += buf;
 		}
-		// 8 label fields
-		for (const char *s : {labels.hdr_ch, labels.hdr_name, labels.hdr_measured, labels.hdr_base, labels.hdr_adjust, labels.hdr_global, labels.hdr_total, labels.lbl_editor}) {
+		// 11 label fields
+		for (const char *s : {labels.hdr_ch, labels.hdr_name, labels.hdr_measured, labels.hdr_base, labels.hdr_adjust, labels.hdr_master_base, labels.hdr_global, labels.hdr_total, labels.lbl_editor, labels.grp_sub, labels.grp_master}) {
 			payload += '|';
 			payload += escape_field(s ? s : "");
 		}
 		// per-channel fields
 		for (int i = 0; i < ch_count; ++i) {
 			const auto &ch = channels[i];
-			char        nums[5][32];
+			char        nums[6][32];
 			std::snprintf(nums[0], sizeof(nums[0]), "%.6g", static_cast<double>(ch.measured_ms));
-			std::snprintf(nums[1], sizeof(nums[1]), "%.6g", static_cast<double>(ch.base_ms));
-			std::snprintf(nums[2], sizeof(nums[2]), "%.6g", static_cast<double>(ch.adjust_ms));
-			std::snprintf(nums[3], sizeof(nums[3]), "%.6g", static_cast<double>(ch.global_ms));
-			std::snprintf(nums[4], sizeof(nums[4]), "%.6g", static_cast<double>(ch.total_ms));
+			std::snprintf(nums[1], sizeof(nums[1]), "%.6g", static_cast<double>(ch.base_delay_ms));
+			std::snprintf(nums[2], sizeof(nums[2]), "%.6g", static_cast<double>(ch.offset_ms));
+			std::snprintf(nums[3], sizeof(nums[3]), "%.6g", static_cast<double>(ch.master_base_delay_ms));
+			std::snprintf(nums[4], sizeof(nums[4]), "%.6g", static_cast<double>(ch.master_offset_ms));
+			std::snprintf(nums[5], sizeof(nums[5]), "%.6g", static_cast<double>(ch.total_ms));
 			payload += '|';
 			payload += escape_field(ch.name ? ch.name : "");
 			payload += '|';
@@ -447,6 +592,8 @@ namespace ods::widgets {
 			payload += nums[3];
 			payload += '|';
 			payload += nums[4];
+			payload += '|';
+			payload += nums[5];
 			payload += '|';
 			payload += (ch.warn ? "1" : "0");
 		}

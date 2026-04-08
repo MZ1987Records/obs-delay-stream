@@ -22,10 +22,10 @@ namespace ods::plugin {
 		return key;
 	}
 
-	SubSettingKey make_sub_delay_key(int ch) {
+	SubSettingKey make_sub_base_delay_key(int ch) {
 		return make_sub_key("delay_ms", ch);
 	}
-	SubSettingKey make_sub_adjust_key(int ch) {
+	SubSettingKey make_sub_offset_key(int ch) {
 		return make_sub_key("adjust_ms", ch);
 	}
 	SubSettingKey make_sub_memo_key(int ch) {
@@ -39,23 +39,25 @@ namespace ods::plugin {
 	}
 
 	float calc_sub_delay_raw_value_ms(float base_delay_ms,
-									  float adjust_ms,
-									  float master_offset_ms) {
-		return base_delay_ms + adjust_ms + master_offset_ms;
+									  float offset_ms,
+									  float master_offset_ms,
+									  float master_base_delay_ms) {
+		return base_delay_ms + offset_ms + master_offset_ms + master_base_delay_ms;
 	}
 
 	float calc_effective_sub_delay_value_ms(float base_delay_ms,
-											float adjust_ms,
-											float master_offset_ms) {
-		float effective = calc_sub_delay_raw_value_ms(base_delay_ms, adjust_ms, master_offset_ms);
+											float offset_ms,
+											float master_offset_ms,
+											float master_base_delay_ms) {
+		float effective = calc_sub_delay_raw_value_ms(base_delay_ms, offset_ms, master_offset_ms, master_base_delay_ms);
 		if (effective < 0.0f) effective = 0.0f;
 		return effective;
 	}
 
 	namespace {
 
-		constexpr float kSubAdjustMinMs = -500.0f;
-		constexpr float kSubAdjustMaxMs = 500.0f;
+		constexpr float kSubOffsetMinMs = -500.0f;
+		constexpr float kSubOffsetMaxMs = 500.0f;
 
 		// update の設定反映を段階化し、項目間の依存をまとめて扱う。
 		class SettingsApplier {
@@ -233,32 +235,33 @@ namespace ods::plugin {
 
 			// マスター/サブ遅延を反映し、実効値変化の有無を返す。
 			bool apply_delay_settings() {
-				data_->master_base_delay_ms = (float)obs_data_get_double(settings_, kMasterBaseDelayKey);
-				data_->master_buf.set_delay_ms(
-					data_->enabled.load() ? (uint32_t)data_->master_base_delay_ms : 0);
+				const float prev_master_base_delay = data_->master_base_delay_ms;
+				data_->master_base_delay_ms        = (float)obs_data_get_double(settings_, kMasterBaseDelayKey);
+				// OBS本流は遅延させない。master_base_delay_ms はサブ配信側へ加算する。
+				data_->master_buf.set_delay_ms(0);
 
 				const float prev_master_offset = data_->master_offset_ms;
 				data_->master_offset_ms        = (float)obs_data_get_double(settings_, kMasterOffsetKey);
 
 				bool effective_delay_changed = false;
 				for (int i = 0; i < MAX_SUB_CH; ++i) {
-					const float prev_delay  = data_->sub_channels[i].delay_ms;
-					const float prev_adjust = data_->sub_channels[i].adjust_ms;
+					const float prev_base_delay = data_->sub_channels[i].base_delay_ms;
+					const float prev_offset     = data_->sub_channels[i].offset_ms;
 
-					const auto  delay_key           = make_sub_delay_key(i);
-					const float new_delay_ms        = (float)obs_data_get_double(settings_, delay_key.data());
-					data_->sub_channels[i].delay_ms = new_delay_ms;
+					const auto  base_delay_key           = make_sub_base_delay_key(i);
+					const float new_base_delay_ms        = (float)obs_data_get_double(settings_, base_delay_key.data());
+					data_->sub_channels[i].base_delay_ms = new_base_delay_ms;
 
-					const auto adjust_key = make_sub_adjust_key(i);
-					float      adjust     = (float)obs_data_get_double(settings_, adjust_key.data());
-					if (adjust < kSubAdjustMinMs) {
-						adjust = kSubAdjustMinMs;
-						obs_data_set_double(settings_, adjust_key.data(), adjust);
-					} else if (adjust > kSubAdjustMaxMs) {
-						adjust = kSubAdjustMaxMs;
-						obs_data_set_double(settings_, adjust_key.data(), adjust);
+					const auto offset_key = make_sub_offset_key(i);
+					float      offset_ms  = (float)obs_data_get_double(settings_, offset_key.data());
+					if (offset_ms < kSubOffsetMinMs) {
+						offset_ms = kSubOffsetMinMs;
+						obs_data_set_double(settings_, offset_key.data(), offset_ms);
+					} else if (offset_ms > kSubOffsetMaxMs) {
+						offset_ms = kSubOffsetMaxMs;
+						obs_data_set_double(settings_, offset_key.data(), offset_ms);
 					}
-					data_->sub_channels[i].adjust_ms = adjust;
+					data_->sub_channels[i].offset_ms = offset_ms;
 
 					const auto  memo_key = make_sub_memo_key(i);
 					const char *memo     = obs_data_get_string(settings_, memo_key.data());
@@ -274,10 +277,10 @@ namespace ods::plugin {
 					data_->router.set_sub_code(i, code);
 					ods::audio::apply_sub_delay_to_buffer(data_, i);
 
-					const float prev_raw       = calc_sub_delay_raw_value_ms(prev_delay, prev_adjust, prev_master_offset);
-					const float new_raw        = calc_sub_delay_raw_value_ms(new_delay_ms, adjust, data_->master_offset_ms);
-					const float prev_effective = calc_effective_sub_delay_value_ms(prev_delay, prev_adjust, prev_master_offset);
-					const float new_effective  = calc_effective_sub_delay_value_ms(new_delay_ms, adjust, data_->master_offset_ms);
+					const float prev_raw       = calc_sub_delay_raw_value_ms(prev_base_delay, prev_offset, prev_master_offset, prev_master_base_delay);
+					const float new_raw        = calc_sub_delay_raw_value_ms(new_base_delay_ms, offset_ms, data_->master_offset_ms, data_->master_base_delay_ms);
+					const float prev_effective = calc_effective_sub_delay_value_ms(prev_base_delay, prev_offset, prev_master_offset, prev_master_base_delay);
+					const float new_effective  = calc_effective_sub_delay_value_ms(new_base_delay_ms, offset_ms, data_->master_offset_ms, data_->master_base_delay_ms);
 					if (std::fabs(prev_effective - new_effective) > 0.01f) {
 						data_->router.notify_apply_delay(i, new_effective, "manual_adjust");
 						effective_delay_changed = true;

@@ -72,10 +72,10 @@ namespace ods::plugin {
 		obs_data_set_default_string(settings, "rtmp_url", "");
 		obs_data_set_default_string(settings, "cloudflared_exe_path", "auto");
 		for (int i = 0; i < MAX_SUB_CH; ++i) {
-			const auto delay_key = make_sub_delay_key(i);
-			obs_data_set_default_double(settings, delay_key.data(), 0.0);
-			const auto adjust_key = make_sub_adjust_key(i);
-			obs_data_set_default_double(settings, adjust_key.data(), 0.0);
+			const auto base_delay_key = make_sub_base_delay_key(i);
+			obs_data_set_default_double(settings, base_delay_key.data(), 0.0);
+			const auto offset_key = make_sub_offset_key(i);
+			obs_data_set_default_double(settings, offset_key.data(), 0.0);
 			const auto memo_key = make_sub_memo_key(i);
 			if (i == 0) {
 				std::string default_memo = make_default_sub_memo(0);

@@ -9,24 +9,25 @@ namespace ods::audio {
 
 	namespace {
 
-		/// サブチャンネル遅延（基準+調整+共通オフセット）の実効値を計算する。
+		/// サブチャンネル遅延（基準+補正+共通オフセット+マスターベース）の実効値を計算する。
 		static float calc_effective_sub_delay_value_ms(const ods::plugin::DelayStreamData *d,
 													   float                               base_delay_ms,
-													   float                               adjust_ms) {
+													   float                               offset_ms) {
 			if (!d) return 0.0f;
 			return ods::plugin::calc_effective_sub_delay_value_ms(
 				base_delay_ms,
-				adjust_ms,
-				d->master_offset_ms);
+				offset_ms,
+				d->master_offset_ms,
+				d->master_base_delay_ms);
 		}
 
 		/// バッファ設定向けに実効遅延をミリ秒整数へ正規化する。
 		static uint32_t calc_effective_sub_delay_ms(const ods::plugin::DelayStreamData *d,
 													float                               base_delay_ms,
-													float                               adjust_ms) {
+													float                               offset_ms) {
 			if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
 			return static_cast<uint32_t>(
-				calc_effective_sub_delay_value_ms(d, base_delay_ms, adjust_ms));
+				calc_effective_sub_delay_value_ms(d, base_delay_ms, offset_ms));
 		}
 
 	} // namespace
@@ -34,7 +35,7 @@ namespace ods::audio {
 	void apply_sub_delay_to_buffer(ods::plugin::DelayStreamData *d, int ch) {
 		if (!d || ch < 0 || ch >= MAX_SUB_CH) return;
 		d->sub_channels[ch].buf.set_delay_ms(
-			calc_effective_sub_delay_ms(d, d->sub_channels[ch].delay_ms, d->sub_channels[ch].adjust_ms));
+			calc_effective_sub_delay_ms(d, d->sub_channels[ch].base_delay_ms, d->sub_channels[ch].offset_ms));
 	}
 
 	void ensure_audio_processing_initialized(ods::plugin::DelayStreamData *d,
@@ -48,7 +49,7 @@ namespace ods::audio {
 		d->sample_rate = sample_rate;
 		d->channels    = num_channels;
 		d->master_buf.init(sample_rate, num_channels);
-		d->master_buf.set_delay_ms((uint32_t)d->master_base_delay_ms);
+		d->master_buf.set_delay_ms(0);
 		for (int i = 0; i < MAX_SUB_CH; ++i) {
 			d->sub_channels[i].buf.init(sample_rate, num_channels);
 			apply_sub_delay_to_buffer(d, i);
