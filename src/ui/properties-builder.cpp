@@ -74,7 +74,7 @@ namespace ods::ui {
 			} else {
 				blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", ws_port);
 			}
-			d->request_props_refresh("cb_ws_server_start");
+			d->request_props_refresh_for_tabs({1, 2}, "cb_ws_server_start");
 			return false;
 		}
 
@@ -85,7 +85,7 @@ namespace ods::ui {
 			d->router.stop();
 			d->router_running.store(false);
 			blog(LOG_INFO, "[obs-delay-stream] WebSocket server stopped");
-			d->request_props_refresh("cb_ws_server_stop");
+			d->request_props_refresh_for_tabs({1, 2}, "cb_ws_server_stop");
 			return false;
 		}
 
@@ -99,7 +99,7 @@ namespace ods::ui {
 			obs_data_release(s);
 			int ws_port = d->ws_port.load(std::memory_order_relaxed);
 			d->tunnel.start(exe ? exe : "", ws_port);
-			d->request_props_refresh("cb_tunnel_start");
+			d->request_props_refresh_for_tabs({2}, "cb_tunnel_start");
 			return false;
 		}
 
@@ -108,7 +108,7 @@ namespace ods::ui {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
 			d->tunnel.stop();
-			d->request_props_refresh("cb_tunnel_stop");
+			d->request_props_refresh_for_tabs({2}, "cb_tunnel_stop");
 			return false;
 		}
 
@@ -144,7 +144,7 @@ namespace ods::ui {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
 			d->flow.reset();
-			d->request_props_refresh("cb_flow_reset");
+			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_reset");
 			return false;
 		}
 
@@ -168,11 +168,9 @@ namespace ods::ui {
 			ods::plugin::apply_codec_option_visibility(props, settings);
 			props_ui_with_preserved_scroll([d]() {
 				if (!d || !d->context) return;
-				schedule_stepper_inject(d->context);
-				schedule_text_button_inject(d->context);
 				schedule_color_button_row_inject(d->context);
 				schedule_pulldown_row_inject(d->context);
-				schedule_delay_table_inject(d->context);
+				schedule_stepper_inject(d->context);
 			});
 			return true;
 		}
@@ -181,14 +179,14 @@ namespace ods::ui {
 		bool cb_select_tab(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *ctx = static_cast<TabCtx *>(priv);
 			if (!ctx || !ctx->d || !ctx->d->context) return false;
+			ctx->d->set_active_tab(ctx->tab);
 			obs_data_t *s = obs_source_get_settings(ctx->d->context);
 			if (s) {
 				obs_data_set_int(s, "active_tab", ctx->tab);
-				obs_source_update(ctx->d->context, s);
 				obs_data_release(s);
 			}
-			ctx->d->request_props_refresh("cb_select_tab");
-			return false;
+			// ColorButtonRow 側の即時再描画（return true）を使ってタブ切替遅延を減らす。
+			return true;
 		}
 
 		// ============================================================

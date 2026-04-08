@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <obs-module.h>
@@ -262,6 +263,7 @@ namespace ods::plugin {
 		float              master_base_delay_ms = 0.0f;                       ///< マスターチャンネルの基準遅延量 (ms)
 		float              master_offset_ms     = 0.0f;                       ///< 全サブチャンネル共通のオフセット (ms)
 		int                sub_ch_count         = 1;                          ///< アクティブなサブチャンネル数
+		std::atomic<int>   active_tab{0};                                     ///< 設定UIの現在タブ（0-indexed）
 		DelayBuffer        master_buf;                                        ///< マスターチャンネルの遅延バッファ
 		RtmpMeasureState   rtmp_measure;                                      ///< RTMP 計測状態
 		StreamRouter       router;                                            ///< WebSocket ルーター
@@ -333,6 +335,31 @@ namespace ods::plugin {
 				destroying.load(std::memory_order_acquire),
 				get_props_depth.load(std::memory_order_acquire),
 				reason);
+		}
+
+		/// active_tab を 0..5 に正規化して保持する。
+		void set_active_tab(int tab) {
+			if (tab < 0 || tab >= 6) tab = 0;
+			active_tab.store(tab, std::memory_order_release);
+		}
+
+		/// 現在の active_tab（0..5）を返す。
+		int get_active_tab() const {
+			int tab = active_tab.load(std::memory_order_acquire);
+			if (tab < 0 || tab >= 6) tab = 0;
+			return tab;
+		}
+
+		/// 指定タブが表示中のときだけプロパティ再描画を要求する。
+		void request_props_refresh_for_tabs(std::initializer_list<int> tabs,
+											const char                *reason = nullptr) const {
+			const int active = get_active_tab();
+			for (int tab : tabs) {
+				if (tab == active) {
+					request_props_refresh(reason);
+					return;
+				}
+			}
 		}
 	};
 

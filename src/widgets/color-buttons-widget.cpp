@@ -29,8 +29,8 @@ namespace ods::widgets {
 	namespace {
 
 		constexpr char kColorButtonRowMagicPipe[]    = "CBTNROW|";
-		constexpr int  kColorButtonRowInjectRetryMax = 40;
-		constexpr int  kColorButtonRowInjectRetryMs  = 5;
+		constexpr int  kColorButtonRowInjectRetryMax = 80;
+		constexpr int  kColorButtonRowInjectRetryMs  = 1;
 
 		// プレースホルダー payload を解析した 1 ボタン分の定義。
 		struct ParsedButtonSpec {
@@ -221,7 +221,17 @@ namespace ods::widgets {
 
 				const bool need_refresh = obs_property_button_clicked(action_prop, source_);
 				if (need_refresh && source_) {
-					obs_source_update_properties(source_);
+					// obs_source_update_properties を次のイベントループへ延期する。
+					// コールバックが return true を返した場合、呼び出し元の ColorButtonRow
+					// 自身が obs_source_update_properties 内で同期的に delete される可能性があり、
+					// メンバ関数の途中で this が解放される未定義動作を防ぐため。
+					obs_source_t *src = obs_source_get_ref(source_);
+					if (src) {
+						QTimer::singleShot(0, qApp, [src]() {
+							obs_source_update_properties(src);
+							obs_source_release(src);
+						});
+					}
 				}
 			}
 

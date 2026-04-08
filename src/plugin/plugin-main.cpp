@@ -86,6 +86,7 @@ private:
 	static void queue_ui_safe(DelayStreamData *, std::function<void(DelayStreamData *)>);
 	static void setup_event_callbacks(DelayStreamData *);
 	static void clear_event_callbacks(DelayStreamData *);
+	static void schedule_widget_injects_for_tab(DelayStreamData *, int);
 	static void schedule_audio_sync_check(DelayStreamData *, std::weak_ptr<std::atomic<bool>>);
 	static void start_update_check_async(DelayStreamData *, std::weak_ptr<std::atomic<bool>>);
 	static void schedule_update_check(DelayStreamData *, std::weak_ptr<std::atomic<bool>>, bool);
@@ -115,7 +116,39 @@ void DelayStreamFilter::queue_ui_safe(DelayStreamData                       *d,
 		auto  c = std::unique_ptr<Ctx>(static_cast<Ctx *>(p));
 		auto life = c->life_token.lock();
 		if (life && life->load(std::memory_order_acquire))
-			c->fn(c->d); }, c.release(), false);
+					c->fn(c->d); }, c.release(), false);
+}
+
+// 表示中タブに必要なカスタムウィジェット注入だけを優先的にスケジュールする。
+void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int active_tab) {
+	if (!d || !d->context) return;
+	obs_source_t *ctx = d->context;
+
+	// タブセレクタを含む色ボタン行は常に必要。
+	schedule_color_button_row_inject(ctx);
+
+	switch (active_tab) {
+	case 0:
+		schedule_text_button_inject(ctx);
+		break;
+	case 1:
+		schedule_pulldown_row_inject(ctx);
+		schedule_stepper_inject(ctx);
+		break;
+	case 2:
+		break;
+	case 3:
+		schedule_flow_progress_inject(ctx);
+		break;
+	case 4:
+		break;
+	case 5:
+		schedule_stepper_inject(ctx);
+		schedule_delay_table_inject(ctx);
+		break;
+	default:
+		break;
+	}
 }
 
 // 音声同期オフセットを定期的に確認し、UIに表示している値と変化があればプロパティを再描画する。
@@ -236,7 +269,7 @@ const char *DelayStreamFilter::get_name(void *) {
 // 各コンポーネントのイベントコールバックを登録する。
 void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->flow.on_update = [d]() {
-		d->request_props_refresh("flow.on_update");
+		d->request_props_refresh_for_tabs({3, 4}, "flow.on_update");
 	};
 	d->flow.on_progress = [d]() {
 		const FlowResult res = d->flow.result();
@@ -246,12 +279,12 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 		update_flow_progress(d->context, pct);
 	};
 	d->flow.on_ch_measured = [d](int, LatencyResult) {
-		d->request_props_refresh("flow.on_ch_measured");
+		d->request_props_refresh_for_tabs({3}, "flow.on_ch_measured");
 	};
 	d->flow.on_apply_master = [d](double ms) {
 		queue_ui_safe(d, [ms](DelayStreamData *d) {
 			apply_master_base_delay(d, ms);
-			d->request_props_refresh("flow.on_apply_master");
+			d->request_props_refresh_for_tabs({4, 5}, "flow.on_apply_master");
 		});
 	};
 	d->flow.on_apply_sub_base_delays = [d](const FlowResult &res) {
@@ -261,37 +294,39 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 				if (!ch.measured) continue;
 				apply_sub_base_delay(d, i, res.proposed_sub_delay_ms(i));
 			}
-			d->request_props_refresh("flow.on_apply_sub_base_delays");
+			d->request_props_refresh_for_tabs({3, 5}, "flow.on_apply_sub_base_delays");
 		});
 	};
 	d->rtmp_measure.prober.on_result = [d](RtmpProbeResult r) {
 		d->rtmp_measure.apply_result(r);
-		d->request_props_refresh("rtmp.prober.on_result");
+		d->request_props_refresh_for_tabs({4}, "rtmp.prober.on_result");
 	};
 	d->tunnel.on_url_ready = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh("tunnel.on_url_ready");
+		d->request_props_refresh_for_tabs({2}, "tunnel.on_url_ready");
 	};
 	d->tunnel.on_error = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh("tunnel.on_error");
+		d->request_props_refresh_for_tabs({2}, "tunnel.on_error");
 	};
 	d->tunnel.on_stopped = [d]() {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh("tunnel.on_stopped");
+		d->request_props_refresh_for_tabs({2}, "tunnel.on_stopped");
 	};
 	d->tunnel.on_download_state = [d](bool downloading) {
 		if (!downloading) {
 			queue_ui_safe(d, [](DelayStreamData *d) {
 				ods::plugin::maybe_persist_cloudflared_path_after_auto_ready(d->context);
-				d->request_props_refresh("tunnel.on_download_state.done");
+				d->request_props_refresh_for_tabs({2}, "tunnel.on_download_state.done");
 			});
 			return;
 		}
-		d->request_props_refresh("tunnel.on_download_state");
+		d->request_props_refresh_for_tabs({2}, "tunnel.on_download_state");
 	};
 	d->router.on_conn_change = [d](const std::string &sid, int, size_t) {
-		if (sid == d->get_stream_id()) d->request_props_refresh("router.on_conn_change");
+		if (sid == d->get_stream_id()) {
+			d->request_props_refresh_for_tabs({3}, "router.on_conn_change");
+		}
 	};
 	d->router.on_any_latency_result = [d](const std::string &sid, int ch, LatencyResult r) {
 		if (sid != d->get_stream_id()) return;
@@ -302,10 +337,10 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 		if (r.valid) {
 			queue_ui_safe(d, [ch, ms_val = r.avg_latency_ms](DelayStreamData *d) {
 				apply_sub_base_delay(d, ch, ms_val);
-				d->request_props_refresh("router.on_any_latency_result.apply");
+				d->request_props_refresh_for_tabs({5}, "router.on_any_latency_result.apply");
 			});
 		} else {
-			d->request_props_refresh("router.on_any_latency_result.invalid");
+			d->request_props_refresh_for_tabs({5}, "router.on_any_latency_result.invalid");
 		}
 	};
 }
@@ -438,7 +473,7 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 	if (d->router.client_count(i) == 0) return false;
 	bool ok = d->router.start_measurement(i, d->ping_count_setting.load(std::memory_order_relaxed), PING_INTV_MS);
 	if (ok) d->sub_channels[i].measure.start();
-	d->request_props_refresh("cb_measure_subchannel");
+	d->request_props_refresh_for_tabs({3, 5}, "cb_measure_subchannel");
 	return false;
 }
 
@@ -478,18 +513,9 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 		d->last_rendered_audio_sync_offset_ns.store(sync_offset_ns, std::memory_order_relaxed);
 	}
 
+	int active_tab = d->get_active_tab();
 	ods::ui::add_plugin_group(props, d);
 	if (!d->is_duplicate_instance) {
-		int active_tab = 0;
-		if (d->context) {
-			obs_data_t *tab_s = obs_source_get_settings(d->context);
-			if (tab_s) {
-				active_tab = (int)obs_data_get_int(tab_s, "active_tab");
-				obs_data_release(tab_s);
-			}
-		}
-		if (active_tab < 0 || active_tab >= 6) active_tab = 0;
-
 		ods::ui::add_tab_selector_row(props, d, active_tab);
 
 		switch (active_tab) {
@@ -519,13 +545,8 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 		}
 	}
 
-	if (d->context) {
-		schedule_stepper_inject(d->context);
-		schedule_text_button_inject(d->context);
-		schedule_color_button_row_inject(d->context);
-		schedule_pulldown_row_inject(d->context);
-		schedule_delay_table_inject(d->context);
-		schedule_flow_progress_inject(d->context);
+	if (!d->is_duplicate_instance) {
+		schedule_widget_injects_for_tab(d, active_tab);
 	}
 
 	return props;

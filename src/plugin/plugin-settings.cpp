@@ -76,6 +76,7 @@ namespace ods::plugin {
 
 				if (reset_to_defaults) handle_defaults_reset();
 
+				apply_active_tab();
 				apply_basic_flags();
 				apply_sub_channel_count();
 				apply_audio_codec_settings();
@@ -87,12 +88,22 @@ namespace ods::plugin {
 				apply_ping_count();
 
 				if (effective_delay_changed) {
-					data_->request_props_refresh("update.effective_changed");
+					data_->request_props_refresh_for_tabs({3, 4, 5}, "update.effective_changed");
 				}
 				data_->prev_stream_id_has_user_value = obs_data_has_user_value(settings_, "stream_id");
 			}
 
 		private:
+
+			// UI 制御用の active_tab を正規化して保持する。
+			void apply_active_tab() {
+				int active_tab = static_cast<int>(obs_data_get_int(settings_, "active_tab"));
+				if (active_tab < 0 || active_tab >= 6) {
+					active_tab = 0;
+					obs_data_set_int(settings_, "active_tab", active_tab);
+				}
+				data_->set_active_tab(active_tab);
+			}
 
 			// 設定リセット時に稼働中の通信系コンポーネントを停止する。
 			void handle_defaults_reset() {
