@@ -260,8 +260,8 @@ namespace ods::plugin {
 		std::atomic<int>   ws_port{WS_PORT};                                  ///< WebSocket ポート番号
 		std::atomic<int>   ping_count_setting{DEFAULT_PING_COUNT};            ///< WebSocket 計測の ping 送信回数
 		int                playback_buffer_ms   = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		float              master_base_delay_ms = 0.0f;                       ///< マスターチャンネルの基準遅延量 (ms)
-		float              master_offset_ms     = 0.0f;                       ///< 全サブチャンネル共通のオフセット (ms)
+		int                master_base_delay_ms = 0;                          ///< マスターチャンネルの基準遅延量 (ms)
+		int                master_offset_ms     = 0;                          ///< 全サブチャンネル共通のオフセット (ms)
 		int                sub_ch_count         = 1;                          ///< アクティブなサブチャンネル数
 		std::atomic<int>   active_tab{0};                                     ///< 設定UIの現在タブ（0-indexed）
 		DelayBuffer        master_buf;                                        ///< マスターチャンネルの遅延バッファ
@@ -278,10 +278,10 @@ namespace ods::plugin {
 		 * サブチャンネルの遅延状態。
 		 */
 		struct SubChannel {
-			float        base_delay_ms = 0.0f; ///< ベース遅延 (ms)
-			float        offset_ms     = 0.0f; ///< 手動補正オフセット (ms)
-			DelayBuffer  buf;                  ///< 音声遅延バッファ
-			MeasureState measure;              ///< 計測状態
+			int          base_delay_ms = 0; ///< ベース遅延 (ms)
+			int          offset_ms     = 0; ///< 手動補正オフセット (ms)
+			DelayBuffer  buf;               ///< 音声遅延バッファ
+			MeasureState measure;           ///< 計測状態
 		};
 
 		std::array<SubChannel, MAX_SUB_CH> sub_channels; ///< サブチャンネルの状態配列

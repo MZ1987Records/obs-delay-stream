@@ -10,10 +10,10 @@ namespace ods::audio {
 	namespace {
 
 		/// サブチャンネル遅延（基準+補正+共通オフセット+マスターベース）の実効値を計算する。
-		static float calc_effective_sub_delay_value_ms(const ods::plugin::DelayStreamData *d,
-													   float                               base_delay_ms,
-													   float                               offset_ms) {
-			if (!d) return 0.0f;
+		static int calc_effective_sub_delay_value_ms(const ods::plugin::DelayStreamData *d,
+													 int                                 base_delay_ms,
+													 int                                 offset_ms) {
+			if (!d) return 0;
 			return ods::plugin::calc_effective_sub_delay_value_ms(
 				base_delay_ms,
 				offset_ms,
@@ -23,11 +23,10 @@ namespace ods::audio {
 
 		/// バッファ設定向けに実効遅延をミリ秒整数へ正規化する。
 		static uint32_t calc_effective_sub_delay_ms(const ods::plugin::DelayStreamData *d,
-													float                               base_delay_ms,
-													float                               offset_ms) {
+													int                                 base_delay_ms,
+													int                                 offset_ms) {
 			if (!d || !d->enabled.load(std::memory_order_relaxed)) return 0;
-			return static_cast<uint32_t>(
-				calc_effective_sub_delay_value_ms(d, base_delay_ms, offset_ms));
+			return static_cast<uint32_t>(calc_effective_sub_delay_value_ms(d, base_delay_ms, offset_ms));
 		}
 
 	} // namespace

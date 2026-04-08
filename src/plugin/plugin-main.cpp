@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -81,8 +82,8 @@ private:
 
 	static bool cb_measure_subchannel(obs_properties_t *, obs_property_t *, void *);
 
-	static void apply_sub_base_delay(DelayStreamData *, int, double);
-	static void apply_master_base_delay(DelayStreamData *, double);
+	static void apply_sub_base_delay(DelayStreamData *, int, int);
+	static void apply_master_base_delay(DelayStreamData *, int);
 	static void queue_ui_safe(DelayStreamData *, std::function<void(DelayStreamData *)>);
 	static void setup_event_callbacks(DelayStreamData *);
 	static void clear_event_callbacks(DelayStreamData *);
@@ -93,14 +94,14 @@ private:
 };
 
 // マスター遅延を設定へ書き戻し、必要ならバッファへ反映する。
-void DelayStreamFilter::apply_master_base_delay(DelayStreamData *d, double ms) {
+void DelayStreamFilter::apply_master_base_delay(DelayStreamData *d, int ms) {
 	obs_data_t *settings = obs_source_get_settings(d->context);
-	obs_data_set_double(settings, ods::plugin::kMasterBaseDelayKey, ms);
-	d->master_base_delay_ms = (float)ms;
+	obs_data_set_int(settings, ods::plugin::kMasterBaseDelayKey, ms);
+	d->master_base_delay_ms = ms;
 	d->master_buf.set_delay_ms(0);
 	for (int i = 0; i < MAX_SUB_CH; ++i) {
 		ods::audio::apply_sub_delay_to_buffer(d, i);
-		const float effective = ods::plugin::calc_effective_sub_delay_value_ms(
+		const int effective = ods::plugin::calc_effective_sub_delay_value_ms(
 			d->sub_channels[i].base_delay_ms,
 			d->sub_channels[i].offset_ms,
 			d->master_offset_ms,
@@ -290,7 +291,7 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->flow.on_ch_measured = [d](int, LatencyResult) {
 		d->request_props_refresh_for_tabs({3}, "flow.on_ch_measured");
 	};
-	d->flow.on_apply_master = [d](double ms) {
+	d->flow.on_apply_master = [d](int ms) {
 		queue_ui_safe(d, [ms](DelayStreamData *d) {
 			apply_master_base_delay(d, ms);
 			d->request_props_refresh_for_tabs({4, 5}, "flow.on_apply_master");
@@ -344,7 +345,7 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 		if (d->flow.phase() != FlowPhase::Idle) return;
 		d->sub_channels[ch].measure.set_result(r, r.valid ? "" : T_("MeasureFailed"));
 		if (r.valid) {
-			queue_ui_safe(d, [ch, ms_val = r.avg_latency_ms](DelayStreamData *d) {
+			queue_ui_safe(d, [ch, ms_val = static_cast<int>(std::lround(r.avg_latency_ms))](DelayStreamData *d) {
 				apply_sub_base_delay(d, ch, ms_val);
 				d->request_props_refresh_for_tabs({5}, "router.on_any_latency_result.apply");
 			});
@@ -486,15 +487,15 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 	return false;
 }
 
-void DelayStreamFilter::apply_sub_base_delay(DelayStreamData *d, int i, double ms) {
+void DelayStreamFilter::apply_sub_base_delay(DelayStreamData *d, int i, int ms) {
 	if (!d || i < 0 || i >= MAX_SUB_CH) return;
 	obs_data_t *settings       = obs_source_get_settings(d->context);
 	const auto  base_delay_key = make_sub_base_delay_key(i);
-	obs_data_set_double(settings, base_delay_key.data(), ms);
+	obs_data_set_int(settings, base_delay_key.data(), ms);
 	obs_data_release(settings);
-	d->sub_channels[i].base_delay_ms = (float)ms;
+	d->sub_channels[i].base_delay_ms = ms;
 	ods::audio::apply_sub_delay_to_buffer(d, i);
-	const float effective = ods::plugin::calc_effective_sub_delay_value_ms(
+	const int effective = ods::plugin::calc_effective_sub_delay_value_ms(
 		d->sub_channels[i].base_delay_ms,
 		d->sub_channels[i].offset_ms,
 		d->master_offset_ms,

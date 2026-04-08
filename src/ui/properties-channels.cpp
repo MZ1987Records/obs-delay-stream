@@ -79,13 +79,13 @@ namespace ods::ui::channels {
 			for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
 				const auto delay_from = ods::plugin::make_sub_base_delay_key(i + 1);
 				const auto delay_to   = ods::plugin::make_sub_base_delay_key(i);
-				double     v          = obs_data_get_double(s, delay_from.data());
-				obs_data_set_double(s, delay_to.data(), v);
+				int        v          = static_cast<int>(obs_data_get_int(s, delay_from.data()));
+				obs_data_set_int(s, delay_to.data(), v);
 
 				const auto offset_from = ods::plugin::make_sub_offset_key(i + 1);
 				const auto offset_to   = ods::plugin::make_sub_offset_key(i);
-				double     ov          = obs_data_get_double(s, offset_from.data());
-				obs_data_set_double(s, offset_to.data(), ov);
+				int        ov          = static_cast<int>(obs_data_get_int(s, offset_from.data()));
+				obs_data_set_int(s, offset_to.data(), ov);
 
 				const auto  memo_from = ods::plugin::make_sub_memo_key(i + 1);
 				const auto  memo_to   = ods::plugin::make_sub_memo_key(i);
@@ -101,9 +101,9 @@ namespace ods::ui::channels {
 			}
 			{
 				const auto delay_last = ods::plugin::make_sub_base_delay_key(MAX_SUB_CH - 1);
-				obs_data_set_double(s, delay_last.data(), 0.0);
+				obs_data_set_int(s, delay_last.data(), 0);
 				const auto offset_last = ods::plugin::make_sub_offset_key(MAX_SUB_CH - 1);
-				obs_data_set_double(s, offset_last.data(), 0.0);
+				obs_data_set_int(s, offset_last.data(), 0);
 				const auto code_last = ods::plugin::make_sub_code_key(MAX_SUB_CH - 1);
 				obs_data_set_string(s, code_last.data(), "");
 				d->router.set_sub_code(MAX_SUB_CH - 1, "");
@@ -118,8 +118,8 @@ namespace ods::ui::channels {
 				ods::audio::apply_sub_delay_to_buffer(d, i);
 				d->sub_channels[i].measure.reset();
 			}
-			d->sub_channels[MAX_SUB_CH - 1].base_delay_ms = 0.0f;
-			d->sub_channels[MAX_SUB_CH - 1].offset_ms     = 0.0f;
+			d->sub_channels[MAX_SUB_CH - 1].base_delay_ms = 0;
+			d->sub_channels[MAX_SUB_CH - 1].offset_ms     = 0;
 			ods::audio::apply_sub_delay_to_buffer(d, MAX_SUB_CH - 1);
 			d->sub_channels[MAX_SUB_CH - 1].measure.reset();
 
@@ -153,10 +153,10 @@ namespace ods::ui::channels {
 			const auto prev_code_key  = ods::plugin::make_sub_code_key(prev);
 			const auto ch_code_key    = ods::plugin::make_sub_code_key(ch);
 
-			const double      prev_delay    = obs_data_get_double(s, prev_delay_key.data());
-			const double      ch_delay      = obs_data_get_double(s, ch_delay_key.data());
-			const double      prev_adj      = obs_data_get_double(s, prev_adj_key.data());
-			const double      ch_adj        = obs_data_get_double(s, ch_adj_key.data());
+			const int         prev_delay    = static_cast<int>(obs_data_get_int(s, prev_delay_key.data()));
+			const int         ch_delay      = static_cast<int>(obs_data_get_int(s, ch_delay_key.data()));
+			const int         prev_adj      = static_cast<int>(obs_data_get_int(s, prev_adj_key.data()));
+			const int         ch_adj        = static_cast<int>(obs_data_get_int(s, ch_adj_key.data()));
 			const char       *prev_memo_raw = obs_data_get_string(s, prev_memo_key.data());
 			const char       *ch_memo_raw   = obs_data_get_string(s, ch_memo_key.data());
 			const char       *prev_code_raw = obs_data_get_string(s, prev_code_key.data());
@@ -166,10 +166,10 @@ namespace ods::ui::channels {
 			const std::string prev_code     = prev_code_raw ? prev_code_raw : "";
 			const std::string ch_code       = ch_code_raw ? ch_code_raw : "";
 
-			obs_data_set_double(s, prev_delay_key.data(), ch_delay);
-			obs_data_set_double(s, ch_delay_key.data(), prev_delay);
-			obs_data_set_double(s, prev_adj_key.data(), ch_adj);
-			obs_data_set_double(s, ch_adj_key.data(), prev_adj);
+			obs_data_set_int(s, prev_delay_key.data(), ch_delay);
+			obs_data_set_int(s, ch_delay_key.data(), prev_delay);
+			obs_data_set_int(s, prev_adj_key.data(), ch_adj);
+			obs_data_set_int(s, ch_adj_key.data(), prev_adj);
 			obs_data_set_string(s, prev_memo_key.data(), ch_memo.c_str());
 			obs_data_set_string(s, ch_memo_key.data(), prev_memo.c_str());
 			obs_data_set_string(s, prev_code_key.data(), ch_code.c_str());

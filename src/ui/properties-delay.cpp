@@ -4,6 +4,7 @@
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -34,7 +35,8 @@ namespace ods::ui::delay {
 			5000.0,
 			0.0,
 			0,
-			" ms");
+			" ms",
+			true);
 		obs_properties_add_group(props, "grp_master_offset", T_("GroupGlobalOffset"), OBS_GROUP_NORMAL, grp);
 	}
 
@@ -64,20 +66,20 @@ namespace ods::ui::delay {
 			channels[i].offset_ms            = d->sub_channels[i].offset_ms;
 			channels[i].master_base_delay_ms = d->master_base_delay_ms;
 			channels[i].master_offset_ms     = d->master_offset_ms;
-			const float raw                  = ods::plugin::calc_sub_delay_raw_value_ms(
+			const int raw                    = ods::plugin::calc_sub_delay_raw_value_ms(
 				d->sub_channels[i].base_delay_ms,
 				d->sub_channels[i].offset_ms,
 				d->master_offset_ms,
 				d->master_base_delay_ms);
-			channels[i].warn     = raw < 0.0f;
-			const float latency  = flow_res.channels[i].measured
-									   ? (float)flow_res.channels[i].one_way_latency_ms
-									   : 0.0f;
-			channels[i].total_ms = latency + ods::plugin::calc_effective_sub_delay_value_ms(
-												 d->sub_channels[i].base_delay_ms,
-												 d->sub_channels[i].offset_ms,
-												 d->master_offset_ms,
-												 d->master_base_delay_ms);
+			channels[i].warn     = raw < 0;
+			const int latency_ms = flow_res.channels[i].measured
+									   ? static_cast<int>(std::lround(flow_res.channels[i].one_way_latency_ms))
+									   : 0;
+			channels[i].total_ms = latency_ms + ods::plugin::calc_effective_sub_delay_value_ms(
+													d->sub_channels[i].base_delay_ms,
+													d->sub_channels[i].offset_ms,
+													d->master_offset_ms,
+													d->master_base_delay_ms);
 		}
 
 		if (settings) obs_data_release(settings);

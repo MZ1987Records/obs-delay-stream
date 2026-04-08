@@ -20,16 +20,16 @@ namespace ods::plugin {
 	SubSettingKey make_sub_remove_row_key(int ch);          ///< `sub{ch}_remove_row` キーを生成する
 
 	/// 補正前のサブ遅延値（base + offset + master_offset + master_base、0 未満許容）を計算する
-	float calc_sub_delay_raw_value_ms(float base_delay_ms,
-									  float offset_ms,
-									  float master_offset_ms,
-									  float master_base_delay_ms);
+	int calc_sub_delay_raw_value_ms(int base_delay_ms,
+									int offset_ms,
+									int master_offset_ms,
+									int master_base_delay_ms);
 
 	/// 実適用するサブ遅延値（下限 0 を適用）を計算する
-	float calc_effective_sub_delay_value_ms(float base_delay_ms,
-											float offset_ms,
-											float master_offset_ms,
-											float master_base_delay_ms);
+	int calc_effective_sub_delay_value_ms(int base_delay_ms,
+										  int offset_ms,
+										  int master_offset_ms,
+										  int master_base_delay_ms);
 
 	/// OBS 設定値を `DelayStreamData` に反映する
 	void apply_settings(DelayStreamData *d, obs_data_t *settings);

@@ -83,14 +83,14 @@ classDiagram
     }
 
     class SubChannel {
-        +base_delay_ms : float
-        +offset_ms : float
+        +base_delay_ms : int
+        +offset_ms : int
     }
 
     class DelayStreamData {
         +playback_buffer_ms : int
-        +master_base_delay_ms : float
-        +master_offset_ms : float
+        +master_base_delay_ms : int
+        +master_offset_ms : int
     }
 
     class AudioConfig {

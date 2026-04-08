@@ -347,7 +347,7 @@ namespace ods::ui {
 						std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
 						if (res.channels[i].measured) {
 							step1_status_text += string_printf(
-								"\n  Ch.%d %s : %.1f ms",
+								"\n  Ch.%d %s : %d ms",
 								i + 1,
 								name.c_str(),
 								d->sub_channels[i].base_delay_ms);
@@ -809,12 +809,12 @@ namespace ods::ui {
 		if (!props || !d) return;
 		obs_properties_t *grp                  = obs_properties_create();
 		bool              auto_mode            = true;
-		double            master_base_delay_ms = 0.0;
+		int               master_base_delay_ms = 0;
 		{
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (s) {
 				auto_mode            = obs_data_get_bool(s, "rtmp_url_auto");
-				master_base_delay_ms = obs_data_get_double(s, ods::plugin::kMasterBaseDelayKey);
+				master_base_delay_ms = static_cast<int>(obs_data_get_int(s, ods::plugin::kMasterBaseDelayKey));
 				obs_data_release(s);
 			}
 		}

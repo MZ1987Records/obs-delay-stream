@@ -25,6 +25,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <cstdio>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -85,11 +86,11 @@ namespace ods::widgets {
 		struct ParsedChannel {
 			QString name;
 			double  measured_ms; // -1 if not measured
-			double  base_delay_ms;
-			double  offset_ms;
-			double  master_base_delay_ms;
-			double  master_offset_ms;
-			double  total_ms;
+			int     base_delay_ms;
+			int     offset_ms;
+			int     master_base_delay_ms;
+			int     master_offset_ms;
+			int     total_ms;
 			bool    warn;
 		};
 
@@ -222,12 +223,12 @@ namespace ods::widgets {
 					table_->setItem(row, 0, makeItem(QString::number(i + 1)));
 					table_->setItem(row, 1, makeItem(ch.name.isEmpty() ? QStringLiteral("—") : ch.name, Qt::AlignLeft | Qt::AlignVCenter));
 					table_->setItem(row, 2, makeItem(ch.measured_ms < 0.0 ? QStringLiteral("—") : QString::number(ch.measured_ms, 'f', 1)));
-					table_->setItem(row, 3, makeItem(QString::number(ch.base_delay_ms, 'f', 1)));
-					table_->setItem(row, 4, makeItem(QString::number(ch.offset_ms, 'f', 0)));
-					table_->setItem(row, 5, makeItem(QString::number(ch.master_base_delay_ms, 'f', 1)));
-					table_->setItem(row, 6, makeItem(QString::number(ch.master_offset_ms, 'f', 0)));
+					table_->setItem(row, 3, makeItem(QString::number(ch.base_delay_ms)));
+					table_->setItem(row, 4, makeItem(QString::number(ch.offset_ms)));
+					table_->setItem(row, 5, makeItem(QString::number(ch.master_base_delay_ms)));
+					table_->setItem(row, 6, makeItem(QString::number(ch.master_offset_ms)));
 
-					auto *total_item = makeItem(QString::number(ch.total_ms, 'f', 1));
+					auto *total_item = makeItem(QString::number(ch.total_ms));
 					if (ch.warn) {
 						total_item->setForeground(QColor(Qt::red));
 						QFont f = total_item->font();
@@ -371,10 +372,10 @@ namespace ods::widgets {
 				if (!s) return;
 				char key[32];
 				std::snprintf(key, sizeof(key), "sub%d_adjust_ms", selected_ch_);
-				const double v = obs_data_get_double(s, key);
+				const int v = static_cast<int>(obs_data_get_int(s, key));
 				obs_data_release(s);
 				spin_->blockSignals(true);
-				spin_->setValue(v);
+				spin_->setValue(static_cast<double>(v));
 				spin_->blockSignals(false);
 			}
 
@@ -398,7 +399,7 @@ namespace ods::widgets {
 				if (!s) return;
 				char key[32];
 				std::snprintf(key, sizeof(key), "sub%d_adjust_ms", selected_ch_);
-				obs_data_set_double(s, key, val);
+				obs_data_set_int(s, key, static_cast<int>(std::lround(val)));
 				obs_source_update(source_, s);
 				obs_data_release(s);
 			}
@@ -464,11 +465,11 @@ namespace ods::widgets {
 				ParsedChannel ch;
 				ch.name                 = fields[idx++];
 				ch.measured_ms          = fields[idx++].toDouble();
-				ch.base_delay_ms        = fields[idx++].toDouble();
-				ch.offset_ms            = fields[idx++].toDouble();
-				ch.master_base_delay_ms = fields[idx++].toDouble();
-				ch.master_offset_ms     = fields[idx++].toDouble();
-				ch.total_ms             = fields[idx++].toDouble();
+				ch.base_delay_ms        = fields[idx++].toInt();
+				ch.offset_ms            = fields[idx++].toInt();
+				ch.master_base_delay_ms = fields[idx++].toInt();
+				ch.master_offset_ms     = fields[idx++].toInt();
+				ch.total_ms             = fields[idx++].toInt();
 				ch.warn                 = (fields[idx++] == QLatin1String("1"));
 				channels.push_back(ch);
 			}
@@ -575,11 +576,11 @@ namespace ods::widgets {
 			const auto &ch = channels[i];
 			char        nums[6][32];
 			std::snprintf(nums[0], sizeof(nums[0]), "%.6g", static_cast<double>(ch.measured_ms));
-			std::snprintf(nums[1], sizeof(nums[1]), "%.6g", static_cast<double>(ch.base_delay_ms));
-			std::snprintf(nums[2], sizeof(nums[2]), "%.6g", static_cast<double>(ch.offset_ms));
-			std::snprintf(nums[3], sizeof(nums[3]), "%.6g", static_cast<double>(ch.master_base_delay_ms));
-			std::snprintf(nums[4], sizeof(nums[4]), "%.6g", static_cast<double>(ch.master_offset_ms));
-			std::snprintf(nums[5], sizeof(nums[5]), "%.6g", static_cast<double>(ch.total_ms));
+			std::snprintf(nums[1], sizeof(nums[1]), "%d", ch.base_delay_ms);
+			std::snprintf(nums[2], sizeof(nums[2]), "%d", ch.offset_ms);
+			std::snprintf(nums[3], sizeof(nums[3]), "%d", ch.master_base_delay_ms);
+			std::snprintf(nums[4], sizeof(nums[4]), "%d", ch.master_offset_ms);
+			std::snprintf(nums[5], sizeof(nums[5]), "%d", ch.total_ms);
 			payload += '|';
 			payload += escape_field(ch.name ? ch.name : "");
 			payload += '|';

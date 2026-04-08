@@ -179,7 +179,7 @@ namespace ods::sync {
 	}
 
 	bool SyncFlow::apply_rtmp_result() {
-		double ms;
+		int ms;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			if (phase_ != FlowPhase::RtmpDone) return false;

@@ -10,11 +10,11 @@ namespace ods::widgets {
 	struct DelayTableChannelInfo {
 		const char *name;                 ///< メモ名（空文字列可）
 		float       measured_ms;          ///< 計測値（片道）。未計測は -1.0f
-		float       base_delay_ms;        ///< サブチャンネル基準遅延
-		float       offset_ms;            ///< サブチャンネル補正オフセット
-		float       master_base_delay_ms; ///< 全サブに加算するマスターベース遅延
-		float       master_offset_ms;     ///< 共通オフセット（master_offset_ms）
-		float       total_ms;             ///< 合計 = max(0, base + offset + master_base + master_offset)
+		int         base_delay_ms;        ///< サブチャンネル基準遅延
+		int         offset_ms;            ///< サブチャンネル補正オフセット
+		int         master_base_delay_ms; ///< 全サブに加算するマスターベース遅延
+		int         master_offset_ms;     ///< 共通オフセット（master_offset_ms）
+		int         total_ms;             ///< 合計 = round(measured) + max(0, base + offset + master_base + master_offset)
 		bool        warn;                 ///< 生値 total が 0 未満なら true
 	};
 

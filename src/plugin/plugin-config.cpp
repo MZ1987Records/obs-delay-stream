@@ -64,8 +64,8 @@ namespace ods::plugin {
 		obs_data_set_default_int(settings, "ping_count", DEFAULT_PING_COUNT);
 		obs_data_set_default_string(settings, "stream_id", "");
 		obs_data_set_default_string(settings, "host_ip_manual", "");
-		obs_data_set_default_double(settings, kMasterBaseDelayKey, 0.0);
-		obs_data_set_default_double(settings, kMasterOffsetKey, 0.0);
+		obs_data_set_default_int(settings, kMasterBaseDelayKey, 0);
+		obs_data_set_default_int(settings, kMasterOffsetKey, 0);
 		obs_data_set_default_int(settings, "delay_table_selected_ch", 0);
 		obs_data_set_default_int(settings, "active_tab", 0);
 		obs_data_set_default_bool(settings, "rtmp_url_auto", true);
@@ -73,9 +73,9 @@ namespace ods::plugin {
 		obs_data_set_default_string(settings, "cloudflared_exe_path", "auto");
 		for (int i = 0; i < MAX_SUB_CH; ++i) {
 			const auto base_delay_key = make_sub_base_delay_key(i);
-			obs_data_set_default_double(settings, base_delay_key.data(), 0.0);
+			obs_data_set_default_int(settings, base_delay_key.data(), 0);
 			const auto offset_key = make_sub_offset_key(i);
-			obs_data_set_default_double(settings, offset_key.data(), 0.0);
+			obs_data_set_default_int(settings, offset_key.data(), 0);
 			const auto memo_key = make_sub_memo_key(i);
 			if (i == 0) {
 				std::string default_memo = make_default_sub_memo(0);

@@ -361,6 +361,7 @@ namespace ods::network {
 
 	void StreamRouter::notify_apply_delay(int ch, double ms, const char *reason) {
 		const char *use_reason = (reason && *reason) ? reason : "auto_measure";
+		const int   rounded_ms = static_cast<int>(std::lround(ms));
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			auto                       &cs = ch_map_[make_key(stream_id_, ch)];
@@ -373,8 +374,8 @@ namespace ods::network {
 
 		const std::string reason_escaped = json_escape(use_reason);
 		const std::string msg            = string_printf(
-			"{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
-			ms,
+			"{\"type\":\"apply_delay\",\"ms\":%d,\"reason\":\"%s\"}",
+			rounded_ms,
 			reason_escaped.c_str());
 		broadcast_text(stream_id_, ch, msg);
 	}
@@ -768,10 +769,11 @@ namespace ods::network {
 			}
 		}
 		if (cached_delay >= 0.0 && cached_delay_reason == "auto_measure") {
-			const std::string reason_escaped = json_escape(cached_delay_reason);
-			const std::string msg            = string_printf(
-				"{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
-				cached_delay,
+			const int         rounded_cached_delay = static_cast<int>(std::lround(cached_delay));
+			const std::string reason_escaped       = json_escape(cached_delay_reason);
+			const std::string msg                  = string_printf(
+				"{\"type\":\"apply_delay\",\"ms\":%d,\"reason\":\"%s\"}",
+				rounded_cached_delay,
 				reason_escaped.c_str());
 			try {
 				srv->send(h, msg, websocketpp::frame::opcode::text);
