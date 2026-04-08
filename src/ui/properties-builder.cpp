@@ -12,6 +12,7 @@
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
+#include "widgets/pulldown-row-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 #include "widgets/text-button-widget.hpp"
 
@@ -170,6 +171,7 @@ namespace ods::ui {
 				schedule_stepper_inject(d->context);
 				schedule_text_button_inject(d->context);
 				schedule_color_button_row_inject(d->context);
+				schedule_pulldown_row_inject(d->context);
 				schedule_delay_table_inject(d->context);
 			});
 			return true;
@@ -519,61 +521,110 @@ namespace ods::ui {
 		obs_property_list_add_int(codec_p, "Opus", 0);
 		obs_property_list_add_int(codec_p, T_("CodecPcm"), 1);
 
-		obs_property_t *opus_bitrate_p = obs_properties_add_list(
+		const ObsPulldownOptionSpec opus_bitrate_options[] = {
+			{"24 kbps", 24},
+			{"32 kbps", 32},
+			{"48 kbps", 48},
+			{"64 kbps", 64},
+			{"96 kbps", 96},
+			{"128 kbps", 128},
+			{"160 kbps", 160},
+			{"192 kbps", 192},
+			{"256 kbps", 256},
+			{"320 kbps", 320},
+		};
+		const ObsPulldownOptionSpec opus_sample_rate_options[] = {
+			{"8000 Hz", 8000},
+			{"12000 Hz", 12000},
+			{"16000 Hz", 16000},
+			{"24000 Hz", 24000},
+			{"48000 Hz", 48000},
+		};
+		const ObsPulldownOptionSpec channel_mode_options[] = {
+			{T_("AudioChannelStereo"), 0},
+			{T_("AudioChannelMono"), 1},
+		};
+		uint32_t                    input_sr                    = d->sample_rate > 0 ? d->sample_rate : 48000;
+		const uint32_t              pcm_sr_full                 = input_sr;
+		const uint32_t              pcm_sr_half                 = (input_sr >= 2) ? (input_sr / 2) : 1;
+		const uint32_t              pcm_sr_quarter              = (input_sr >= 4) ? (input_sr / 4) : 1;
+		const std::string           pcm_sr_full_label           = string_printf("%u Hz", pcm_sr_full);
+		const std::string           pcm_sr_half_label           = string_printf("%u Hz", pcm_sr_half);
+		const std::string           pcm_sr_quarter_label        = string_printf("%u Hz", pcm_sr_quarter);
+		const ObsPulldownOptionSpec quantization_bits_options[] = {
+			{"8 bit", 8},
+			{"16 bit", 16},
+		};
+		const ObsPulldownOptionSpec pcm_sample_rate_options[] = {
+			{pcm_sr_full_label.c_str(), 1},
+			{pcm_sr_half_label.c_str(), 2},
+			{pcm_sr_quarter_label.c_str(), 4},
+		};
+		const ObsPulldownSpec opus_codec_specs[] = {
+			{
+				"opus_bitrate_kbps",
+				nullptr,
+				opus_bitrate_options,
+				sizeof(opus_bitrate_options) / sizeof(opus_bitrate_options[0]),
+				nullptr,
+				nullptr,
+				!ws_running,
+			},
+			{
+				"opus_sample_rate",
+				nullptr,
+				opus_sample_rate_options,
+				sizeof(opus_sample_rate_options) / sizeof(opus_sample_rate_options[0]),
+				nullptr,
+				nullptr,
+				!ws_running,
+				false,
+			},
+		};
+		obs_properties_add_pulldown_row(
 			grp,
-			"opus_bitrate_kbps",
-			T_("OpusBitrate"),
-			OBS_COMBO_TYPE_LIST,
-			OBS_COMBO_FORMAT_INT);
-		obs_property_list_add_int(opus_bitrate_p, "24 kbps", 24);
-		obs_property_list_add_int(opus_bitrate_p, "32 kbps", 32);
-		obs_property_list_add_int(opus_bitrate_p, "48 kbps", 48);
-		obs_property_list_add_int(opus_bitrate_p, "64 kbps", 64);
-		obs_property_list_add_int(opus_bitrate_p, "96 kbps", 96);
-		obs_property_list_add_int(opus_bitrate_p, "128 kbps", 128);
-		obs_property_list_add_int(opus_bitrate_p, "160 kbps", 160);
-		obs_property_list_add_int(opus_bitrate_p, "192 kbps", 192);
-		obs_property_list_add_int(opus_bitrate_p, "256 kbps", 256);
-		obs_property_list_add_int(opus_bitrate_p, "320 kbps", 320);
-		obs_property_t *opus_sample_rate_p = obs_properties_add_list(
+			"audio_codec_opus_row",
+			T_("AudioCodecOptions"),
+			opus_codec_specs,
+			sizeof(opus_codec_specs) / sizeof(opus_codec_specs[0]));
+
+		const ObsPulldownSpec pcm_codec_specs[] = {
+			{
+				"pcm_downsample_ratio",
+				nullptr,
+				pcm_sample_rate_options,
+				sizeof(pcm_sample_rate_options) / sizeof(pcm_sample_rate_options[0]),
+				nullptr,
+				nullptr,
+				!ws_running,
+			},
+			{
+				"quantization_bits",
+				nullptr,
+				quantization_bits_options,
+				sizeof(quantization_bits_options) / sizeof(quantization_bits_options[0]),
+				nullptr,
+				nullptr,
+				!ws_running,
+				false,
+			},
+			{
+				"audio_mono",
+				nullptr,
+				channel_mode_options,
+				sizeof(channel_mode_options) / sizeof(channel_mode_options[0]),
+				nullptr,
+				nullptr,
+				!ws_running,
+				true,
+			},
+		};
+		obs_properties_add_pulldown_row(
 			grp,
-			"opus_sample_rate",
-			T_("OpusSampleRate"),
-			OBS_COMBO_TYPE_LIST,
-			OBS_COMBO_FORMAT_INT);
-		obs_property_list_add_int(opus_sample_rate_p, "8000 Hz", 8000);
-		obs_property_list_add_int(opus_sample_rate_p, "12000 Hz", 12000);
-		obs_property_list_add_int(opus_sample_rate_p, "16000 Hz", 16000);
-		obs_property_list_add_int(opus_sample_rate_p, "24000 Hz", 24000);
-		obs_property_list_add_int(opus_sample_rate_p, "48000 Hz", 48000);
-		uint32_t          input_sr = d->sample_rate > 0 ? d->sample_rate : 48000;
-		const std::string pcm_sr_info =
-			string_printf(T_("PcmInputSampleRateFmt"), input_sr);
-		obs_property_t *pcm_sr_info_p = obs_properties_add_text(
-			grp,
-			"pcm_input_sample_rate_info",
-			pcm_sr_info.c_str(),
-			OBS_TEXT_INFO);
-		obs_property_text_set_info_word_wrap(pcm_sr_info_p, false);
-		obs_property_t *quant_bits_p = obs_properties_add_list(
-			grp,
-			"quantization_bits",
-			T_("QuantizationBits"),
-			OBS_COMBO_TYPE_LIST,
-			OBS_COMBO_FORMAT_INT);
-		obs_property_list_add_int(quant_bits_p, "8", 8);
-		obs_property_list_add_int(quant_bits_p, "16", 16);
-		obs_property_t *mono_mix_p =
-			obs_properties_add_bool(grp, "audio_mono", T_("AudioMono"));
-		obs_property_t *pcm_ds_ratio_p = obs_properties_add_list(
-			grp,
-			"pcm_downsample_ratio",
-			T_("PcmDownsampleRatio"),
-			OBS_COMBO_TYPE_LIST,
-			OBS_COMBO_FORMAT_INT);
-		obs_property_list_add_int(pcm_ds_ratio_p, T_("PcmDownsampleRatioNone"), 1);
-		obs_property_list_add_int(pcm_ds_ratio_p, "1/2", 2);
-		obs_property_list_add_int(pcm_ds_ratio_p, "1/4", 4);
+			"audio_codec_pcm_row",
+			T_("AudioCodecOptions"),
+			pcm_codec_specs,
+			sizeof(pcm_codec_specs) / sizeof(pcm_codec_specs[0]));
 		obs_properties_add_stepper(
 			grp,
 			"playback_buffer_ms_stepper",
@@ -588,11 +639,6 @@ namespace ods::ui {
 
 		if (ws_running) {
 			obs_property_set_enabled(codec_p, false);
-			obs_property_set_enabled(opus_bitrate_p, false);
-			obs_property_set_enabled(opus_sample_rate_p, false);
-			obs_property_set_enabled(quant_bits_p, false);
-			obs_property_set_enabled(mono_mix_p, false);
-			obs_property_set_enabled(pcm_ds_ratio_p, false);
 		}
 
 		if (d->context) {

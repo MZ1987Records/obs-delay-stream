@@ -22,23 +22,27 @@ namespace ods::plugin {
 		bool is_opus           = (codec == 0);
 		bool show_opus_options = is_opus;
 		bool show_pcm_options  = !is_opus;
-		if (auto *p = obs_properties_get(props, "opus_bitrate_kbps")) {
+		if (auto *p = obs_properties_get(props, "audio_codec_opus_row")) {
 			obs_property_set_visible(p, show_opus_options);
+		}
+		if (auto *p = obs_properties_get(props, "audio_codec_pcm_row")) {
+			obs_property_set_visible(p, show_pcm_options);
+		}
+		// 横並び行で描画するため、隠し実体プロパティは常に非表示のまま維持する。
+		if (auto *p = obs_properties_get(props, "opus_bitrate_kbps")) {
+			obs_property_set_visible(p, false);
 		}
 		if (auto *p = obs_properties_get(props, "opus_sample_rate")) {
-			obs_property_set_visible(p, show_opus_options);
-		}
-		if (auto *p = obs_properties_get(props, "pcm_input_sample_rate_info")) {
-			obs_property_set_visible(p, show_pcm_options);
+			obs_property_set_visible(p, false);
 		}
 		if (auto *p = obs_properties_get(props, "quantization_bits")) {
-			obs_property_set_visible(p, show_pcm_options);
+			obs_property_set_visible(p, false);
 		}
 		if (auto *p = obs_properties_get(props, "audio_mono")) {
-			obs_property_set_visible(p, show_pcm_options);
+			obs_property_set_visible(p, false);
 		}
 		if (auto *p = obs_properties_get(props, "pcm_downsample_ratio")) {
-			obs_property_set_visible(p, show_pcm_options);
+			obs_property_set_visible(p, false);
 		}
 	}
 

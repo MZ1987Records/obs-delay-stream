@@ -70,6 +70,7 @@ add_library(obs-delay-stream MODULE
   src/widgets/stepper-widget.cpp
   src/widgets/text-button-widget.cpp
   src/widgets/color-buttons-widget.cpp
+  src/widgets/pulldown-row-widget.cpp
   src/widgets/delay-table-widget.cpp
   src/widgets/flow-progress-widget.cpp
   src/widgets/widget-payload-utils.cpp

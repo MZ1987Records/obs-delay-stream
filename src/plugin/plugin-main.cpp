@@ -21,6 +21,7 @@
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
+#include "widgets/pulldown-row-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 #include "widgets/text-button-widget.hpp"
 
@@ -522,6 +523,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 		schedule_stepper_inject(d->context);
 		schedule_text_button_inject(d->context);
 		schedule_color_button_row_inject(d->context);
+		schedule_pulldown_row_inject(d->context);
 		schedule_delay_table_inject(d->context);
 		schedule_flow_progress_inject(d->context);
 	}
