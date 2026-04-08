@@ -7,6 +7,15 @@
 
 namespace ods::plugin {
 
+	bool try_get_parent_audio_sync_offset_ns(obs_source_t *filter_source, int64_t &out_offset_ns) {
+		if (!filter_source) return false;
+		obs_source_t *parent = obs_filter_get_parent(filter_source);
+		if (!parent) parent = obs_filter_get_target(filter_source);
+		if (!parent || is_obs_source_removed(parent)) return false;
+		out_offset_ns = obs_source_get_sync_offset(parent);
+		return true;
+	}
+
 	std::string resolve_rtmp_url_from_source(obs_source_t *source) {
 		if (!source) return "";
 		std::string url;
@@ -44,8 +53,8 @@ namespace ods::plugin {
 		obs_data_t *s = obs_source_get_settings(source);
 		if (!s) return;
 		const char *cur     = obs_data_get_string(s, "cloudflared_exe_path");
-		bool        is_auto = (!cur || !*cur || _stricmp(cur, "auto") == 0);
-		if (is_auto && (!cur || _stricmp(cur, ui_path.c_str()) != 0)) {
+		bool        is_auto = (!*cur || _stricmp(cur, "auto") == 0);
+		if (is_auto && _stricmp(cur, ui_path.c_str()) != 0) {
 			obs_data_set_string(s, "cloudflared_exe_path", ui_path.c_str());
 		}
 		obs_data_release(s);

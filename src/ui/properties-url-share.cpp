@@ -96,10 +96,9 @@ namespace ods::ui::url_share {
 		const char       *suffix     = (ts == TunnelState::Starting)
 										   ? T_("UrlShareStartingSuffix")
 										   : (via_tunnel ? T_("UrlShareTunnelSuffix") : T_("UrlShareDirectSuffix"));
-		char              copy_label[192];
-		snprintf(copy_label, sizeof(copy_label), "%s%s", T_("UrlShareCopyAll"), suffix);
-		obs_property_t *copy_p =
-			obs_properties_add_button2(grp, "url_share_copy_all", copy_label, cb_sub_copy_all, d);
+		const std::string copy_label = std::string(T_("UrlShareCopyAll")) + suffix;
+		obs_property_t   *copy_p =
+			obs_properties_add_button2(grp, "url_share_copy_all", copy_label.c_str(), cb_sub_copy_all, d);
 		if (ts == TunnelState::Starting) {
 			obs_property_set_enabled(copy_p, false);
 		}

@@ -1,4 +1,5 @@
 #include "audio/audio-processor.hpp"
+#include "core/string-format.hpp"
 #include "core/constants.hpp"
 #include "plugin/plugin-config.hpp"
 #include "plugin/plugin-settings.hpp"
@@ -7,7 +8,6 @@
 #include "ui/properties-channels.hpp"
 #include "widgets/text-button-widget.hpp"
 
-#include <cstdio>
 #include <obs-module.h>
 #include <string>
 
@@ -139,9 +139,8 @@ namespace ods::ui::channels {
 		for (int i = 0; i < sub_count; ++i) {
 			d->sub_btn_ctx[i] = {d, i};
 
-			const auto memo_key = ods::plugin::make_sub_memo_key(i);
-			char       lt[32];
-			snprintf(lt, sizeof(lt), "Ch.%d", i + 1);
+			const auto        memo_key = ods::plugin::make_sub_memo_key(i);
+			const std::string lt       = "Ch." + std::to_string(i + 1);
 
 			const auto row_prop       = ods::plugin::make_sub_remove_row_key(i);
 			const bool input_enabled  = !d->router_running.load();
@@ -149,25 +148,26 @@ namespace ods::ui::channels {
 			obs_properties_add_text_button(
 				grp,
 				row_prop.data(),
-				lt,
+				lt.c_str(),
 				memo_key.data(),
 				T_("SubRemove"),
 				cb_sub_remove,
 				&d->sub_btn_ctx[i],
 				input_enabled,
-				button_enabled);
+				button_enabled,
+				SUB_MEMO_MAX_CHARS);
 		}
 		obs_property_t *spc_bottom = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
 		obs_property_set_long_description(spc_bottom, " ");
 		obs_property_text_set_info_word_wrap(spc_bottom, false);
-		char add_label[64];
+		std::string add_label;
 		if (d->sub_ch_count >= MAX_SUB_CH) {
-			snprintf(add_label, sizeof(add_label), "%s", T_("SubAddLimitReached"));
+			add_label = T_("SubAddLimitReached");
 		} else {
-			snprintf(add_label, sizeof(add_label), T_("SubAddFmt"), d->sub_ch_count + 1);
+			add_label = string_printf(T_("SubAddFmt"), d->sub_ch_count + 1);
 		}
 		obs_property_t *add_p =
-			obs_properties_add_button2(grp, "sub_add_btn", add_label, cb_sub_add, d);
+			obs_properties_add_button2(grp, "sub_add_btn", add_label.c_str(), cb_sub_add, d);
 		if (d->router_running.load() || d->sub_ch_count >= MAX_SUB_CH) {
 			obs_property_set_enabled(add_p, false);
 		}

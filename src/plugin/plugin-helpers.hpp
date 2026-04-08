@@ -1,9 +1,13 @@
 #pragma once
 
 #include <obs-module.h>
+#include <cstdint>
 #include <string>
 
 namespace ods::plugin {
+
+	/// フィルタソースの親ソースの音声同期オフセット(ns)を取得する
+	bool try_get_parent_audio_sync_offset_ns(obs_source_t *filter_source, int64_t &out_offset_ns);
 
 	/// ソースの設定から RTMP URL を解決する
 	std::string resolve_rtmp_url_from_source(obs_source_t *source);

@@ -7,6 +7,7 @@ namespace ods::core {
 
 	// チャンネル数・ポート
 	static constexpr int   MAX_SUB_CH                 = 20;       ///< サブチャンネルの最大数
+	static constexpr int   SUB_MEMO_MAX_CHARS         = 64;       ///< 出演者名(メモ)入力の最大文字数
 	static constexpr int   WS_PORT                    = 19000;    ///< WebSocket サーバーの待受ポート
 	static constexpr float MAX_DELAY_MS               = 10000.0f; ///< 遅延バッファの上限 (ms)
 	static constexpr int   PLAYBACK_BUFFER_MIN_MS     = 20;       ///< 再生バッファの最小値 (ms)

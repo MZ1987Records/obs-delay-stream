@@ -16,6 +16,7 @@
 #include <QWidget>
 #include <atomic>
 #include <cstdio>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -54,7 +55,7 @@ namespace ods::widgets {
 		class TextButtonRow : public QWidget {
 		public:
 
-			TextButtonRow(obs_source_t *source, const char *key, const char *binding_id, const char *button_label, bool input_enabled, bool button_enabled, QWidget *parent = nullptr)
+			TextButtonRow(obs_source_t *source, const char *key, const char *binding_id, const char *button_label, bool input_enabled, bool button_enabled, int max_input_chars, QWidget *parent = nullptr)
 				: QWidget(parent),
 				  source_(source ? obs_source_get_ref(source) : nullptr),
 				  key_(key ? key : ""),
@@ -66,6 +67,8 @@ namespace ods::widgets {
 				edit_ = new QLineEdit();
 				edit_->setMinimumWidth(0);
 				edit_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+				if (max_input_chars > 0)
+					edit_->setMaxLength(max_input_chars);
 				lay->addWidget(edit_, 1);
 
 				button_ = new QPushButton(QString::fromUtf8(button_label ? button_label : ""));
@@ -202,7 +205,7 @@ namespace ods::widgets {
 
 		/// テキスト+ボタン行プレースホルダーを実ウィジェットへ置換する。
 		void do_text_button_inject(void *param) {
-			auto *ctx = static_cast<TextButtonInjectCtx *>(param);
+			auto ctx = std::unique_ptr<TextButtonInjectCtx>(static_cast<TextButtonInjectCtx *>(param));
 			if (!ctx)
 				return;
 
@@ -231,13 +234,19 @@ namespace ods::widgets {
 				if (!parse_text_button_payload(ph.text, fields))
 					continue;
 
-				const QString key            = fields[1];
-				const QString binding_id     = fields[2];
-				const QString button_label   = fields[3];
-				bool          input_enabled  = true;
-				bool          button_enabled = true;
+				const QString key             = fields[1];
+				const QString binding_id      = fields[2];
+				const QString button_label    = fields[3];
+				bool          input_enabled   = true;
+				bool          button_enabled  = true;
+				int           max_input_chars = 0;
 				QString       row_label;
-				if (fields.size() >= 7) {
+				if (fields.size() >= 8) {
+					input_enabled   = (fields[4] == QLatin1String("1"));
+					button_enabled  = (fields[5] == QLatin1String("1"));
+					max_input_chars = fields[6].toInt();
+					row_label       = fields.mid(7).join(QStringLiteral(" "));
+				} else if (fields.size() >= 7) {
 					input_enabled  = (fields[4] == QLatin1String("1"));
 					button_enabled = (fields[5] == QLatin1String("1"));
 					row_label      = fields.mid(6).join(QStringLiteral(" "));
@@ -270,6 +279,7 @@ namespace ods::widgets {
 					button_label.toUtf8().constData(),
 					input_enabled,
 					button_enabled,
+					max_input_chars,
 					parent);
 
 				form->removeRow(row);
@@ -286,12 +296,11 @@ namespace ods::widgets {
 				ctx->retries_left > 0) {
 				// OBS プロパティ再構築直後は QLabel がまだ揃わない場合があるため再試行する。
 				--ctx->retries_left;
+				auto *next = ctx.release();
 				QTimer::singleShot(kTextButtonInjectRetryMs,
-								   [ctx]() { do_text_button_inject(ctx); });
+								   [next]() { do_text_button_inject(next); });
 				return;
 			}
-
-			delete ctx;
 		}
 
 	} // namespace
@@ -304,7 +313,8 @@ namespace ods::widgets {
 												   obs_property_clicked_t clicked,
 												   void                  *clicked_priv,
 												   bool                   input_enabled,
-												   bool                   button_enabled) {
+												   bool                   button_enabled,
+												   int                    max_input_chars) {
 		if (!props || !prop_name || !*prop_name || !setting_key || !*setting_key ||
 			!button_label || !*button_label || !clicked) {
 			return nullptr;
@@ -332,6 +342,9 @@ namespace ods::widgets {
 			g_text_button_action_props[binding_id] = action_prop;
 		}
 
+		if (max_input_chars < 0)
+			max_input_chars = 0;
+
 		const std::string payload =
 			std::string("TEXTBTN|") +
 			escape_field(setting_key) + "|" +
@@ -339,6 +352,7 @@ namespace ods::widgets {
 			escape_field(button_label) + "|" +
 			(input_enabled ? "1" : "0") + std::string("|") +
 			(button_enabled ? "1" : "0") + "|" +
+			std::to_string(max_input_chars) + "|" +
 			escape_field(label ? label : "");
 		return obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
 	}
@@ -346,8 +360,8 @@ namespace ods::widgets {
 	void schedule_text_button_inject(obs_source_t *source) {
 		if (!source)
 			return;
-		auto *ctx = new TextButtonInjectCtx(source);
-		obs_queue_task(OBS_TASK_UI, do_text_button_inject, ctx, false);
+		auto ctx = std::make_unique<TextButtonInjectCtx>(source);
+		obs_queue_task(OBS_TASK_UI, do_text_button_inject, ctx.release(), false);
 	}
 
 } // namespace ods::widgets

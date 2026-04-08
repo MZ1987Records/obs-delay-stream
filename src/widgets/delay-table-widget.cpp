@@ -20,6 +20,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -332,7 +333,7 @@ namespace ods::widgets {
 
 		/// DelayTable プレースホルダーを実テーブルウィジェットへ差し替える。
 		void do_delay_table_inject(void *param) {
-			auto *ctx = static_cast<DelayTableInjectCtx *>(param);
+			auto ctx = std::unique_ptr<DelayTableInjectCtx>(static_cast<DelayTableInjectCtx *>(param));
 			if (!ctx) return;
 
 			struct Placeholder {
@@ -389,11 +390,11 @@ namespace ods::widgets {
 			if ((found.empty() || replaced_count < static_cast<int>(found.size())) &&
 				ctx->retries_left > 0) {
 				--ctx->retries_left;
+				auto *next = ctx.release();
 				QTimer::singleShot(kDelayTableInjectRetryMs,
-								   [ctx]() { do_delay_table_inject(ctx); });
+								   [next]() { do_delay_table_inject(next); });
 				return;
 			}
-			delete ctx;
 		}
 
 	} // namespace
@@ -455,8 +456,8 @@ namespace ods::widgets {
 
 	void schedule_delay_table_inject(obs_source_t *source) {
 		if (!source) return;
-		auto *ctx = new DelayTableInjectCtx(source);
-		obs_queue_task(OBS_TASK_UI, do_delay_table_inject, ctx, false);
+		auto ctx = std::make_unique<DelayTableInjectCtx>(source);
+		obs_queue_task(OBS_TASK_UI, do_delay_table_inject, ctx.release(), false);
 	}
 
 } // namespace ods::widgets

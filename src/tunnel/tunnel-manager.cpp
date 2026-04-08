@@ -31,6 +31,7 @@
 #include <obs-module.h>
 #include <vector>
 
+#include "core/string-format.hpp"
 #include "tunnel/tunnel-manager.hpp"
 
 namespace ods::tunnel {
@@ -118,9 +119,7 @@ namespace ods::tunnel {
 	std::string TunnelManager::make_ch_url(const std::string &stream_id, int ch_1idx) const {
 		std::lock_guard<std::mutex> lk(mtx_);
 		if (url_.empty() || stream_id.empty()) return "";
-		char buf[256];
-		snprintf(buf, sizeof(buf), "%s/%s/%d", url_.c_str(), stream_id.c_str(), ch_1idx);
-		return buf;
+		return url_ + "/" + stream_id + "/" + std::to_string(ch_1idx);
 	}
 
 	bool TunnelManager::cloudflared_downloading() const {
@@ -226,10 +225,9 @@ namespace ods::tunnel {
 			"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
 		HRESULT hr = URLDownloadToFileA(nullptr, kUrl, path.c_str(), 0, nullptr);
 		if (FAILED(hr)) {
-			char buf[64] = {};
-			snprintf(buf, sizeof(buf), "0x%08lx", (unsigned long)hr);
-			err = std::string("cloudflared の自動ダウンロードに失敗しました (") + buf +
-				  ")。ネットワーク接続を確認するか、手動でパスを指定してください。";
+			const std::string hr_hex = string_printf("0x%08lx", (unsigned long)hr);
+			err                      = std::string("cloudflared の自動ダウンロードに失敗しました (") + hr_hex +
+									   ")。ネットワーク接続を確認するか、手動でパスを指定してください。";
 			return false;
 		}
 		if (!file_exists(path)) {
@@ -267,11 +265,11 @@ namespace ods::tunnel {
 	bool TunnelManager::launch_process(const std::string &exe_path, const std::string &args) {
 		last_launch_error_.clear();
 		// ファイルリダイレクト方式（パイプバッファ詰まりを完全回避）
-		char tmp_path[MAX_PATH] = {};
-		GetTempPathA(MAX_PATH, tmp_path);
-		if (tmp_path[0] == 0) strncpy(tmp_path, "C:\\Temp\\", MAX_PATH - 1);
-		CreateDirectoryA(tmp_path, nullptr);
-		log_file_path_ = std::string(tmp_path) + "obs_tunnel_out.txt";
+		std::string tmp_path = get_temp_dir();
+		if (tmp_path.empty()) tmp_path = "C:\\Temp\\";
+		if (tmp_path.back() != '\\' && tmp_path.back() != '/') tmp_path.push_back('\\');
+		CreateDirectoryA(tmp_path.c_str(), nullptr);
+		log_file_path_ = tmp_path + "obs_tunnel_out.txt";
 		blog(LOG_INFO, "[obs-delay-stream] tunnel log file: %s", log_file_path_.c_str());
 
 		SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
@@ -322,9 +320,7 @@ namespace ods::tunnel {
 						   sizeof(errmsg) - 1,
 						   nullptr);
 			blog(LOG_ERROR, "[obs-delay-stream] CreateProcess failed: err=%lu [%s] exe=[%s]", err, errmsg, exe_path.c_str());
-			char buf[512] = {};
-			snprintf(buf, sizeof(buf), "CreateProcess failed: err=%lu [%s]", err, errmsg);
-			last_launch_error_ = buf;
+			last_launch_error_ = string_printf("CreateProcess failed: err=%lu [%s]", err, errmsg);
 			return false;
 		}
 		{
@@ -380,8 +376,7 @@ namespace ods::tunnel {
 	}
 
 	bool TunnelManager::run_cloudflared() {
-		char args[256];
-		snprintf(args, sizeof(args), "tunnel --url http://localhost:%d", ws_port_);
+		const std::string args = "tunnel --url http://localhost:" + std::to_string(ws_port_);
 
 		if (!launch_process(exe_path_, args)) {
 			if (!last_launch_error_.empty())

@@ -66,7 +66,7 @@ namespace ods::plugin {
 
 			SettingsApplier(DelayStreamData *d, obs_data_t *s) : data_(d), settings_(s) {}
 
-			/// update 入力を一括反映するエントリーポイント。
+			// update 入力を一括反映するエントリーポイント。
 			void apply_all() {
 				bool stream_id_has_user_value = obs_data_has_user_value(settings_, "stream_id");
 				bool reset_to_defaults =
@@ -94,7 +94,7 @@ namespace ods::plugin {
 
 		private:
 
-			/// 設定リセット時に稼働中の通信系コンポーネントを停止する。
+			// 設定リセット時に稼働中の通信系コンポーネントを停止する。
 			void handle_defaults_reset() {
 				if (data_->router_running.load(std::memory_order_relaxed)) {
 					data_->router.stop();
@@ -108,7 +108,7 @@ namespace ods::plugin {
 				}
 			}
 
-			/// 有効/一時停止フラグを反映する。
+			// 有効/一時停止フラグを反映する。
 			void apply_basic_flags() {
 				bool delay_disable = obs_data_get_bool(settings_, "delay_disable");
 				data_->enabled.store(!delay_disable);
@@ -116,7 +116,7 @@ namespace ods::plugin {
 				data_->ws_send_enabled.store(!paused);
 			}
 
-			/// サブチャンネル数を正規化して関連状態へ適用する。
+			// サブチャンネル数を正規化して関連状態へ適用する。
 			void apply_sub_channel_count() {
 				int  current          = data_->sub_ch_count;
 				bool has_sub_ch_count = obs_data_has_user_value(settings_, "sub_ch_count");
@@ -143,7 +143,7 @@ namespace ods::plugin {
 				if (changed) data_->flow.reset();
 			}
 
-			/// 音声コーデック関連設定を正規化して router へ適用する。
+			// 音声コーデック関連設定を正規化して router へ適用する。
 			void apply_audio_codec_settings() {
 				AudioConfig audio_cfg{};
 				audio_cfg.codec = (int)obs_data_get_int(settings_, "audio_codec");
@@ -159,27 +159,22 @@ namespace ods::plugin {
 					audio_cfg.opus_bitrate_kbps = bitrate;
 				}
 				{
-					int sample_rate = normalize_opus_sample_rate(
-						(int)obs_data_get_int(settings_, "opus_sample_rate"));
-					if (sample_rate != (int)obs_data_get_int(settings_, "opus_sample_rate")) {
-						obs_data_set_int(settings_, "opus_sample_rate", sample_rate);
-					}
+					int raw         = (int)obs_data_get_int(settings_, "opus_sample_rate");
+					int sample_rate = normalize_opus_sample_rate(raw);
+					if (sample_rate != raw) obs_data_set_int(settings_, "opus_sample_rate", sample_rate);
 					audio_cfg.opus_target_sample_rate = sample_rate;
 				}
 				{
-					int quant_bits = normalize_quantization_bits(
-						(int)obs_data_get_int(settings_, "quantization_bits"));
-					if (quant_bits != (int)obs_data_get_int(settings_, "quantization_bits")) {
-						obs_data_set_int(settings_, "quantization_bits", quant_bits);
-					}
+					int raw        = (int)obs_data_get_int(settings_, "quantization_bits");
+					int quant_bits = normalize_quantization_bits(raw);
+					if (quant_bits != raw) obs_data_set_int(settings_, "quantization_bits", quant_bits);
 					audio_cfg.quantization_bits = quant_bits;
 				}
 				audio_cfg.mono = obs_data_get_bool(settings_, "audio_mono");
 				{
-					int ratio = normalize_pcm_downsample_ratio(
-						(int)obs_data_get_int(settings_, "pcm_downsample_ratio"));
-					if (ratio != (int)obs_data_get_int(settings_, "pcm_downsample_ratio"))
-						obs_data_set_int(settings_, "pcm_downsample_ratio", ratio);
+					int raw   = (int)obs_data_get_int(settings_, "pcm_downsample_ratio");
+					int ratio = normalize_pcm_downsample_ratio(raw);
+					if (ratio != raw) obs_data_set_int(settings_, "pcm_downsample_ratio", ratio);
 					audio_cfg.pcm_downsample_ratio = ratio;
 				}
 				{
@@ -194,7 +189,7 @@ namespace ods::plugin {
 				data_->router.set_audio_config(audio_cfg);
 			}
 
-			/// 配信先識別子や接続先情報を更新する。
+			// 配信先識別子や接続先情報を更新する。
 			void apply_stream_endpoint_settings() {
 				const char *raw = obs_data_get_string(settings_, "stream_id");
 				std::string sid = raw ? sanitize_stream_id(raw) : "";
@@ -225,7 +220,7 @@ namespace ods::plugin {
 				data_->set_host_ip(hip);
 			}
 
-			/// マスター/サブ遅延を反映し、実効値変化の有無を返す。
+			// マスター/サブ遅延を反映し、実効値変化の有無を返す。
 			bool apply_delay_settings() {
 				data_->master_base_delay_ms = (float)obs_data_get_double(settings_, kMasterBaseDelayKey);
 				data_->master_buf.set_delay_ms(
@@ -239,8 +234,9 @@ namespace ods::plugin {
 					const float prev_delay  = data_->sub_channels[i].delay_ms;
 					const float prev_adjust = data_->sub_channels[i].adjust_ms;
 
-					const auto delay_key            = make_sub_delay_key(i);
-					data_->sub_channels[i].delay_ms = (float)obs_data_get_double(settings_, delay_key.data());
+					const auto  delay_key           = make_sub_delay_key(i);
+					const float new_delay_ms        = (float)obs_data_get_double(settings_, delay_key.data());
+					data_->sub_channels[i].delay_ms = new_delay_ms;
 
 					const auto adjust_key = make_sub_adjust_key(i);
 					float      adjust     = (float)obs_data_get_double(settings_, adjust_key.data());
@@ -267,14 +263,10 @@ namespace ods::plugin {
 					data_->router.set_sub_code(i, code);
 					ods::audio::apply_sub_delay_to_buffer(data_, i);
 
-					const float prev_raw =
-						calc_sub_delay_raw_value_ms(prev_delay, prev_adjust, prev_master_offset);
-					const float new_raw =
-						calc_sub_delay_raw_value_ms(data_->sub_channels[i].delay_ms, data_->sub_channels[i].adjust_ms, data_->master_offset_ms);
-					const float prev_effective =
-						calc_effective_sub_delay_value_ms(prev_delay, prev_adjust, prev_master_offset);
-					const float new_effective =
-						calc_effective_sub_delay_value_ms(data_->sub_channels[i].delay_ms, data_->sub_channels[i].adjust_ms, data_->master_offset_ms);
+					const float prev_raw       = calc_sub_delay_raw_value_ms(prev_delay, prev_adjust, prev_master_offset);
+					const float new_raw        = calc_sub_delay_raw_value_ms(new_delay_ms, adjust, data_->master_offset_ms);
+					const float prev_effective = calc_effective_sub_delay_value_ms(prev_delay, prev_adjust, prev_master_offset);
+					const float new_effective  = calc_effective_sub_delay_value_ms(new_delay_ms, adjust, data_->master_offset_ms);
 					if (std::fabs(prev_effective - new_effective) > 0.01f) {
 						data_->router.notify_apply_delay(i, new_effective, "manual_adjust");
 						effective_delay_changed = true;
@@ -286,7 +278,7 @@ namespace ods::plugin {
 				return effective_delay_changed;
 			}
 
-			/// Ping 回数設定を正規化して flow へ適用する。
+			// Ping 回数設定を正規化して flow へ適用する。
 			void apply_ping_count() {
 				int pc = (int)obs_data_get_int(settings_, "ping_count");
 				if (pc != 10 && pc != 20 && pc != 30 && pc != 40 && pc != 50) {

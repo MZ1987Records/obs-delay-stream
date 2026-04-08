@@ -1,5 +1,6 @@
 #include "ui/properties-builder.hpp"
 
+#include "core/string-format.hpp"
 #include "core/constants.hpp"
 #include "plugin/plugin-config.hpp"
 #include "plugin/plugin-helpers.hpp"
@@ -15,7 +16,6 @@
 #include "widgets/text-button-widget.hpp"
 
 #include <cstdint>
-#include <cstdio>
 #include <string>
 
 #define T_(s) obs_module_text(s)
@@ -41,23 +41,11 @@ namespace ods::ui {
 		// namespace ローカル補助関数
 		// ============================================================
 
-		/// 親ソースの音声同期オフセット(ns)を取得する。
-		bool try_get_parent_audio_sync_offset_ns(DelayStreamData *d, int64_t &out_offset_ns) {
-			if (!d || !d->context) return false;
-
-			obs_source_t *parent = obs_filter_get_parent(d->context);
-			if (!parent) parent = obs_filter_get_target(d->context);
-			if (!parent || ods::plugin::is_obs_source_removed(parent)) return false;
-
-			out_offset_ns = obs_source_get_sync_offset(parent);
-			return true;
-		}
-
 		// ============================================================
 		// static コールバック（properties UI）
 		// ============================================================
 
-		/// RTMP URL 自動設定トグルに合わせて入力有効状態を切り替える。
+		// RTMP URL 自動設定トグルに合わせて入力有効状態を切り替える。
 		bool cb_rtmp_url_auto_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d || !settings) return false;
@@ -74,7 +62,7 @@ namespace ods::ui {
 			return true;
 		}
 
-		/// WebSocket サーバーを起動し、状態表示を更新する。
+		// WebSocket サーバーを起動し、状態表示を更新する。
 		bool cb_ws_server_start(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d || d->router_running.load()) return false;
@@ -89,7 +77,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// WebSocket サーバーを停止し、状態表示を更新する。
+		// WebSocket サーバーを停止し、状態表示を更新する。
 		bool cb_ws_server_stop(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d || !d->router_running.load()) return false;
@@ -100,7 +88,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// cloudflared トンネル起動を要求する。
+		// cloudflared トンネル起動を要求する。
 		bool cb_tunnel_start(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d || !d->context) return false;
@@ -114,7 +102,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// cloudflared トンネルを停止する。
+		// cloudflared トンネルを停止する。
 		bool cb_tunnel_stop(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
@@ -123,7 +111,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// WebSocket 計測フローを開始する。
+		// WebSocket 計測フローを開始する。
 		bool cb_flow_start(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
@@ -133,7 +121,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// 失敗したチャンネルのみ再計測する。
+		// 失敗したチャンネルのみ再計測する。
 		bool cb_flow_retry_failed(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
@@ -141,7 +129,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// RTMP 計測フローを開始する。
+		// RTMP 計測フローを開始する。
 		bool cb_flow_start_rtmp(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
@@ -150,7 +138,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// SyncFlow を中断して状態を初期化する。
+		// SyncFlow を中断して状態を初期化する。
 		bool cb_flow_reset(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
@@ -159,7 +147,7 @@ namespace ods::ui {
 			return false;
 		}
 
-		/// stream_id の有無に応じて関連ボタンの有効状態を切り替える。
+		// stream_id の有無に応じて関連ボタンの有効状態を切り替える。
 		bool cb_stream_id_changed(void *, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
 			if (!props || !settings) return false;
 			const char *sid     = obs_data_get_string(settings, "stream_id");
@@ -173,7 +161,7 @@ namespace ods::ui {
 			return true;
 		}
 
-		/// コーデック変更時に表示項目とカスタムウィジェットを再同期する。
+		// コーデック変更時に表示項目とカスタムウィジェットを再同期する。
 		bool cb_audio_codec_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			ods::plugin::apply_codec_option_visibility(props, settings);
@@ -187,7 +175,7 @@ namespace ods::ui {
 			return true;
 		}
 
-		/// タブ選択を設定へ反映し、プロパティを再描画する。
+		// タブ選択を設定へ反映し、プロパティを再描画する。
 		bool cb_select_tab(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *ctx = static_cast<TabCtx *>(priv);
 			if (!ctx || !ctx->d || !ctx->d->context) return false;
@@ -205,7 +193,7 @@ namespace ods::ui {
 		// private 補助関数
 		// ============================================================
 
-		/// RTMP計測セクションのボタン群と状態表示を構築する。
+		// RTMP計測セクションのボタン群と状態表示を構築する。
 		void add_flow_rtmp_measure_section(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
 
@@ -245,25 +233,23 @@ namespace ods::ui {
 				flow_rtmp_measure_buttons,
 				sizeof(flow_rtmp_measure_buttons) / sizeof(flow_rtmp_measure_buttons[0]));
 
-			char step3_status[512];
+			std::string step3_status;
 			if (is_rtmp_measuring) {
-				snprintf(step3_status, sizeof(step3_status), "%s", T_("FlowRtmpMeasureProgress"));
+				step3_status = T_("FlowRtmpMeasureProgress");
 			} else if ((is_rtmp_done || is_complete) && res.rtmp_valid) {
-				snprintf(step3_status,
-						 sizeof(step3_status),
-						 T_("FlowRtmpMeasureResultFmt"),
-						 res.rtmp_latency_ms,
-						 res.max_latency_ms(),
-						 res.proposed_master_delay_ms());
+				step3_status = string_printf(T_("FlowRtmpMeasureResultFmt"),
+											 res.rtmp_latency_ms,
+											 res.max_latency_ms(),
+											 res.proposed_master_delay_ms());
 			} else if (is_rtmp_done && !res.rtmp_valid) {
-				snprintf(step3_status, sizeof(step3_status), T_("FlowRtmpFailedFmt"), res.rtmp_error.c_str());
+				step3_status = string_printf(T_("FlowRtmpFailedFmt"), res.rtmp_error.c_str());
 			} else {
-				snprintf(step3_status, sizeof(step3_status), "%s", T_("FlowNotMeasured"));
+				step3_status = T_("FlowNotMeasured");
 			}
-			obs_properties_add_text(grp, "flow_s3_status", step3_status, OBS_TEXT_INFO);
+			obs_properties_add_text(grp, "flow_s3_status", step3_status.c_str(), OBS_TEXT_INFO);
 		}
 
-		/// SyncFlow パネル全体（接続状況/操作/進捗）を構築する。
+		// SyncFlow パネル全体（接続状況/操作/進捗）を構築する。
 		void build_flow_panel(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
 			obs_properties_add_text(grp, "flow_desc", T_("FlowDesc"), OBS_TEXT_INFO);
@@ -360,9 +346,11 @@ namespace ods::ui {
 						const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : "";
 						std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
 						if (res.channels[i].measured) {
-							char line[192];
-							snprintf(line, sizeof(line), "\n  Ch.%d %s : %.1f ms", i + 1, name.c_str(), d->sub_channels[i].delay_ms);
-							step1_status_text += line;
+							step1_status_text += string_printf(
+								"\n  Ch.%d %s : %.1f ms",
+								i + 1,
+								name.c_str(),
+								d->sub_channels[i].delay_ms);
 						} else {
 							step1_status_text +=
 								"\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
@@ -449,12 +437,12 @@ namespace ods::ui {
 			UpdateCheckStatus::UpdateAvailable) {
 			const std::string latest_version = d->update_check.latest_version();
 			if (!latest_version.empty()) {
-				char update_notice[512];
-				snprintf(update_notice, sizeof(update_notice), T_("UpdateAvailableNoticeFmt"), latest_version.c_str());
+				const std::string update_notice =
+					string_printf(T_("UpdateAvailableNoticeFmt"), latest_version.c_str());
 				obs_property_t *update_notice_p = obs_properties_add_text(
 					grp,
 					"update_available_notice_top",
-					update_notice,
+					update_notice.c_str(),
 					OBS_TEXT_INFO);
 				obs_property_text_set_info_word_wrap(update_notice_p, true);
 			}
@@ -476,7 +464,7 @@ namespace ods::ui {
 				obs_property_text_set_info_word_wrap(ver_warn_p, true);
 			}
 			int64_t sync_offset_ns = 0;
-			if (try_get_parent_audio_sync_offset_ns(d, sync_offset_ns) &&
+			if (ods::plugin::try_get_parent_audio_sync_offset_ns(d->context, sync_offset_ns) &&
 				sync_offset_ns != REQUIRED_AUDIO_SYNC_OFFSET_NS) {
 				obs_property_t *warn_p = obs_properties_add_text(
 					grp,
@@ -498,9 +486,8 @@ namespace ods::ui {
 		obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
 		obs_property_set_enabled(sid_p, false);
 		{
-			char info[128];
-			snprintf(info, sizeof(info), T_("AutoIpFmt"), d->auto_ip.c_str());
-			obs_properties_add_text(grp, "auto_ip_info", info, OBS_TEXT_INFO);
+			const std::string info = string_printf(T_("AutoIpFmt"), d->auto_ip.c_str());
+			obs_properties_add_text(grp, "auto_ip_info", info.c_str(), OBS_TEXT_INFO);
 		}
 		obs_property_t *ip_p =
 			obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
@@ -559,13 +546,13 @@ namespace ods::ui {
 		obs_property_list_add_int(opus_sample_rate_p, "16000 Hz", 16000);
 		obs_property_list_add_int(opus_sample_rate_p, "24000 Hz", 24000);
 		obs_property_list_add_int(opus_sample_rate_p, "48000 Hz", 48000);
-		uint32_t input_sr = d->sample_rate > 0 ? d->sample_rate : 48000;
-		char     pcm_sr_info[128];
-		snprintf(pcm_sr_info, sizeof(pcm_sr_info), T_("PcmInputSampleRateFmt"), input_sr);
+		uint32_t          input_sr = d->sample_rate > 0 ? d->sample_rate : 48000;
+		const std::string pcm_sr_info =
+			string_printf(T_("PcmInputSampleRateFmt"), input_sr);
 		obs_property_t *pcm_sr_info_p = obs_properties_add_text(
 			grp,
 			"pcm_input_sample_rate_info",
-			pcm_sr_info,
+			pcm_sr_info.c_str(),
 			OBS_TEXT_INFO);
 		obs_property_text_set_info_word_wrap(pcm_sr_info_p, false);
 		obs_property_t *quant_bits_p = obs_properties_add_list(
@@ -642,12 +629,12 @@ namespace ods::ui {
 			T_("WsServerControls"),
 			ws_buttons,
 			sizeof(ws_buttons) / sizeof(ws_buttons[0]));
-		char ws_firewall_note[160];
-		snprintf(ws_firewall_note, sizeof(ws_firewall_note), T_("WsFirewallNoteFmt"), ws_port);
+		const std::string ws_firewall_note =
+			string_printf(T_("WsFirewallNoteFmt"), ws_port);
 		obs_property_t *fw_note_p = obs_properties_add_text(
 			grp,
 			"ws_firewall_note",
-			ws_firewall_note,
+			ws_firewall_note.c_str(),
 			OBS_TEXT_INFO);
 		obs_property_text_set_info_word_wrap(fw_note_p, false);
 
@@ -716,9 +703,9 @@ namespace ods::ui {
 		} else {
 			tunnel_domain_text = T_("TunnelUnassignedDomain");
 		}
-		char db[320];
-		snprintf(db, sizeof(db), T_("TunnelAssignedDomainFmt"), tunnel_domain_text);
-		obs_properties_add_text(grp, "tunnel_domain_info", db, OBS_TEXT_INFO);
+		const std::string db =
+			string_printf(T_("TunnelAssignedDomainFmt"), tunnel_domain_text);
+		obs_properties_add_text(grp, "tunnel_domain_info", db.c_str(), OBS_TEXT_INFO);
 
 		if (show_tunnel_start_note) {
 			obs_properties_add_text(grp, "tunnel_start_note", T_("TunnelStartNote"), OBS_TEXT_INFO);
@@ -727,9 +714,8 @@ namespace ods::ui {
 		if (ts == TunnelState::Running && !turl.empty()) {
 			// URL 表示は「出演者別チャンネル」に集約
 		} else if (ts == TunnelState::Error && !terr.empty()) {
-			char eb[256];
-			snprintf(eb, sizeof(eb), T_("TunnelErrorFmt"), terr.c_str());
-			obs_properties_add_text(grp, "tunnel_error", eb, OBS_TEXT_INFO);
+			const std::string eb = string_printf(T_("TunnelErrorFmt"), terr.c_str());
+			obs_properties_add_text(grp, "tunnel_error", eb.c_str(), OBS_TEXT_INFO);
 		}
 		obs_properties_add_group(props, "grp_tunnel", T_("TunnelGroupTitle"), OBS_GROUP_NORMAL, grp);
 	}
@@ -763,7 +749,7 @@ namespace ods::ui {
 			obs_property_text_set_info_word_wrap(ver_warn_p, true);
 		}
 		int64_t sync_offset_ns = 0;
-		if (try_get_parent_audio_sync_offset_ns(d, sync_offset_ns) &&
+		if (ods::plugin::try_get_parent_audio_sync_offset_ns(d->context, sync_offset_ns) &&
 			sync_offset_ns != REQUIRED_AUDIO_SYNC_OFFSET_NS) {
 			obs_property_t *warn_p = obs_properties_add_text(
 				grp,
@@ -794,9 +780,9 @@ namespace ods::ui {
 			obs_properties_add_text(grp, "rtmp_url", T_("RtmpUrl"), OBS_TEXT_DEFAULT);
 		obs_property_set_enabled(url_p, !auto_mode);
 		add_flow_rtmp_measure_section(grp, d);
-		char master_delay_text[128];
-		snprintf(master_delay_text, sizeof(master_delay_text), T_("MasterDelayFmt"), master_base_delay_ms);
-		obs_properties_add_text(grp, "master_base_delay_display", master_delay_text, OBS_TEXT_INFO);
+		const std::string master_delay_text =
+			string_printf(T_("MasterDelayFmt"), master_base_delay_ms);
+		obs_properties_add_text(grp, "master_base_delay_display", master_delay_text.c_str(), OBS_TEXT_INFO);
 		obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
 	}
 

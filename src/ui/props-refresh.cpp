@@ -9,8 +9,10 @@
 #include <QTimer>
 #include <QWidget>
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace ods::ui {
@@ -21,7 +23,10 @@ namespace ods::ui {
 		struct PropsRefreshCtx {
 			obs_source_t *source = nullptr;
 			uint64_t      seq    = 0;
-			const char   *reason = nullptr;
+			std::string   reason;
+			~PropsRefreshCtx() {
+				if (source) obs_source_release(source);
+			}
 		};
 
 		// スクロール位置の復元に使うスナップショット。
@@ -76,27 +81,22 @@ namespace ods::ui {
 				if (get_props_depth > 0) return;
 
 				uint64_t seq = seq_.fetch_add(1, std::memory_order_relaxed) + 1;
-				auto    *ctx = new PropsRefreshCtx();
+				auto     ctx = std::make_unique<PropsRefreshCtx>();
 				ctx->seq     = seq;
 				ctx->reason  = reason ? reason : "unspecified";
 				ctx->source  = obs_source_get_ref(source);
 				if (!ctx->source) {
-					delete ctx;
 					return;
 				}
 				{
 					std::lock_guard<std::mutex> lk(pending_mtx_);
 					// 破棄済み/破棄中ソースへの再描画キュー混入を避ける。
 					if (blocked_sources_.find(ctx->source) != blocked_sources_.end()) {
-						blog(LOG_INFO, "[obs-delay-stream] props_refresh drop(blocked) seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
-						obs_source_release(ctx->source);
-						delete ctx;
+						blog(LOG_INFO, "[obs-delay-stream] props_refresh drop(blocked) seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason.c_str());
 						return;
 					}
 					if (pending_sources_.find(ctx->source) != pending_sources_.end()) {
-						blog(LOG_INFO, "[obs-delay-stream] props_refresh drop(pending) seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
-						obs_source_release(ctx->source);
-						delete ctx;
+						blog(LOG_INFO, "[obs-delay-stream] props_refresh drop(pending) seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason.c_str());
 						return;
 					}
 					pending_sources_.insert(ctx->source);
@@ -104,11 +104,11 @@ namespace ods::ui {
 
 				if (obs_in_task_thread(OBS_TASK_UI)) {
 					// UI スレッド起点だと同期待ちになりやすいため graphics を挟んでバウンスする。
-					blog(LOG_INFO, "[obs-delay-stream] props_refresh queue(seq=%llu reason=%s via=graphics->ui)", (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
-					obs_queue_task(OBS_TASK_GRAPHICS, task_bounce, ctx, false);
+					blog(LOG_INFO, "[obs-delay-stream] props_refresh queue(seq=%llu reason=%s via=graphics->ui)", (unsigned long long)ctx->seq, ctx->reason.c_str());
+					obs_queue_task(OBS_TASK_GRAPHICS, task_bounce, ctx.release(), false);
 				} else {
-					blog(LOG_INFO, "[obs-delay-stream] props_refresh queue(seq=%llu reason=%s via=ui)", (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
-					obs_queue_task(OBS_TASK_UI, task_refresh_ui, ctx, false);
+					blog(LOG_INFO, "[obs-delay-stream] props_refresh queue(seq=%llu reason=%s via=ui)", (unsigned long long)ctx->seq, ctx->reason.c_str());
+					obs_queue_task(OBS_TASK_UI, task_refresh_ui, ctx.release(), false);
 				}
 			}
 
@@ -123,9 +123,8 @@ namespace ods::ui {
 
 			/// 1件分のプロパティ再描画要求を UI スレッドで実行する。
 			static void task_refresh_ui(void *p) {
-				auto *ctx = static_cast<PropsRefreshCtx *>(p);
+				auto ctx = std::unique_ptr<PropsRefreshCtx>(static_cast<PropsRefreshCtx *>(p));
 				if (!ctx || !ctx->source) {
-					delete ctx;
 					return;
 				}
 				bool  should_update = true;
@@ -142,15 +141,13 @@ namespace ods::ui {
 					should_update = false;
 				}
 				if (should_update) {
-					blog(LOG_INFO, "[obs-delay-stream] props_refresh exec seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
+					blog(LOG_INFO, "[obs-delay-stream] props_refresh exec seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason.c_str());
 					props_ui_with_preserved_scroll([&]() {
 						obs_source_update_properties(ctx->source);
 					});
 				} else {
-					blog(LOG_INFO, "[obs-delay-stream] props_refresh skip seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason ? ctx->reason : "(null)");
+					blog(LOG_INFO, "[obs-delay-stream] props_refresh skip seq=%llu reason=%s", (unsigned long long)ctx->seq, ctx->reason.c_str());
 				}
-				obs_source_release(ctx->source);
-				delete ctx;
 			}
 
 			std::mutex               pending_mtx_;

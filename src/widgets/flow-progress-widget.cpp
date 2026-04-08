@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QWidget>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -48,7 +49,7 @@ namespace ods::widgets {
 
 		/// プレースホルダーを QProgressBar へ差し替える inject 本体。
 		void do_inject(void *param) {
-			auto *ctx = static_cast<InjectCtx *>(param);
+			auto ctx = std::unique_ptr<InjectCtx>(static_cast<InjectCtx *>(param));
 			if (!ctx) return;
 
 			struct Found {
@@ -117,10 +118,10 @@ namespace ods::widgets {
 			if ((found.empty() || replaced < static_cast<int>(found.size())) &&
 				ctx->retries_left > 0) {
 				--ctx->retries_left;
-				QTimer::singleShot(kInjectRetryMs, [ctx]() { do_inject(ctx); });
+				auto *next = ctx.release();
+				QTimer::singleShot(kInjectRetryMs, [next]() { do_inject(next); });
 				return;
 			}
-			delete ctx;
 		}
 
 		// ============================================================
@@ -135,7 +136,7 @@ namespace ods::widgets {
 
 		/// レジストリ経由で対象プログレスバー値を更新する。
 		void do_update(void *param) {
-			auto *ctx = static_cast<UpdateCtx *>(param);
+			auto ctx = std::unique_ptr<UpdateCtx>(static_cast<UpdateCtx *>(param));
 			if (!ctx) return;
 
 			QPointer<QProgressBar> bar;
@@ -145,8 +146,6 @@ namespace ods::widgets {
 				if (it != g_registry.end()) bar = it->second;
 			}
 			if (bar) bar->setValue(ctx->value);
-
-			delete ctx;
 		}
 
 	} // namespace
@@ -161,21 +160,21 @@ namespace ods::widgets {
 		const char       *row_label,
 		int               value) {
 		if (!props || !prop_name || !*prop_name) return nullptr;
-		char buf[512];
-		snprintf(buf, sizeof(buf), "FLOWPROG|%d|%s", value, row_label ? row_label : "");
-		return obs_properties_add_text(props, prop_name, buf, OBS_TEXT_INFO);
+		const std::string payload =
+			"FLOWPROG|" + std::to_string(value) + "|" + (row_label ? row_label : "");
+		return obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
 	}
 
 	void schedule_flow_progress_inject(obs_source_t *source) {
 		if (!source) return;
-		auto *ctx = new InjectCtx(source);
-		obs_queue_task(OBS_TASK_UI, do_inject, ctx, false);
+		auto ctx = std::make_unique<InjectCtx>(source);
+		obs_queue_task(OBS_TASK_UI, do_inject, ctx.release(), false);
 	}
 
 	void update_flow_progress(obs_source_t *source, int value) {
 		if (!source) return;
-		auto *ctx = new UpdateCtx{source, value};
-		obs_queue_task(OBS_TASK_UI, do_update, ctx, false);
+		auto ctx = std::make_unique<UpdateCtx>(UpdateCtx{source, value});
+		obs_queue_task(OBS_TASK_UI, do_update, ctx.release(), false);
 	}
 
 	void flow_progress_unregister_source(obs_source_t *source) {

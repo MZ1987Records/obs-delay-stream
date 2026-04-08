@@ -37,7 +37,6 @@
 #include <memory>
 #include <mutex>
 #include <obs-module.h>
-#include <stdint.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -64,22 +63,6 @@ using ods::network::LatencyResult;
 using ods::network::RtmpProbeResult;
 using namespace ods::core;
 using namespace ods::widgets;
-
-namespace {
-
-	/// 親ソースの音声同期オフセット(ns)を取得する。
-	bool try_get_parent_audio_sync_offset_ns(DelayStreamData *d, int64_t &out_offset_ns) {
-		if (!d || !d->context) return false;
-
-		obs_source_t *parent = obs_filter_get_parent(d->context);
-		if (!parent) parent = obs_filter_get_target(d->context);
-		if (!parent || ods::plugin::is_obs_source_removed(parent)) return false;
-
-		out_offset_ns = obs_source_get_sync_offset(parent);
-		return true;
-	}
-
-} // namespace
 
 // OBS の各コールバックを受け、DelayStreamData のライフサイクルを統括する。
 class DelayStreamFilter {
@@ -126,13 +109,12 @@ void DelayStreamFilter::queue_ui_safe(DelayStreamData                       *d,
 		DelayStreamData                       *d;
 		std::function<void(DelayStreamData *)> fn;
 	};
-	auto *c = new Ctx{d->life_token, d, std::move(fn)};
+	auto c = std::make_unique<Ctx>(Ctx{d->life_token, d, std::move(fn)});
 	obs_queue_task(OBS_TASK_UI, [](void *p) {
-		auto* c = static_cast<Ctx*>(p);
+		auto  c = std::unique_ptr<Ctx>(static_cast<Ctx *>(p));
 		auto life = c->life_token.lock();
 		if (life && life->load(std::memory_order_acquire))
-			c->fn(c->d);
-		delete c; }, c, false);
+			c->fn(c->d); }, c.release(), false);
 }
 
 // 音声同期オフセットを定期的に確認し、UIに表示している値と変化があればプロパティを再描画する。
@@ -144,7 +126,7 @@ void DelayStreamFilter::schedule_audio_sync_check(
 		auto token = life_token_weak.lock();
 		if (!token || !token->load(std::memory_order_acquire)) return;
 		int64_t current = INT64_MIN;
-		try_get_parent_audio_sync_offset_ns(d, current);
+		ods::plugin::try_get_parent_audio_sync_offset_ns(d->context, current);
 		const int64_t last =
 			d->last_rendered_audio_sync_offset_ns.load(std::memory_order_relaxed);
 		if (current != last) {
@@ -183,9 +165,14 @@ void DelayStreamFilter::start_update_check_async(
 				bool                             has_update = false;
 				ods::plugin::LatestReleaseInfo   info;
 			};
-			auto *ctx = new Ctx{life_token_weak, d, ok, has_update, std::move(info)};
+			auto ctx = std::make_unique<Ctx>(Ctx{
+				life_token_weak,
+				d,
+				ok,
+				has_update,
+				std::move(info)});
 			obs_queue_task(OBS_TASK_UI, [](void *p) {
-				auto *ctx = static_cast<Ctx *>(p);
+				auto  ctx = std::unique_ptr<Ctx>(static_cast<Ctx *>(p));
 				auto  life = ctx->life_token.lock();
 				if (life && life->load(std::memory_order_acquire)) {
 					DelayStreamData *d = ctx->d;
@@ -216,8 +203,7 @@ void DelayStreamFilter::start_update_check_async(
 							 "[obs-delay-stream] update check failed: %s",
 							 d->update_check.error().c_str());
 					}
-				}
-				delete ctx; }, ctx, false);
+				} }, ctx.release(), false);
 		}).detach();
 	} catch (...) {
 		d->update_check.inflight.store(false, std::memory_order_release);
@@ -242,7 +228,6 @@ void DelayStreamFilter::schedule_update_check(
 	});
 }
 
-// OBS表示名を返す。
 const char *DelayStreamFilter::get_name(void *) {
 	return "obs-delay-stream";
 }
@@ -404,7 +389,7 @@ void *DelayStreamFilter::create(obs_data_t *settings, obs_source_t *source) {
 
 // フィルタインスタンス破棄時に各コンポーネントを安全に停止する。
 void DelayStreamFilter::destroy(void *data) {
-	auto *d = static_cast<DelayStreamData *>(data);
+	auto d = std::unique_ptr<DelayStreamData>(static_cast<DelayStreamData *>(data));
 	if (!d) return;
 	d->destroying.store(true, std::memory_order_release);
 	if (d->life_token) {
@@ -423,10 +408,9 @@ void DelayStreamFilter::destroy(void *data) {
 		d->rtmp_measure.prober.cancel();
 		d->tunnel.stop();
 		d->router.stop();
-		clear_event_callbacks(d);
+		clear_event_callbacks(d.get());
 	}
-
-	delete d;
+	d.reset();
 	if (release_singleton_slot) {
 		std::lock_guard<std::mutex> lk(g_singleton_mtx);
 		if (g_singleton_owner == my_source && g_singleton_generation == my_gen) {
@@ -435,19 +419,16 @@ void DelayStreamFilter::destroy(void *data) {
 	}
 }
 
-// OBS設定値を内部状態へ同期する。
 void DelayStreamFilter::update(void *data, obs_data_t *settings) {
 	ods::plugin::apply_settings(static_cast<DelayStreamData *>(data), settings);
 }
 
-// マスター遅延適用とチャンネル配信用の音声分岐を行う。
 obs_audio_data *DelayStreamFilter::filter_audio(void *data, obs_audio_data *audio) {
 	return ods::audio::filter_audio_delay_stream(
 		static_cast<DelayStreamData *>(data),
 		audio);
 }
 
-// 選択されたチャンネルの往復レイテンシ計測を開始する。
 bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t *, void *priv) {
 	auto *ctx = static_cast<SubChannelCtx *>(priv);
 	auto *d   = ctx->d;
@@ -460,7 +441,6 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 	return false;
 }
 
-// 指定チャンネルの遅延を設定値と実バッファへ反映する。
 void DelayStreamFilter::apply_sub_base_delay(DelayStreamData *d, int i, double ms) {
 	if (!d || i < 0 || i >= MAX_SUB_CH) return;
 	obs_data_t *settings  = obs_source_get_settings(d->context);
@@ -472,7 +452,6 @@ void DelayStreamFilter::apply_sub_base_delay(DelayStreamData *d, int i, double m
 	d->router.notify_apply_delay(i, d->sub_channels[i].delay_ms, "auto_measure");
 }
 
-// OBSプロパティパネル全体を構築する。
 obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 	obs_properties_t *props = obs_properties_create();
 	if (!data) return props;
@@ -494,7 +473,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 
 	{
 		int64_t sync_offset_ns = INT64_MIN;
-		try_get_parent_audio_sync_offset_ns(d, sync_offset_ns);
+		ods::plugin::try_get_parent_audio_sync_offset_ns(d->context, sync_offset_ns);
 		d->last_rendered_audio_sync_offset_ns.store(sync_offset_ns, std::memory_order_relaxed);
 	}
 
@@ -550,14 +529,12 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 	return props;
 }
 
-// 各設定項目のデフォルト値を定義する。
 void DelayStreamFilter::get_defaults(obs_data_t *settings) {
 	ods::plugin::set_delay_stream_defaults(settings);
 }
 
 static struct obs_source_info delay_stream_filter;
 
-// OBSへ登録するソース情報テーブルを初期化する。
 static void register_source_info() {
 	memset(&delay_stream_filter, 0, sizeof(delay_stream_filter));
 	delay_stream_filter.id             = "delay_stream_filter";
@@ -572,7 +549,6 @@ static void register_source_info() {
 	delay_stream_filter.get_defaults   = DelayStreamFilter::get_defaults;
 }
 
-// プラグイン読み込み時にフィルタを登録する。
 bool obs_module_load(void) {
 	register_source_info();
 	obs_register_source(&delay_stream_filter);

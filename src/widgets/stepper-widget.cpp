@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -216,7 +217,7 @@ namespace ods::widgets {
 
 		/// Stepper プレースホルダーを実ウィジェットへ差し替える。
 		void do_stepper_inject(void *param) {
-			auto *ctx = static_cast<StepperInjectCtx *>(param);
+			auto ctx = std::unique_ptr<StepperInjectCtx>(static_cast<StepperInjectCtx *>(param));
 			if (!ctx)
 				return;
 
@@ -312,12 +313,11 @@ namespace ods::widgets {
 				ctx->retries_left > 0) {
 				// プロパティ構築タイミング差を吸収するため再試行する。
 				--ctx->retries_left;
+				auto *next = ctx.release();
 				QTimer::singleShot(kStepperInjectRetryMs,
-								   [ctx]() { do_stepper_inject(ctx); });
+								   [next]() { do_stepper_inject(next); });
 				return;
 			}
-
-			delete ctx;
 		}
 
 	} // namespace
@@ -346,8 +346,8 @@ namespace ods::widgets {
 	void schedule_stepper_inject(obs_source_t *source) {
 		if (!source)
 			return;
-		auto *ctx = new StepperInjectCtx(source);
-		obs_queue_task(OBS_TASK_UI, do_stepper_inject, ctx, false);
+		auto ctx = std::make_unique<StepperInjectCtx>(source);
+		obs_queue_task(OBS_TASK_UI, do_stepper_inject, ctx.release(), false);
 	}
 
 } // namespace ods::widgets

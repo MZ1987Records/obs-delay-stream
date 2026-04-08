@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -287,7 +288,7 @@ namespace ods::widgets {
 
 		/// 色ボタン行プレースホルダーを実ウィジェットへ置換する。
 		void do_color_button_row_inject(void *param) {
-			auto *ctx = static_cast<ColorButtonInjectCtx *>(param);
+			auto ctx = std::unique_ptr<ColorButtonInjectCtx>(static_cast<ColorButtonInjectCtx *>(param));
 			if (!ctx)
 				return;
 
@@ -355,12 +356,11 @@ namespace ods::widgets {
 				ctx->retries_left > 0) {
 				// UI ツリー反映待ちの取りこぼしを吸収するため短時間で再試行する。
 				--ctx->retries_left;
+				auto *next = ctx.release();
 				QTimer::singleShot(kColorButtonRowInjectRetryMs,
-								   [ctx]() { do_color_button_row_inject(ctx); });
+								   [next]() { do_color_button_row_inject(next); });
 				return;
 			}
-
-			delete ctx;
 		}
 
 	} // namespace
@@ -447,8 +447,8 @@ namespace ods::widgets {
 	void schedule_color_button_row_inject(obs_source_t *source) {
 		if (!source)
 			return;
-		auto *ctx = new ColorButtonInjectCtx(source);
-		obs_queue_task(OBS_TASK_UI, do_color_button_row_inject, ctx, false);
+		auto ctx = std::make_unique<ColorButtonInjectCtx>(source);
+		obs_queue_task(OBS_TASK_UI, do_color_button_row_inject, ctx.release(), false);
 	}
 
 } // namespace ods::widgets

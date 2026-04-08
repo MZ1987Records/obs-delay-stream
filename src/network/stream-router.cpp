@@ -1,5 +1,7 @@
 #include "network/stream-router.hpp"
 
+#include "core/string-format.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -369,9 +371,12 @@ namespace ods::network {
 		if (audio_codec_.load(std::memory_order_relaxed) == 0)
 			opus_flush_pending_.store(true, std::memory_order_release);
 
-		char buf[160];
-		snprintf(buf, sizeof(buf), "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}", ms, use_reason);
-		broadcast_text(stream_id_, ch, buf);
+		const std::string reason_escaped = json_escape(use_reason);
+		const std::string msg            = string_printf(
+			"{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
+			ms,
+			reason_escaped.c_str());
+		broadcast_text(stream_id_, ch, msg);
 	}
 
 	size_t StreamRouter::client_count(int ch) const {
@@ -386,9 +391,8 @@ namespace ods::network {
 		std::string                 code_str;
 		if (ch0 >= 0 && ch0 < MAX_SUB_CH) code_str = sub_code_[ch0];
 		if (code_str.empty()) code_str = "(code未設定)";
-		char buf[256];
-		snprintf(buf, sizeof(buf), "ws://%s:%d/%s/%s", host.c_str(), (int)port_, stream_id_.empty() ? "(配信ID未設定)" : stream_id_.c_str(), code_str.c_str());
-		return buf;
+		const std::string sid = stream_id_.empty() ? "(配信ID未設定)" : stream_id_;
+		return "ws://" + host + ":" + std::to_string(static_cast<int>(port_)) + "/" + sid + "/" + code_str;
 	}
 
 	void StreamRouter::set_audio_config(const AudioConfig &cfg) {
@@ -764,10 +768,13 @@ namespace ods::network {
 			}
 		}
 		if (cached_delay >= 0.0 && cached_delay_reason == "auto_measure") {
-			char buf[160];
-			snprintf(buf, sizeof(buf), "{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}", cached_delay, cached_delay_reason.c_str());
+			const std::string reason_escaped = json_escape(cached_delay_reason);
+			const std::string msg            = string_printf(
+				"{\"type\":\"apply_delay\",\"ms\":%.1f,\"reason\":\"%s\"}",
+				cached_delay,
+				reason_escaped.c_str());
 			try {
-				srv->send(h, std::string(buf), websocketpp::frame::opcode::text);
+				srv->send(h, msg, websocketpp::frame::opcode::text);
 			} catch (...) {
 			}
 		}
@@ -1027,13 +1034,16 @@ namespace ods::network {
 				if (!cs || !cs->measuring) break;
 				auto srv = server_ptr_;
 				if (!srv) break;
-				auto t_now          = DurationMs(Clock::now().time_since_epoch()).count();
-				cs->ping_times[seq] = Clock::now();
-				char buf[128];
-				snprintf(buf, sizeof(buf), "{\"type\":\"ping\",\"seq\":%d,\"t\":%.3f,\"total\":%d}", seq, t_now, num_pings);
+				auto t_now                 = DurationMs(Clock::now().time_since_epoch()).count();
+				cs->ping_times[seq]        = Clock::now();
+				const std::string ping_msg = string_printf(
+					"{\"type\":\"ping\",\"seq\":%d,\"t\":%.3f,\"total\":%d}",
+					seq,
+					t_now,
+					num_pings);
 				for (auto &hdl : cs->conns) {
 					try {
-						srv->send(hdl, std::string(buf), websocketpp::frame::opcode::text);
+						srv->send(hdl, ping_msg, websocketpp::frame::opcode::text);
 					} catch (...) {
 					}
 				}
@@ -1147,19 +1157,19 @@ namespace ods::network {
 	}
 
 	std::string StreamRouter::format_latency_result_json(const LatencyResult &r) {
-		char buf[300];
-		snprintf(buf, sizeof(buf), "{\"type\":\"latency_result\","
-								   "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
-								   "\"min\":%.1f,\"max\":%.1f,"
-								   "\"samples\":%d,\"used_samples\":%d,\"method\":\"%s\"}",
-				 r.avg_rtt_ms,
-				 r.avg_latency_ms,
-				 r.min_rtt_ms,
-				 r.max_rtt_ms,
-				 r.samples,
-				 r.used_samples,
-				 r.method);
-		return buf;
+		const char       *method_raw = r.method ? r.method : "";
+		const std::string method     = json_escape(method_raw);
+		return string_printf("{\"type\":\"latency_result\","
+							 "\"avg_rtt\":%.1f,\"one_way\":%.1f,"
+							 "\"min\":%.1f,\"max\":%.1f,"
+							 "\"samples\":%d,\"used_samples\":%d,\"method\":\"%s\"}",
+							 r.avg_rtt_ms,
+							 r.avg_latency_ms,
+							 r.min_rtt_ms,
+							 r.max_rtt_ms,
+							 r.samples,
+							 r.used_samples,
+							 method.c_str());
 	}
 
 	void StreamRouter::broadcast_text(const std::string &sid, int ch, const std::string &msg) {
