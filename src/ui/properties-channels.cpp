@@ -10,6 +10,7 @@
 
 #include <obs-module.h>
 #include <string>
+#include <utility>
 
 #define T_(s) obs_module_text(s)
 
@@ -22,7 +23,7 @@ namespace ods::ui::channels {
 
 	namespace {
 
-		/// サブチャンネルを1つ追加し、初期メモ/コードを設定する。
+		// サブチャンネルを1つ追加し、初期メモ/コードを設定する。
 		bool cb_sub_add(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
@@ -63,7 +64,7 @@ namespace ods::ui::channels {
 			return false;
 		}
 
-		/// 指定サブチャンネルを削除し、後続チャンネル設定を前詰めする。
+		// 指定サブチャンネルを削除し、後続チャンネル設定を前詰めする。
 		bool cb_sub_remove(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *ctx = static_cast<SubChannelCtx *>(priv);
 			if (!ctx || !ctx->d) return false;
@@ -130,6 +131,81 @@ namespace ods::ui::channels {
 			return false;
 		}
 
+		// 指定サブチャンネルと直前サブチャンネルの内容を入れ替える。
+		bool cb_sub_swap_up(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *ctx = static_cast<SubChannelCtx *>(priv);
+			if (!ctx || !ctx->d) return false;
+			auto *d = ctx->d;
+			if (d->router_running.load()) return false;
+			int cur = d->sub_ch_count;
+			int ch  = ctx->ch;
+			if (ch <= 0 || ch >= cur) return false;
+			int prev = ch - 1;
+
+			obs_data_t *s = obs_source_get_settings(d->context);
+			if (!s) return false;
+			const auto prev_delay_key = ods::plugin::make_sub_delay_key(prev);
+			const auto ch_delay_key   = ods::plugin::make_sub_delay_key(ch);
+			const auto prev_adj_key   = ods::plugin::make_sub_adjust_key(prev);
+			const auto ch_adj_key     = ods::plugin::make_sub_adjust_key(ch);
+			const auto prev_memo_key  = ods::plugin::make_sub_memo_key(prev);
+			const auto ch_memo_key    = ods::plugin::make_sub_memo_key(ch);
+			const auto prev_code_key  = ods::plugin::make_sub_code_key(prev);
+			const auto ch_code_key    = ods::plugin::make_sub_code_key(ch);
+
+			const double      prev_delay    = obs_data_get_double(s, prev_delay_key.data());
+			const double      ch_delay      = obs_data_get_double(s, ch_delay_key.data());
+			const double      prev_adj      = obs_data_get_double(s, prev_adj_key.data());
+			const double      ch_adj        = obs_data_get_double(s, ch_adj_key.data());
+			const char       *prev_memo_raw = obs_data_get_string(s, prev_memo_key.data());
+			const char       *ch_memo_raw   = obs_data_get_string(s, ch_memo_key.data());
+			const char       *prev_code_raw = obs_data_get_string(s, prev_code_key.data());
+			const char       *ch_code_raw   = obs_data_get_string(s, ch_code_key.data());
+			const std::string prev_memo     = prev_memo_raw ? prev_memo_raw : "";
+			const std::string ch_memo       = ch_memo_raw ? ch_memo_raw : "";
+			const std::string prev_code     = prev_code_raw ? prev_code_raw : "";
+			const std::string ch_code       = ch_code_raw ? ch_code_raw : "";
+
+			obs_data_set_double(s, prev_delay_key.data(), ch_delay);
+			obs_data_set_double(s, ch_delay_key.data(), prev_delay);
+			obs_data_set_double(s, prev_adj_key.data(), ch_adj);
+			obs_data_set_double(s, ch_adj_key.data(), prev_adj);
+			obs_data_set_string(s, prev_memo_key.data(), ch_memo.c_str());
+			obs_data_set_string(s, ch_memo_key.data(), prev_memo.c_str());
+			obs_data_set_string(s, prev_code_key.data(), ch_code.c_str());
+			obs_data_set_string(s, ch_code_key.data(), prev_code.c_str());
+			obs_data_release(s);
+
+			std::swap(d->sub_channels[prev].delay_ms, d->sub_channels[ch].delay_ms);
+			std::swap(d->sub_channels[prev].adjust_ms, d->sub_channels[ch].adjust_ms);
+			ods::audio::apply_sub_delay_to_buffer(d, prev);
+			ods::audio::apply_sub_delay_to_buffer(d, ch);
+			d->sub_channels[prev].measure.reset();
+			d->sub_channels[ch].measure.reset();
+			d->router.set_sub_memo(prev, ch_memo);
+			d->router.set_sub_memo(ch, prev_memo);
+			d->router.set_sub_code(prev, ch_code);
+			d->router.set_sub_code(ch, prev_code);
+
+			blog(LOG_INFO, "[obs-delay-stream] cb_sub_swap_up ch=%d <-> ch=%d", ch + 1, prev + 1);
+			d->flow.reset();
+			d->request_props_refresh("cb_sub_swap_up");
+			return false;
+		}
+
+		// 指定サブチャンネルと直後サブチャンネルの内容を入れ替える。
+		bool cb_sub_swap_down(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *ctx = static_cast<SubChannelCtx *>(priv);
+			if (!ctx || !ctx->d) return false;
+			auto *d = ctx->d;
+			if (d->router_running.load()) return false;
+			int ch  = ctx->ch;
+			int cur = d->sub_ch_count;
+			if (ch < 0 || ch >= cur - 1) return false;
+			SubChannelCtx next_ctx{d, ch + 1};
+			return cb_sub_swap_up(nullptr, nullptr, &next_ctx);
+		}
+
 	} // namespace
 
 	void add_sub_channels_group(obs_properties_t *props, DelayStreamData *d) {
@@ -142,19 +218,24 @@ namespace ods::ui::channels {
 			const auto        memo_key = ods::plugin::make_sub_memo_key(i);
 			const std::string lt       = "Ch." + std::to_string(i + 1);
 
-			const auto row_prop       = ods::plugin::make_sub_remove_row_key(i);
-			const bool input_enabled  = !d->router_running.load();
-			const bool button_enabled = !(d->router_running.load() || sub_count <= 1);
-			obs_properties_add_text_button(
+			const auto                    row_prop      = ods::plugin::make_sub_remove_row_key(i);
+			const bool                    input_enabled = !d->router_running.load();
+			const bool                    can_remove    = !(d->router_running.load() || sub_count <= 1);
+			const bool                    can_up        = !(d->router_running.load() || i <= 0);
+			const bool                    can_down      = !(d->router_running.load() || i >= (sub_count - 1));
+			const ObsTextButtonActionSpec row_buttons[] = {
+				{T_("SubRemove"), cb_sub_remove, &d->sub_btn_ctx[i], can_remove},
+				{T_("SubMoveUp"), cb_sub_swap_up, &d->sub_btn_ctx[i], can_up},
+				{T_("SubMoveDown"), cb_sub_swap_down, &d->sub_btn_ctx[i], can_down},
+			};
+			obs_properties_add_text_buttons(
 				grp,
 				row_prop.data(),
 				lt.c_str(),
 				memo_key.data(),
-				T_("SubRemove"),
-				cb_sub_remove,
-				&d->sub_btn_ctx[i],
+				row_buttons,
+				sizeof(row_buttons) / sizeof(row_buttons[0]),
 				input_enabled,
-				button_enabled,
 				SUB_MEMO_MAX_CHARS);
 		}
 		obs_property_t *spc_bottom = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
