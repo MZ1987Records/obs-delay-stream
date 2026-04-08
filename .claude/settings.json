@@ -2,6 +2,8 @@
   "env": {
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "true"
   },
+  "effortLevel": "high",
+  "showThinkingSummaries": true,
   "permissions": {
     "allow": [
       "Read",
