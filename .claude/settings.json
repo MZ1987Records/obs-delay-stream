@@ -33,6 +33,7 @@
       "Bash(uniq *)",
       "Bash(pwd)",
       "Bash(sed *)",
+      "Bash(jq *)",
       "Bash(xargs grep *)",
       "Bash(xargs wc *)",
       "Bash(cmake --build build *)",
