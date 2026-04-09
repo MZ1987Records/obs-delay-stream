@@ -41,9 +41,9 @@ namespace ods::core {
 	static constexpr int CLOUDFLARED_POLL_INTV_MS  = 500;  ///< URL 確認のポーリング間隔 (ms)
 	static constexpr int TUNNEL_KILL_TIMEOUT_MS    = 2000; ///< トンネルプロセス終了待機のタイムアウト (ms)
 
-	// UI 色（操作ボタン）
-	static constexpr const char *UI_COLOR_START_BUTTON_BG = "#1E7F34"; ///< 開始ボタンの背景色
-	static constexpr const char *UI_COLOR_STOP_BUTTON_BG  = "#8B1E1E"; ///< 停止ボタンの背景色
-	static constexpr const char *UI_COLOR_BUTTON_TEXT     = "#FFFFFF"; ///< ボタンテキストの色
+	// UI 色（ステータスインジケーター）
+	static constexpr const char *UI_COLOR_STATUS_DOT_OK   = "#22CC44"; ///< 起動中・正常ステータスの丸アイコン色
+	static constexpr const char *UI_COLOR_STATUS_DOT_BUSY = "#FFAA00"; ///< 開始中・処理中ステータスの丸アイコン色
+	static constexpr const char *UI_COLOR_STATUS_DOT_OFF  = "#888888"; ///< 停止中ステータスの丸アイコン色
 
 } // namespace ods::core

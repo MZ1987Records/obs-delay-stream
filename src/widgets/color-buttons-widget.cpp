@@ -115,7 +115,7 @@ namespace ods::widgets {
 		class ColorButtonRow : public QWidget {
 		public:
 
-			ColorButtonRow(obs_source_t *source, const char *binding_id, const std::vector<ParsedButtonSpec> &buttons, QWidget *parent = nullptr)
+			ColorButtonRow(obs_source_t *source, const char *binding_id, const std::vector<ParsedButtonSpec> &buttons, const QString &status_dot_color, const QString &status_text, QWidget *parent = nullptr)
 				: QWidget(parent),
 				  source_(source ? obs_source_get_ref(source) : nullptr),
 				  binding_id_(binding_id ? binding_id : "") {
@@ -160,6 +160,25 @@ namespace ods::widgets {
 					lay->addWidget(button);
 					buttons_.push_back(button);
 				}
+
+				// ステータス表示（丸アイコン＋テキスト）をボタン群の右側に追加する。
+				if (!status_text.isEmpty()) {
+					QString html;
+					if (!status_dot_color.isEmpty()) {
+						html = QStringLiteral("<span style='color: ") +
+							   status_dot_color.toHtmlEscaped() +
+							   QStringLiteral("'>&#9679;</span> ") +
+							   status_text.toHtmlEscaped();
+					} else {
+						html = status_text.toHtmlEscaped();
+					}
+					auto *status_label = new QLabel(html);
+					status_label->setTextFormat(Qt::RichText);
+					// ボタン群との間に余白を確保する。
+					status_label->setContentsMargins(8, 0, 0, 0);
+					lay->addWidget(status_label);
+				}
+
 				// 余白側へストレッチを入れて、固定幅ボタン群を常に左寄せにする。
 				lay->addStretch(1);
 				updateButtonWidths();
@@ -264,7 +283,9 @@ namespace ods::widgets {
 		bool parse_color_button_payload(const QString                 &text,
 										QString                       &binding_id,
 										QString                       &row_label,
-										std::vector<ParsedButtonSpec> &buttons) {
+										std::vector<ParsedButtonSpec> &buttons,
+										QString                       &status_dot_color,
+										QString                       &status_text) {
 			QStringList fields;
 			if (!split_escaped_pipe_fields(text, fields))
 				return false;
@@ -293,6 +314,9 @@ namespace ods::widgets {
 				spec.text_color = fields[idx++];
 				buttons.push_back(spec);
 			}
+			// ステータス表示用の 2 フィールドはオプション（後方互換）。
+			status_dot_color = (fields.size() >= expected_fields + 2) ? fields[expected_fields] : QString{};
+			status_text      = (fields.size() >= expected_fields + 2) ? fields[expected_fields + 1] : QString{};
 			return true;
 		}
 
@@ -326,7 +350,9 @@ namespace ods::widgets {
 				QString                       binding_id;
 				QString                       row_label;
 				std::vector<ParsedButtonSpec> buttons;
-				if (!parse_color_button_payload(ph.text, binding_id, row_label, buttons))
+				QString                       status_dot_color;
+				QString                       status_text;
+				if (!parse_color_button_payload(ph.text, binding_id, row_label, buttons, status_dot_color, status_text))
 					continue;
 
 				QWidget *parent = ph.label->parentWidget();
@@ -346,6 +372,8 @@ namespace ods::widgets {
 					ctx->source,
 					binding_id.toUtf8().constData(),
 					buttons,
+					status_dot_color,
+					status_text,
 					parent);
 
 				form->removeRow(row);
@@ -380,7 +408,9 @@ namespace ods::widgets {
 		const char               *prop_name,
 		const char               *label,
 		const ObsColorButtonSpec *buttons,
-		size_t                    button_count) {
+		size_t                    button_count,
+		const char               *status_dot_color,
+		const char               *status_text) {
 		if (!props || !prop_name || !*prop_name || !buttons || button_count == 0)
 			return nullptr;
 		if (obs_properties_get(props, prop_name))
@@ -441,6 +471,12 @@ namespace ods::widgets {
 			payload += "|";
 			payload += escape_field(spec.text_color ? spec.text_color : "");
 		}
+
+		// ステータス表示フィールドを末尾に追加する（オプション）。
+		payload += "|";
+		payload += escape_field(status_dot_color ? status_dot_color : "");
+		payload += "|";
+		payload += escape_field(status_text ? status_text : "");
 
 		obs_property_t *placeholder =
 			obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
