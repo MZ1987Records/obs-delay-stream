@@ -68,6 +68,13 @@ namespace ods::plugin {
 		return fn(source);
 	}
 
+	bool is_obs_streaming_active() {
+		using streaming_active_fn = bool (*)();
+		static streaming_active_fn fn =
+			find_obs_symbol<streaming_active_fn>("obs_frontend_streaming_active");
+		return fn ? fn() : false;
+	}
+
 	std::string get_obs_stream_url() {
 		using get_streaming_service_fn = obs_service_t *(*)();
 		using service_get_settings_fn  = obs_data_t *(*)(obs_service_t *);

@@ -70,6 +70,8 @@ add_library(obs-delay-stream MODULE
   src/ui/properties-builder.cpp
   src/widgets/stepper-widget.cpp
   src/widgets/text-button-widget.cpp
+  src/widgets/path-mode-row-widget.cpp
+  src/widgets/mode-text-row-widget.cpp
   src/widgets/color-buttons-widget.cpp
   src/widgets/pulldown-row-widget.cpp
   src/widgets/delay-table-widget.cpp
@@ -79,6 +81,7 @@ add_library(obs-delay-stream MODULE
   src/network/stream-router.cpp
   src/network/stream-router-utils.cpp
   src/network/rtmp-prober.cpp
+  src/network/rtsp-e2e-prober.cpp
   src/tunnel/tunnel-manager.cpp
   src/sync/sync-flow.cpp
 )

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 /**
  * 遅延バッファ・共通定数など、プラグイン全体で共有するコアユーティリティ。
  */
@@ -21,6 +23,14 @@ namespace ods::core {
 	// RTMP プローブパラメータ
 	static constexpr int RTMP_PROBE_CNT  = 10;  ///< プローブ試行回数
 	static constexpr int RTMP_PROBE_INTV = 300; ///< プローブ試行間隔 (ms)
+
+	// RTSP E2E 計測パラメータ
+	static constexpr int     RTSP_E2E_TIMEOUT_S            = 60;    ///< インパルス検出タイムアウト (s)
+	static constexpr int     RTSP_E2E_READY_TIMEOUT_S      = 15;    ///< RTSP 受信開始待機タイムアウト (s)
+	static constexpr int     RTSP_E2E_MEASURE_SETS_DEFAULT = 5;     ///< 接続・計測・切断のデフォルト反復回数
+	static constexpr int     RTSP_IMPULSE_SAMPLES          = 256;   ///< インパルス長 (sample/ch)
+	static constexpr float   RTSP_IMPULSE_AMP              = 0.9f;  ///< インパルス振幅
+	static constexpr int16_t RTSP_DETECT_THRESHOLD         = 28000; ///< 検出閾値 (int16)
 
 	// ネットワーク・ソケット
 	static constexpr int SOCKET_TIMEOUT_MS = 2000; ///< TCP 接続タイムアウト (ms)

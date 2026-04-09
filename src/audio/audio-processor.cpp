@@ -3,6 +3,8 @@
 #include "plugin/plugin-settings.hpp"
 #include "plugin/plugin-state.hpp"
 
+#include <algorithm>
+
 namespace ods::audio {
 
 	using namespace ods::core;
@@ -94,6 +96,18 @@ namespace ods::audio {
 				for (size_t f = 0; f < frames; ++f)
 					dst[f] = out[f * num_channels + c];
 			}
+
+			// RTSP E2E 計測用インパルスは 1 回だけ注入する。
+			if (d->inject_impulse.exchange(false, std::memory_order_acq_rel)) {
+				const int inject_n = std::min<int>(RTSP_IMPULSE_SAMPLES, static_cast<int>(frames));
+				for (uint32_t c = 0; c < num_channels; ++c) {
+					if (!audio->data[c]) continue;
+					float *dst = reinterpret_cast<float *>(audio->data[c]);
+					for (int i = 0; i < inject_n; ++i)
+						dst[i] = RTSP_IMPULSE_AMP;
+				}
+			}
+
 			if (ws_send_enabled && router_running && has_sid) {
 				for (int i = 0; i < sub_count; ++i) {
 					d->sub_channels[i].buf.process(in, sub_buf, frames);

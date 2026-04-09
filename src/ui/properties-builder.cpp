@@ -12,12 +12,17 @@
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
+#include "widgets/mode-text-row-widget.hpp"
+#include "widgets/path-mode-row-widget.hpp"
 #include "widgets/pulldown-row-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 #include "widgets/text-button-widget.hpp"
 
 #include <cstdint>
+#include <cstring>
+#include <memory>
 #include <string>
+#include <thread>
 
 #define T_(s) obs_module_text(s)
 
@@ -35,12 +40,56 @@ namespace ods::ui {
 	namespace {
 		using ods::plugin::extract_host_from_url;
 		using ods::plugin::make_sub_memo_key;
+		using ods::plugin::to_rtsp_url_from_rtmp;
 
 		static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
+		static constexpr char    kEmptyAbsolutePathSentinel[]  = "__OBS_DELAY_STREAM_EMPTY_ABSOLUTE_PATH__";
 
 		// ============================================================
 		// namespace ローカル補助関数
 		// ============================================================
+
+		// 設定に基づいて RTMP URL から RTSP URL を同期する。
+		void sync_rtsp_url_from_rtmp_if_needed(obs_data_t *settings) {
+			if (!settings) return;
+			if (!obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey)) return;
+			const char *raw_rtmp = obs_data_get_string(settings, "rtmp_url");
+			std::string rtmp_url = raw_rtmp ? raw_rtmp : "";
+			std::string rtsp_url = to_rtsp_url_from_rtmp(rtmp_url);
+			if (!rtsp_url.empty()) {
+				obs_data_set_string(settings, ods::plugin::kRtspUrlKey, rtsp_url.c_str());
+			}
+		}
+
+		// RTSP URL 入力欄の有効/無効を同期する。
+		void sync_rtsp_url_enabled(obs_properties_t *props, obs_data_t *settings) {
+			if (!props || !settings) return;
+			const bool use_rtmp = obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey);
+			if (auto *rtsp_p = obs_properties_get(props, ods::plugin::kRtspUrlKey)) {
+				obs_property_set_enabled(rtsp_p, !use_rtmp);
+			}
+		}
+
+		// モード設定と入力値から実際に解決へ渡すパスヒント文字列を生成する。
+		std::string build_exe_path_hint(obs_data_t *settings,
+										const char *mode_key,
+										const char *path_key) {
+			if (!settings || !mode_key || !path_key) return "auto";
+			const auto mode = ods::plugin::normalize_exe_path_mode(
+				static_cast<int>(obs_data_get_int(settings, mode_key)));
+			if (mode == ods::plugin::ExePathMode::Auto) {
+				return "auto";
+			}
+			if (mode == ods::plugin::ExePathMode::FromPath) {
+				return ods::plugin::kPathModeFromEnvPath;
+			}
+			const char *raw = obs_data_get_string(settings, path_key);
+			if (!raw || !*raw) return kEmptyAbsolutePathSentinel;
+			if (_stricmp(raw, "auto") == 0 || _stricmp(raw, ods::plugin::kPathModeFromEnvPath) == 0) {
+				return kEmptyAbsolutePathSentinel;
+			}
+			return raw;
+		}
 
 		// ============================================================
 		// static コールバック（properties UI）
@@ -55,12 +104,36 @@ namespace ods::ui {
 			if (auto_new) {
 				ods::plugin::maybe_autofill_rtmp_url(settings, true);
 			}
+			sync_rtsp_url_from_rtmp_if_needed(settings);
 			if (props) {
 				if (auto *url_p = obs_properties_get(props, "rtmp_url")) {
 					obs_property_set_enabled(url_p, !auto_new);
 				}
+				sync_rtsp_url_enabled(props, settings);
 			}
-			return true;
+			return false;
+		}
+
+		// RTSP URL を RTMP URL から自動生成するかどうかを切り替える。
+		bool cb_rtsp_use_rtmp_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+			(void)priv;
+			if (!settings) return false;
+			if (obs_data_get_bool(settings, "rtmp_url_auto")) {
+				ods::plugin::maybe_autofill_rtmp_url(settings, true);
+			}
+			sync_rtsp_url_from_rtmp_if_needed(settings);
+			sync_rtsp_url_enabled(props, settings);
+			return false;
+		}
+
+		// RTMP URL 編集時に、必要なら RTSP URL へ自動同期する。
+		bool cb_rtmp_url_changed(void *priv, obs_properties_t *, obs_property_t *, obs_data_t *settings) {
+			(void)priv;
+			if (!settings) return false;
+			const bool use_rtmp_for_rtsp = obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey);
+			sync_rtsp_url_from_rtmp_if_needed(settings);
+			if (!use_rtmp_for_rtsp) return false;
+			return false;
 		}
 
 		// WebSocket サーバーを起動し、状態表示を更新する。
@@ -95,11 +168,62 @@ namespace ods::ui {
 			if (!d || !d->context) return false;
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (!s) return false;
-			const char *exe = obs_data_get_string(s, "cloudflared_exe_path");
+			const std::string exe = build_exe_path_hint(
+				s,
+				ods::plugin::kCloudflaredExePathModeKey,
+				ods::plugin::kCloudflaredExePathKey);
 			obs_data_release(s);
 			int ws_port = d->ws_port.load(std::memory_order_relaxed);
-			d->tunnel.start(exe ? exe : "", ws_port);
+			d->tunnel.start(exe, ws_port);
 			d->request_props_refresh_for_tabs({2}, "cb_tunnel_start");
+			return false;
+		}
+
+		// cloudflared バイナリを既定配置先へ非同期ダウンロードする。
+		bool cb_cloudflared_download(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *d = static_cast<DelayStreamData *>(priv);
+			if (!d || !d->context) return false;
+
+			bool expected = false;
+			if (!d->manual_cloudflared_download_running.compare_exchange_strong(
+					expected,
+					true,
+					std::memory_order_acq_rel)) {
+				return false;
+			}
+			d->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.begin");
+
+			auto life = std::weak_ptr<std::atomic<bool>>(d->life_token);
+			try {
+				std::thread([d, life]() {
+					std::string out_path;
+					std::string err;
+					const bool  ok =
+						ods::tunnel::TunnelManager::ensure_auto_cloudflared_path(out_path, err);
+					if (!ok) {
+						blog(LOG_WARNING,
+							 "[obs-delay-stream] cloudflared download failed: %s",
+							 err.c_str());
+					}
+
+					struct UiCtx {
+						std::weak_ptr<std::atomic<bool>> life_token;
+						DelayStreamData                 *data;
+					};
+					auto ui_ctx = std::make_unique<UiCtx>(UiCtx{life, d});
+					obs_queue_task(OBS_TASK_UI, [](void *param) {
+						auto ctx = std::unique_ptr<UiCtx>(static_cast<UiCtx *>(param));
+						auto token = ctx->life_token.lock();
+						if (!token || !token->load(std::memory_order_acquire)) return;
+
+						ctx->data->manual_cloudflared_download_running.store(false, std::memory_order_release);
+						ods::plugin::maybe_persist_cloudflared_path_after_auto_ready(ctx->data->context);
+						ctx->data->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.done"); }, ui_ctx.release(), false);
+				}).detach();
+			} catch (...) {
+				d->manual_cloudflared_download_running.store(false, std::memory_order_release);
+				d->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.spawn_error");
+			}
 			return false;
 		}
 
@@ -130,12 +254,81 @@ namespace ods::ui {
 			return false;
 		}
 
-		// RTMP 計測フローを開始する。
-		bool cb_flow_start_rtmp(obs_properties_t *, obs_property_t *, void *priv) {
+		// RTSP E2E 計測フローを開始する。
+		bool cb_flow_start_rtsp_e2e(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
-			if (!d) return false;
-			std::string url = ods::plugin::resolve_rtmp_url_from_source(d->context);
-			d->flow.start_rtmp_measurement(url);
+			if (!d || !d->context) return false;
+			obs_data_t *settings = obs_source_get_settings(d->context);
+			if (!settings) return false;
+			bool auto_mode = obs_data_get_bool(settings, "rtmp_url_auto");
+			if (auto_mode) {
+				ods::plugin::maybe_autofill_rtmp_url(settings, true);
+			}
+			const bool  use_rtmp_for_rtsp = obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey);
+			std::string rtsp_url;
+			if (use_rtmp_for_rtsp) {
+				const char *raw_rtmp_url = obs_data_get_string(settings, "rtmp_url");
+				rtsp_url                 = to_rtsp_url_from_rtmp(raw_rtmp_url ? raw_rtmp_url : "");
+				if (!rtsp_url.empty()) {
+					obs_data_set_string(settings, ods::plugin::kRtspUrlKey, rtsp_url.c_str());
+				}
+			} else {
+				const char *raw_rtsp_url = obs_data_get_string(settings, ods::plugin::kRtspUrlKey);
+				rtsp_url                 = raw_rtsp_url ? raw_rtsp_url : "";
+			}
+			std::string ffmpeg_path = build_exe_path_hint(
+				settings,
+				ods::plugin::kFfmpegExePathModeKey,
+				ods::plugin::kFfmpegExePathKey);
+			obs_data_release(settings);
+			d->flow.start_rtsp_e2e_measurement(rtsp_url, ffmpeg_path, *d);
+			return false;
+		}
+
+		// ffmpeg バイナリを既定配置先へ非同期ダウンロードする。
+		bool cb_ffmpeg_download(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *d = static_cast<DelayStreamData *>(priv);
+			if (!d || !d->context) return false;
+
+			bool expected = false;
+			if (!d->manual_ffmpeg_download_running.compare_exchange_strong(
+					expected,
+					true,
+					std::memory_order_acq_rel)) {
+				return false;
+			}
+			d->request_props_refresh_for_tabs({4}, "cb_ffmpeg_download.begin");
+
+			auto life = std::weak_ptr<std::atomic<bool>>(d->life_token);
+			try {
+				std::thread([d, life]() {
+					std::string out_path;
+					std::string err;
+					const bool  ok =
+						ods::network::RtspE2eProber::ensure_auto_ffmpeg_path(out_path, err);
+					if (!ok) {
+						blog(LOG_WARNING,
+							 "[obs-delay-stream] ffmpeg download failed: %s",
+							 err.c_str());
+					}
+
+					struct UiCtx {
+						std::weak_ptr<std::atomic<bool>> life_token;
+						DelayStreamData                 *data;
+					};
+					auto ui_ctx = std::make_unique<UiCtx>(UiCtx{life, d});
+					obs_queue_task(OBS_TASK_UI, [](void *param) {
+						auto ctx = std::unique_ptr<UiCtx>(static_cast<UiCtx *>(param));
+						auto token = ctx->life_token.lock();
+						if (!token || !token->load(std::memory_order_acquire)) return;
+
+						ctx->data->manual_ffmpeg_download_running.store(false, std::memory_order_release);
+						ctx->data->request_props_refresh_for_tabs({4}, "cb_ffmpeg_download.done"); }, ui_ctx.release(), false);
+				}).detach();
+			} catch (...) {
+				d->manual_ffmpeg_download_running.store(false, std::memory_order_release);
+				d->request_props_refresh_for_tabs({4}, "cb_ffmpeg_download.spawn_error");
+			}
 			return false;
 		}
 
@@ -144,6 +337,7 @@ namespace ods::ui {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
 			d->flow.reset();
+			d->inject_impulse.store(false, std::memory_order_release);
 			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_reset");
 			return false;
 		}
@@ -193,60 +387,73 @@ namespace ods::ui {
 		// private 補助関数
 		// ============================================================
 
-		// RTMP計測セクションのボタン群と状態表示を構築する。
-		void add_flow_rtmp_measure_section(obs_properties_t *grp, DelayStreamData *d) {
+		// RTSP E2E 計測セクションのボタン群と状態表示を構築する。
+		void add_flow_rtsp_e2e_measure_section(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
 
-			FlowPhase  phase             = d->flow.phase();
-			FlowResult res               = d->flow.result();
-			const bool is_complete       = (phase == FlowPhase::Complete);
-			const bool is_ws_done        = (phase == FlowPhase::WsDone);
-			const bool is_rtmp_measuring = (phase == FlowPhase::RtmpMeasuring);
-			const bool is_rtmp_done      = (phase == FlowPhase::RtmpDone);
-			const bool can_start_rtmp =
-				is_ws_done || is_rtmp_done || is_complete;
+			const FlowPhase  phase                 = d->flow.phase();
+			const FlowResult res                   = d->flow.result();
+			const bool       is_rtsp_e2e_measuring = (phase == FlowPhase::RtspE2eMeasuring);
+			const bool       is_rtsp_e2e_done      = (phase == FlowPhase::RtspE2eDone);
+			const bool       has_rtsp_e2e_result =
+				(is_rtsp_e2e_done || phase == FlowPhase::Complete);
+			const bool can_start_rtsp_e2e_measure =
+				(phase == FlowPhase::Idle) ||
+				(phase == FlowPhase::WsDone) ||
+				(phase == FlowPhase::RtspE2eDone) ||
+				(phase == FlowPhase::Complete);
 
-			const ObsColorButtonSpec flow_rtmp_measure_buttons[] = {
+			const ObsColorButtonSpec flow_rtsp_e2e_buttons[] = {
 				{
-					"flow_rtmp_measure_start_btn",
+					"flow_rtsp_e2e_measure_start_btn",
 					T_("FlowMeasureStartShort"),
-					cb_flow_start_rtmp,
+					cb_flow_start_rtsp_e2e,
 					d,
-					(!is_rtmp_measuring && can_start_rtmp),
+					(!is_rtsp_e2e_measuring && can_start_rtsp_e2e_measure),
 					nullptr,
 					nullptr,
 				},
 				{
-					"flow_rtmp_measure_stop_btn",
+					"flow_rtsp_e2e_measure_stop_btn",
 					T_("FlowMeasureStopShort"),
 					cb_flow_reset,
 					d,
-					is_rtmp_measuring,
+					is_rtsp_e2e_measuring,
 					nullptr,
 					nullptr,
 				},
 			};
 			obs_properties_add_color_button_row(
 				grp,
-				"flow_rtmp_measure_controls_row",
-				T_("FlowRtmpMeasureLabel"),
-				flow_rtmp_measure_buttons,
-				sizeof(flow_rtmp_measure_buttons) / sizeof(flow_rtmp_measure_buttons[0]));
+				"flow_rtsp_e2e_measure_controls_row",
+				T_("RtspE2eMeasure"),
+				flow_rtsp_e2e_buttons,
+				sizeof(flow_rtsp_e2e_buttons) / sizeof(flow_rtsp_e2e_buttons[0]));
 
-			std::string step3_status;
-			if (is_rtmp_measuring) {
-				step3_status = T_("FlowRtmpMeasureProgress");
-			} else if ((is_rtmp_done || is_complete) && res.rtmp_valid) {
-				step3_status = string_printf(T_("FlowRtmpMeasureResultFmt"),
-											 res.rtmp_latency_ms,
-											 res.max_latency_ms(),
-											 res.proposed_master_delay_ms());
-			} else if (is_rtmp_done && !res.rtmp_valid) {
-				step3_status = string_printf(T_("FlowRtmpFailedFmt"), res.rtmp_error.c_str());
+			if (is_rtsp_e2e_measuring) {
+				const int pct = (res.rtsp_e2e_total_sets > 0)
+									? (res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets)
+									: 0;
+				obs_properties_add_flow_progress(grp, "flow_s4_status", T_("FlowMeasureProgressLabel"), pct);
+			} else if (has_rtsp_e2e_result && res.rtsp_e2e_valid) {
+				const std::string summary = string_printf(
+					T_("RtspE2eResultFmt"),
+					res.rtsp_e2e_latency_ms,
+					res.rtsp_e2e_min_latency_ms,
+					res.rtsp_e2e_max_latency_ms);
+				const std::string status = string_printf(
+					"%s: %s",
+					T_("RtspE2eResult"),
+					summary.c_str());
+				obs_properties_add_text(grp, "flow_s4_status", status.c_str(), OBS_TEXT_INFO);
+			} else if (has_rtsp_e2e_result && !res.rtsp_e2e_valid) {
+				const std::string status = std::string(T_("RtspE2eError")) + res.rtsp_e2e_error;
+				obs_properties_add_text(grp, "flow_s4_status", status.c_str(), OBS_TEXT_INFO);
 			} else {
-				step3_status = T_("FlowNotMeasured");
+				const std::string status =
+					string_printf("%s: %s", T_("RtspE2eResult"), T_("FlowNotMeasured"));
+				obs_properties_add_text(grp, "flow_s4_status", status.c_str(), OBS_TEXT_INFO);
 			}
-			obs_properties_add_text(grp, "flow_s3_status", step3_status.c_str(), OBS_TEXT_INFO);
 		}
 
 		// SyncFlow パネル全体（接続状況/操作/進捗）を構築する。
@@ -261,10 +468,10 @@ namespace ods::ui {
 			const bool is_complete       = (phase == FlowPhase::Complete);
 			const bool is_ws_measuring   = (phase == FlowPhase::WsMeasuring);
 			const bool is_ws_done        = (phase == FlowPhase::WsDone);
-			const bool is_rtmp_measuring = (phase == FlowPhase::RtmpMeasuring);
-			const bool is_rtmp_done      = (phase == FlowPhase::RtmpDone);
+			const bool is_rtsp_measuring = (phase == FlowPhase::RtspE2eMeasuring);
+			const bool is_rtsp_done      = (phase == FlowPhase::RtspE2eDone);
 			const bool is_ws_done_or_later =
-				is_ws_done || is_rtmp_measuring || is_rtmp_done || is_complete;
+				is_ws_done || is_rtsp_measuring || is_rtsp_done || is_complete;
 
 			obs_data_t *s               = obs_source_get_settings(d->context);
 			auto        format_sub_name = [s](int ch) -> std::string {
@@ -302,7 +509,7 @@ namespace ods::ui {
 			const bool can_start_ws =
 				(phase == FlowPhase::Idle) ||
 				(phase == FlowPhase::WsDone) ||
-				(phase == FlowPhase::RtmpDone) ||
+				(phase == FlowPhase::RtspE2eDone) ||
 				(phase == FlowPhase::Complete);
 			const ObsColorButtonSpec flow_measure_buttons[] = {
 				{
@@ -699,15 +906,40 @@ namespace ods::ui {
 		std::string turl = d->tunnel.url();
 		std::string terr = d->tunnel.error();
 
-		obs_properties_t *grp = obs_properties_create();
-		obs_properties_add_text(grp, "cloudflared_exe_path", T_("CloudflaredExePath"), OBS_TEXT_DEFAULT);
+		obs_properties_t *grp                     = obs_properties_create();
+		bool              show_tunnel_start_note  = false;
+		bool              cloudflared_downloading = d->tunnel.cloudflared_downloading();
+		bool              cloudflared_dl_running =
+			d->manual_cloudflared_download_running.load(std::memory_order_acquire);
+		bool ws_running     = d->router_running.load();
+		bool tunnel_running = (ts == TunnelState::Running);
+		bool tunnel_busy =
+			cloudflared_downloading || cloudflared_dl_running || (ts == TunnelState::Starting);
+		std::string cloudflared_auto_path;
+		const bool  cloudflared_auto_exists =
+			ods::tunnel::TunnelManager::get_auto_cloudflared_path_if_exists(cloudflared_auto_path);
+		const ObsPathModeRowSpec cloudflared_path_spec = {
+			ods::plugin::kCloudflaredExePathModeKey,
+			ods::plugin::kCloudflaredExePathKey,
+			T_("ExePathModeAuto"),
+			T_("ExePathModePath"),
+			T_("ExePathModeAbsolute"),
+			(cloudflared_downloading || cloudflared_dl_running) ? T_("PathModeDownloading") : T_("PathModeDownload"),
+			cb_cloudflared_download,
+			d,
+			(!cloudflared_downloading && !cloudflared_dl_running),
+			true,
+			0,
+			cloudflared_auto_exists,
+			cloudflared_auto_path.c_str(),
+		};
+		obs_properties_add_path_mode_row(
+			grp,
+			"cloudflared_exe_path_row",
+			T_("CloudflaredExePath"),
+			cloudflared_path_spec);
 
-		bool                     show_tunnel_start_note  = false;
-		bool                     cloudflared_downloading = d->tunnel.cloudflared_downloading();
-		bool                     ws_running              = d->router_running.load();
-		bool                     tunnel_running          = (ts == TunnelState::Running);
-		bool                     tunnel_busy             = cloudflared_downloading || (ts == TunnelState::Starting);
-		const ObsColorButtonSpec tunnel_buttons[]        = {
+		const ObsColorButtonSpec tunnel_buttons[] = {
 			{
 				"tunnel_start_btn",
 				T_("TunnelStartShort"),
@@ -738,7 +970,7 @@ namespace ods::ui {
 
 		std::string tunnel_domain      = extract_host_from_url(turl);
 		const char *tunnel_domain_text = nullptr;
-		if (cloudflared_downloading) {
+		if (cloudflared_downloading || cloudflared_dl_running) {
 			tunnel_domain_text = T_("CloudflaredDownloading");
 		} else if (ts == TunnelState::Starting) {
 			tunnel_domain_text = T_("TunnelStarting");
@@ -808,22 +1040,82 @@ namespace ods::ui {
 	void add_master_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
 		obs_properties_t *grp                  = obs_properties_create();
-		bool              auto_mode            = true;
 		int               master_base_delay_ms = 0;
 		{
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (s) {
-				auto_mode            = obs_data_get_bool(s, "rtmp_url_auto");
 				master_base_delay_ms = static_cast<int>(obs_data_get_int(s, ods::plugin::kMasterBaseDelayKey));
 				obs_data_release(s);
 			}
 		}
-		obs_property_t *auto_p = obs_properties_add_bool(grp, "rtmp_url_auto", T_("RtmpUrlAuto"));
-		obs_property_set_modified_callback2(auto_p, cb_rtmp_url_auto_changed, d);
-		obs_property_t *url_p =
-			obs_properties_add_text(grp, "rtmp_url", T_("RtmpUrl"), OBS_TEXT_DEFAULT);
-		obs_property_set_enabled(url_p, !auto_mode);
-		add_flow_rtmp_measure_section(grp, d);
+		const ObsModeTextRowOptionSpec url_mode_options[] = {
+			{T_("UrlModeAuto"), 1},
+			{T_("UrlModeManual"), 0},
+		};
+		const ObsModeTextRowSpec rtmp_url_row_spec = {
+			"rtmp_url_auto",
+			"rtmp_url",
+			url_mode_options,
+			sizeof(url_mode_options) / sizeof(url_mode_options[0]),
+			0,
+			true,
+			cb_rtmp_url_auto_changed,
+			d,
+			cb_rtmp_url_changed,
+			d,
+			true,
+			0,
+		};
+		obs_properties_add_mode_text_row(
+			grp,
+			"rtmp_url_mode_row",
+			T_("RtmpUrl"),
+			rtmp_url_row_spec);
+		const ObsModeTextRowSpec rtsp_url_row_spec = {
+			ods::plugin::kRtspUseRtmpUrlKey,
+			ods::plugin::kRtspUrlKey,
+			url_mode_options,
+			sizeof(url_mode_options) / sizeof(url_mode_options[0]),
+			0,
+			true,
+			cb_rtsp_use_rtmp_changed,
+			d,
+			nullptr,
+			nullptr,
+			true,
+			0,
+		};
+		obs_properties_add_mode_text_row(
+			grp,
+			"rtsp_url_mode_row",
+			T_("RtspUrl"),
+			rtsp_url_row_spec);
+		std::string ffmpeg_auto_path;
+		const bool  ffmpeg_auto_exists =
+			ods::network::RtspE2eProber::get_auto_ffmpeg_path_if_exists(ffmpeg_auto_path);
+		const bool ffmpeg_dl_running =
+			d->manual_ffmpeg_download_running.load(std::memory_order_acquire);
+		const ObsPathModeRowSpec ffmpeg_path_spec = {
+			ods::plugin::kFfmpegExePathModeKey,
+			ods::plugin::kFfmpegExePathKey,
+			T_("ExePathModeAuto"),
+			T_("ExePathModePath"),
+			T_("ExePathModeAbsolute"),
+			ffmpeg_dl_running ? T_("PathModeDownloading") : T_("PathModeDownload"),
+			cb_ffmpeg_download,
+			d,
+			!ffmpeg_dl_running,
+			true,
+			0,
+			ffmpeg_auto_exists,
+			ffmpeg_auto_path.c_str(),
+		};
+		obs_properties_add_path_mode_row(
+			grp,
+			"ffmpeg_exe_path_row",
+			T_("FfmpegExePath"),
+			ffmpeg_path_spec);
+		add_flow_rtsp_e2e_measure_section(grp, d);
 		const std::string master_delay_text =
 			string_printf(T_("MasterDelayFmt"), master_base_delay_ms);
 		obs_properties_add_text(grp, "master_base_delay_display", master_delay_text.c_str(), OBS_TEXT_INFO);

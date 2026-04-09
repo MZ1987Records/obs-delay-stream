@@ -1,5 +1,6 @@
 #include "plugin/plugin-helpers.hpp"
 
+#include "plugin/plugin-settings.hpp"
 #include "plugin/plugin-services.hpp"
 #include "tunnel/tunnel-manager.hpp"
 
@@ -33,13 +34,25 @@ namespace ods::plugin {
 		return url;
 	}
 
+	std::string to_rtsp_url_from_rtmp(const std::string &rtmp_url) {
+		if (rtmp_url.rfind("rtmp://", 0) == 0) {
+			return "rtsp://" + rtmp_url.substr(7);
+		}
+		if (rtmp_url.rfind("rtmps://", 0) == 0) {
+			return "rtsps://" + rtmp_url.substr(8);
+		}
+		return rtmp_url;
+	}
+
 	void maybe_fill_cloudflared_path_from_auto(obs_source_t *source) {
 		if (!source) return;
 		obs_data_t *s = obs_source_get_settings(source);
 		if (!s) return;
-		const char *cur = obs_data_get_string(s, "cloudflared_exe_path");
-		if (!cur || !*cur) {
-			obs_data_set_string(s, "cloudflared_exe_path", "auto");
+		const char       *cur  = obs_data_get_string(s, kCloudflaredExePathKey);
+		const ExePathMode mode = normalize_exe_path_mode(
+			static_cast<int>(obs_data_get_int(s, kCloudflaredExePathModeKey)));
+		if (mode == ExePathMode::Auto && (!cur || !*cur)) {
+			obs_data_set_string(s, kCloudflaredExePathKey, "auto");
 		}
 		obs_data_release(s);
 	}
@@ -52,10 +65,13 @@ namespace ods::plugin {
 
 		obs_data_t *s = obs_source_get_settings(source);
 		if (!s) return;
-		const char *cur     = obs_data_get_string(s, "cloudflared_exe_path");
-		bool        is_auto = (!*cur || _stricmp(cur, "auto") == 0);
-		if (is_auto && _stricmp(cur, ui_path.c_str()) != 0) {
-			obs_data_set_string(s, "cloudflared_exe_path", ui_path.c_str());
+		const ExePathMode mode = normalize_exe_path_mode(
+			static_cast<int>(obs_data_get_int(s, kCloudflaredExePathModeKey)));
+		if (mode != ExePathMode::Auto) {
+			const char *cur = obs_data_get_string(s, kCloudflaredExePathKey);
+			if (!cur || _stricmp(cur, ui_path.c_str()) != 0) {
+				obs_data_set_string(s, kCloudflaredExePathKey, ui_path.c_str());
+			}
 		}
 		obs_data_release(s);
 	}

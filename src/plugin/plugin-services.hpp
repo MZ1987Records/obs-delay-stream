@@ -8,6 +8,9 @@ namespace ods::plugin {
 	/// OBS ソースが削除済みか判定する
 	bool is_obs_source_removed(obs_source_t *source);
 
+	/// OBS の配信出力が現在アクティブか判定する
+	bool is_obs_streaming_active();
+
 	/// OBS の出力設定から RTMP URL を取得する
 	std::string get_obs_stream_url();
 

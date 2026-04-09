@@ -282,7 +282,7 @@ namespace ods::widgets {
 				hlay->addWidget(reset_btn);
 
 				spin_ = new FocusSpinBox(this);
-				spin_->setRange(-500.0, 500.0); // SUB_ADJUST_MIN_MS .. SUB_ADJUST_MAX_MS
+				spin_->setRange(-3000.0, 3000.0); // SUB_ADJUST_MIN_MS .. SUB_ADJUST_MAX_MS
 				spin_->setDecimals(0);
 				spin_->setSuffix(QStringLiteral(" ms"));
 				spin_->setSingleStep(1.0);

@@ -4,13 +4,13 @@
  * 同期フローを管理する。
  *
  * WebSocket 計測: 接続中チャンネルを並列計測
- * RTMP 計測: RTMP レイテンシ計測
+ * RTSP E2E 計測: インパルス注入で終端到達遅延を計測
  *
- * マスター遅延は `max_latency + rtmp_latency` で算出する。
+ * マスター遅延は `max_latency + rtsp_e2e_latency` で算出する。
  */
 
 #include "core/constants.hpp"
-#include "network/rtmp-prober.hpp"         // RtmpProber, RtmpProbeResult
+#include "network/rtsp-e2e-prober.hpp"     // RtspE2eProber, RtspE2eResult
 #include "network/stream-router-types.hpp" // LatencyResult
 
 #include <array>
@@ -25,24 +25,28 @@ namespace ods::network {
 	class StreamRouter;
 }
 
+namespace ods::plugin {
+	struct DelayStreamData;
+}
+
 namespace ods::sync {
 
 	using ods::core::MAX_SUB_CH;
 	using ods::core::DEFAULT_PING_COUNT;
 	using ods::network::LatencyResult;
-	using ods::network::RtmpProber;
-	using ods::network::RtmpProbeResult;
+	using ods::network::RtspE2eProber;
+	using ods::network::RtspE2eResult;
 
 	/**
 	 * 同期フローの状態。
 	 */
 	enum class FlowPhase {
-		Idle,          ///< 待機中
-		WsMeasuring,   ///< WebSocket 計測中: 全 CH 並列計測
-		WsDone,        ///< WebSocket 計測完了（確認待ち）
-		RtmpMeasuring, ///< RTMP 計測中
-		RtmpDone,      ///< RTMP 計測完了（確認待ち）
-		Complete,      ///< 全完了
+		Idle,             ///< 待機中
+		WsMeasuring,      ///< WebSocket 計測中: 全 CH 並列計測
+		WsDone,           ///< WebSocket 計測完了（確認待ち）
+		RtspE2eMeasuring, ///< RTSP E2E 計測中
+		RtspE2eDone,      ///< RTSP E2E 計測完了（確認待ち）
+		Complete,         ///< 全完了
 	};
 
 	/**
@@ -65,9 +69,13 @@ namespace ods::sync {
 		int ping_sent_count  = 0; ///< 送信済み ping 合計
 		int ping_total_count = 0; ///< 予定 ping 総数
 
-		double      rtmp_latency_ms = 0.0;   ///< RTMP 計測で得た平均レイテンシ
-		bool        rtmp_valid      = false; ///< RTMP 計測結果が有効か
-		std::string rtmp_error;              ///< RTMP 計測失敗時の理由
+		double      rtsp_e2e_latency_ms     = 0.0;   ///< RTSP E2E 計測結果（中央値, ms）
+		double      rtsp_e2e_min_latency_ms = 0.0;   ///< RTSP E2E 計測結果（最小値, ms）
+		double      rtsp_e2e_max_latency_ms = 0.0;   ///< RTSP E2E 計測結果（最大値, ms）
+		bool        rtsp_e2e_valid          = false; ///< RTSP E2E 計測結果が有効か
+		std::string rtsp_e2e_error;                  ///< RTSP E2E 計測失敗時の理由
+		int         rtsp_e2e_completed_sets = 0;     ///< RTSP E2E 計測の完了セット数
+		int         rtsp_e2e_total_sets     = 0;     ///< RTSP E2E 計測の総セット数
 
 		int connected_count() const {
 			int count = 0;
@@ -109,7 +117,7 @@ namespace ods::sync {
 		}
 
 		int proposed_master_delay_ms() const {
-			double proposed = max_latency_raw_ms() + rtmp_latency_ms;
+			double proposed = max_latency_raw_ms() + rtsp_e2e_latency_ms;
 			if (proposed < 0.0) proposed = 0.0;
 			return static_cast<int>(std::lround(proposed));
 		}
@@ -122,7 +130,7 @@ namespace ods::sync {
 	public:
 
 		std::function<void()>                      on_update;                ///< GUI 再描画要求コールバック
-		std::function<void()>                      on_progress;              ///< ping 送信ごとの軽量進捗通知（再構築不要）
+		std::function<void()>                      on_progress;              ///< 計測進捗の軽量通知（再構築不要）
 		std::function<void(int ch, LatencyResult)> on_ch_measured;           ///< 各 CH 計測完了通知
 		std::function<void(int master_ms)>         on_apply_master;          ///< マスター遅延書き込み要求
 		std::function<void(const FlowResult &)>    on_apply_sub_base_delays; ///< WebSocket 計測完了時の全 CH 遅延書き込み要求
@@ -146,10 +154,12 @@ namespace ods::sync {
 		bool start_ws_measurement(ods::network::StreamRouter &router, const std::string &stream_id);
 		/// WebSocket 計測で失敗した CH のみ再計測する。
 		bool retry_failed_channels(ods::network::StreamRouter &router);
-		/// RTMP 計測を開始する。
-		bool start_rtmp_measurement(const std::string &rtmp_url);
-		/// RTMP 計測結果を適用して完了状態へ進める。
-		bool apply_rtmp_result();
+		/// RTSP E2E 計測を開始する。
+		bool start_rtsp_e2e_measurement(const std::string            &rtsp_url,
+										const std::string            &ffmpeg_path,
+										ods::plugin::DelayStreamData &audio_data);
+		/// RTSP E2E 計測結果を適用して完了状態へ進める。
+		bool apply_rtsp_e2e_result();
 		/// フロー全体の状態を初期化する。
 		void reset();
 
@@ -162,7 +172,7 @@ namespace ods::sync {
 		std::atomic<int>   pending_count_{0};                ///< 未完了 CH 計測件数
 		std::atomic<int>   ping_sent_count_{0};              ///< 実送信 ping 件数
 		FlowResult         result_;                          ///< フロー結果本体
-		RtmpProber         prober_;                          ///< RTMP レイテンシ計測器
+		RtspE2eProber      prober_e2e_;                      ///< RTSP E2E 計測器
 
 		/// 各 CH 計測完了時の集計処理。
 		void on_ch_result(int i, LatencyResult r);

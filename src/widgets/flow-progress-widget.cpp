@@ -7,9 +7,12 @@
 #include <QLabel>
 #include <QPointer>
 #include <QProgressBar>
+#include <QSizePolicy>
 #include <QString>
 #include <QTimer>
+#include <QVBoxLayout>
 #include <QWidget>
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -92,18 +95,58 @@ namespace ods::widgets {
 				QFormLayout::ItemRole role;
 				form->getWidgetPosition(f.label, &row, &role);
 				if (row < 0) continue;
+				const int      row_height    = std::max(f.label->sizeHint().height(), 24);
+				const QMargins text_margins  = f.label->contentsMargins();
+				int            top_margin    = text_margins.top();
+				int            bottom_margin = text_margins.bottom();
+				const int      label_margin  = std::max(0, f.label->margin());
+				top_margin += label_margin;
+				bottom_margin += label_margin;
+				if (top_margin == 0 && bottom_margin == 0) {
+					// OBS_TEXT_INFO の行間に寄せるため、既定の上下余白を持たせる。
+					top_margin    = 6;
+					bottom_margin = 6;
+				}
+				const int margins_vsum   = top_margin + bottom_margin;
+				const int control_height = std::max(20, row_height);
 
 				auto *bar = new QProgressBar(parent);
 				bar->setRange(0, 100);
 				bar->setValue(initial_value);
 				bar->setTextVisible(true);
 				bar->setFormat(QStringLiteral("%p%"));
+				bar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+				bar->setFixedHeight(control_height);
+				bar->setStyleSheet(QStringLiteral(
+					"QProgressBar {"
+					" border:1px solid palette(mid);"
+					" border-radius:3px;"
+					" background-color:palette(base);"
+					" text-align:center;"
+					" padding:0px;"
+					"}"
+					"QProgressBar::chunk {"
+					" background-color:palette(highlight);"
+					" border:none;"
+					" border-radius:0px;"
+					"}"));
+				auto *bar_host = new QWidget(parent);
+				bar_host->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+				bar_host->setFixedHeight(control_height + margins_vsum);
+				auto *bar_lay = new QVBoxLayout(bar_host);
+				bar_lay->setContentsMargins(
+					text_margins.left(),
+					top_margin,
+					text_margins.right(),
+					bottom_margin);
+				bar_lay->setSpacing(0);
+				bar_lay->addWidget(bar);
 
 				form->removeRow(row);
 				if (!row_label.isEmpty())
-					form->insertRow(row, row_label, bar);
+					form->insertRow(row, row_label, bar_host);
 				else
-					form->insertRow(row, bar);
+					form->insertRow(row, bar_host);
 
 				// レジストリに登録
 				{

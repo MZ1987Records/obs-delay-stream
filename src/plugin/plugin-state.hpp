@@ -3,6 +3,7 @@
 #include "core/constants.hpp"
 #include "core/delay-buffer.hpp"
 #include "network/rtmp-prober.hpp"
+#include "network/rtsp-e2e-prober.hpp"
 #include "network/stream-router.hpp"
 #include "sync/sync-flow.hpp"
 #include "tunnel/tunnel-manager.hpp"
@@ -32,6 +33,8 @@ namespace ods::plugin {
 	using ods::network::LatencyResult;
 	using ods::network::RtmpProber;
 	using ods::network::RtmpProbeResult;
+	using ods::network::RtspE2eProber;
+	using ods::network::RtspE2eResult;
 	using ods::network::StreamRouter;
 	using ods::network::AudioConfig;
 	using ods::sync::SyncFlow;
@@ -162,6 +165,59 @@ namespace ods::plugin {
 		std::string        cached_url_;      ///< 直近の計測対象 URL
 	};
 
+	/**
+	 * RtspE2eProber と計測結果をまとめた状態クラス。
+	 */
+	class RtspE2eMeasureState {
+	public:
+
+		RtspE2eProber prober; ///< on_ready/on_result は外部で設定
+
+		/// 計測結果をスレッドセーフに記録する。
+		void apply_result(const RtspE2eResult &r) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			result_  = r;
+			applied_ = false;
+		}
+
+		/// 直近の RTSP E2E 計測結果を返す。スレッドセーフ。
+		RtspE2eResult result() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return result_;
+		}
+
+		/// 結果が適用済みか返す。スレッドセーフ。
+		bool is_applied() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return applied_;
+		}
+
+		/// 適用済みフラグを設定する。スレッドセーフ。
+		void set_applied(bool v) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			applied_ = v;
+		}
+
+		/// キャッシュ済み RTSP URL を返す。スレッドセーフ。
+		std::string cached_url() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return cached_url_;
+		}
+
+		/// RTSP URL をキャッシュする。スレッドセーフ。
+		void set_cached_url(const std::string &url) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			cached_url_ = url;
+		}
+
+	private:
+
+		mutable std::mutex mtx_;             ///< メンバアクセスを保護する mutex
+		RtspE2eResult      result_;          ///< 直近の RTSP E2E 計測結果
+		bool               applied_ = false; ///< 結果適用済みフラグ
+		std::string        cached_url_;      ///< 直近の計測対象 URL
+	};
+
 	struct DelayStreamData;
 
 	/**
@@ -248,26 +304,28 @@ namespace ods::plugin {
 		std::atomic<bool> destroying{false};               ///< デストラクタ実行中フラグ
 		std::atomic<bool> enabled{true};                   ///< フィルタ有効フラグ
 		std::atomic<bool> ws_send_enabled{true};           ///< WebSocket 音声送信有効フラグ
+		std::atomic<bool> inject_impulse{false};           ///< RTSP E2E 計測用インパルス注入フラグ
 
 		/// 非同期タスクがフィルタ生存中かチェックするトークン
 		std::shared_ptr<std::atomic<bool>> life_token =
 			std::make_shared<std::atomic<bool>>(true);
 
-		mutable std::mutex stream_id_mtx;                                     ///< stream_id / host_ip / auto_ip を保護する mutex
-		std::string        stream_id;                                         ///< 配信 ID（例: "myshow2024"）
-		std::string        host_ip;                                           ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
-		std::string        auto_ip;                                           ///< 自動取得したローカル IP
-		std::atomic<int>   ws_port{WS_PORT};                                  ///< WebSocket ポート番号
-		std::atomic<int>   ping_count_setting{DEFAULT_PING_COUNT};            ///< WebSocket 計測の ping 送信回数
-		int                playback_buffer_ms   = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		int                master_base_delay_ms = 0;                          ///< マスターチャンネルの基準遅延量 (ms)
-		int                master_offset_ms     = 0;                          ///< 全サブチャンネル共通のオフセット (ms)
-		int                sub_ch_count         = 1;                          ///< アクティブなサブチャンネル数
-		std::atomic<int>   active_tab{0};                                     ///< 設定UIの現在タブ（0-indexed）
-		DelayBuffer        master_buf;                                        ///< マスターチャンネルの遅延バッファ
-		RtmpMeasureState   rtmp_measure;                                      ///< RTMP 計測状態
-		StreamRouter       router;                                            ///< WebSocket ルーター
-		std::atomic<bool>  router_running{false};                             ///< WebSocket ルーター起動中フラグ
+		mutable std::mutex  stream_id_mtx;                                     ///< stream_id / host_ip / auto_ip を保護する mutex
+		std::string         stream_id;                                         ///< 配信 ID（例: "myshow2024"）
+		std::string         host_ip;                                           ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
+		std::string         auto_ip;                                           ///< 自動取得したローカル IP
+		std::atomic<int>    ws_port{WS_PORT};                                  ///< WebSocket ポート番号
+		std::atomic<int>    ping_count_setting{DEFAULT_PING_COUNT};            ///< WebSocket 計測の ping 送信回数
+		int                 playback_buffer_ms   = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
+		int                 master_base_delay_ms = 0;                          ///< マスターチャンネルの基準遅延量 (ms)
+		int                 master_offset_ms     = 0;                          ///< 全サブチャンネル共通のオフセット (ms)
+		int                 sub_ch_count         = 1;                          ///< アクティブなサブチャンネル数
+		std::atomic<int>    active_tab{0};                                     ///< 設定UIの現在タブ（0-indexed）
+		DelayBuffer         master_buf;                                        ///< マスターチャンネルの遅延バッファ
+		RtmpMeasureState    rtmp_measure;                                      ///< RTMP 計測状態
+		RtspE2eMeasureState rtsp_e2e_measure;                                  ///< RTSP E2E 計測状態
+		StreamRouter        router;                                            ///< WebSocket ルーター
+		std::atomic<bool>   router_running{false};                             ///< WebSocket ルーター起動中フラグ
 
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
@@ -286,13 +344,15 @@ namespace ods::plugin {
 
 		std::array<SubChannel, MAX_SUB_CH> sub_channels; ///< サブチャンネルの状態配列
 
-		SyncFlow          flow;                ///< 3ステップ同期フロー
-		TunnelManager     tunnel;              ///< cloudflared トンネルマネージャー
-		uint32_t          sample_rate = 48000; ///< 音声サンプルレート (Hz)
-		uint32_t          channels    = 2;     ///< 音声チャンネル数
-		bool              initialized = false; ///< 音声処理の初期化完了フラグ
-		std::atomic<bool> create_done{false};  ///< obs_source_create 完了フラグ
-		std::atomic<int>  get_props_depth{0};  ///< obs_get_properties の再入深度
+		SyncFlow          flow;                                       ///< 3ステップ同期フロー
+		TunnelManager     tunnel;                                     ///< cloudflared トンネルマネージャー
+		std::atomic<bool> manual_cloudflared_download_running{false}; ///< cloudflared 手動ダウンロード実行中フラグ
+		std::atomic<bool> manual_ffmpeg_download_running{false};      ///< ffmpeg 手動ダウンロード実行中フラグ
+		uint32_t          sample_rate = 48000;                        ///< 音声サンプルレート (Hz)
+		uint32_t          channels    = 2;                            ///< 音声チャンネル数
+		bool              initialized = false;                        ///< 音声処理の初期化完了フラグ
+		std::atomic<bool> create_done{false};                         ///< obs_source_create 完了フラグ
+		std::atomic<int>  get_props_depth{0};                         ///< obs_get_properties の再入深度
 
 		/// 最後にレンダリングした音声同期オフセット (ns)
 		std::atomic<int64_t> last_rendered_audio_sync_offset_ns{INT64_MIN};

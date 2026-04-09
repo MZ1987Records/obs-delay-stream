@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <string>
 
@@ -38,6 +39,19 @@ namespace ods::plugin {
 		return make_sub_key("memo_remove_row", ch);
 	}
 
+	ExePathMode normalize_exe_path_mode(int raw_mode) {
+		switch (raw_mode) {
+		case static_cast<int>(ExePathMode::Auto):
+			return ExePathMode::Auto;
+		case static_cast<int>(ExePathMode::FromPath):
+			return ExePathMode::FromPath;
+		case static_cast<int>(ExePathMode::Absolute):
+			return ExePathMode::Absolute;
+		default:
+			return ExePathMode::Auto;
+		}
+	}
+
 	int calc_sub_delay_raw_value_ms(int base_delay_ms,
 									int offset_ms,
 									int master_offset_ms,
@@ -56,8 +70,44 @@ namespace ods::plugin {
 
 	namespace {
 
-		constexpr int kSubOffsetMinMs = -500;
-		constexpr int kSubOffsetMaxMs = 500;
+		constexpr int kSubOffsetMinMs    = -3000;
+		constexpr int kSubOffsetMaxMs    = 3000;
+		constexpr int kMasterOffsetMinMs = -3000;
+		constexpr int kMasterOffsetMaxMs = 3000;
+
+		// 既存設定（path文字列のみ）から cloudflared モードを推定する。
+		ExePathMode infer_cloudflared_mode_from_path(const char *raw_path) {
+			const std::string path = raw_path ? raw_path : "";
+			if (path.empty() || _stricmp(path.c_str(), "auto") == 0) {
+				return ExePathMode::Auto;
+			}
+			if (_stricmp(path.c_str(), kPathModeFromEnvPath) == 0) {
+				return ExePathMode::FromPath;
+			}
+
+			std::string auto_path_abs;
+			if (ods::tunnel::TunnelManager::get_auto_cloudflared_path_if_exists(auto_path_abs)) {
+				const std::string auto_path_env =
+					ods::tunnel::TunnelManager::to_localappdata_env_path(auto_path_abs);
+				if (_stricmp(path.c_str(), auto_path_abs.c_str()) == 0 ||
+					_stricmp(path.c_str(), auto_path_env.c_str()) == 0) {
+					return ExePathMode::Auto;
+				}
+			}
+			return ExePathMode::Absolute;
+		}
+
+		// 既存設定（path文字列のみ）から ffmpeg モードを推定する。
+		ExePathMode infer_ffmpeg_mode_from_path(const char *raw_path) {
+			const std::string path = raw_path ? raw_path : "";
+			if (path.empty() || _stricmp(path.c_str(), "auto") == 0) {
+				return ExePathMode::Auto;
+			}
+			if (_stricmp(path.c_str(), kPathModeFromEnvPath) == 0) {
+				return ExePathMode::FromPath;
+			}
+			return ExePathMode::Absolute;
+		}
 
 		/// OBS 設定値（double/int 混在）を ms の整数値へ丸めて読み取る。
 		int get_ms_int(obs_data_t *settings, const char *key) {
@@ -224,7 +274,29 @@ namespace ods::plugin {
 				data_->set_stream_id(sid);
 				data_->router.set_stream_id(sid);
 				maybe_autofill_rtmp_url(settings_, true);
+				if (obs_data_get_bool(settings_, kRtspUseRtmpUrlKey)) {
+					const char *raw_rtmp = obs_data_get_string(settings_, "rtmp_url");
+					std::string rtmp_url = raw_rtmp ? raw_rtmp : "";
+					std::string rtsp_url = to_rtsp_url_from_rtmp(rtmp_url);
+					if (!rtsp_url.empty()) {
+						obs_data_set_string(settings_, kRtspUrlKey, rtsp_url.c_str());
+					}
+				}
 				maybe_fill_cloudflared_path_from_auto(data_->context);
+
+				const char       *cloudflared_path     = obs_data_get_string(settings_, kCloudflaredExePathKey);
+				const int         cloudflared_mode_raw = obs_data_has_user_value(settings_, kCloudflaredExePathModeKey)
+															 ? static_cast<int>(obs_data_get_int(settings_, kCloudflaredExePathModeKey))
+															 : static_cast<int>(infer_cloudflared_mode_from_path(cloudflared_path));
+				const ExePathMode cloudflared_mode     = normalize_exe_path_mode(cloudflared_mode_raw);
+				obs_data_set_int(settings_, kCloudflaredExePathModeKey, static_cast<int>(cloudflared_mode));
+
+				const char       *ffmpeg_path     = obs_data_get_string(settings_, kFfmpegExePathKey);
+				const int         ffmpeg_mode_raw = obs_data_has_user_value(settings_, kFfmpegExePathModeKey)
+														? static_cast<int>(obs_data_get_int(settings_, kFfmpegExePathModeKey))
+														: static_cast<int>(infer_ffmpeg_mode_from_path(ffmpeg_path));
+				const ExePathMode ffmpeg_mode     = normalize_exe_path_mode(ffmpeg_mode_raw);
+				obs_data_set_int(settings_, kFfmpegExePathModeKey, static_cast<int>(ffmpeg_mode));
 
 				{
 					int ws_port = (int)obs_data_get_int(settings_, "ws_port");
@@ -246,8 +318,18 @@ namespace ods::plugin {
 				// OBS本流は遅延させない。master_base_delay_ms はサブ配信側へ加算する。
 				data_->master_buf.set_delay_ms(0);
 
-				const int prev_master_offset = data_->master_offset_ms;
-				data_->master_offset_ms      = get_ms_int(settings_, kMasterOffsetKey);
+				const int    prev_master_offset = data_->master_offset_ms;
+				const double raw_master_offset  = obs_data_get_double(settings_, kMasterOffsetKey);
+				int          master_offset_ms   = static_cast<int>(std::lround(raw_master_offset));
+				if (master_offset_ms < kMasterOffsetMinMs) {
+					master_offset_ms = kMasterOffsetMinMs;
+				} else if (master_offset_ms > kMasterOffsetMaxMs) {
+					master_offset_ms = kMasterOffsetMaxMs;
+				}
+				data_->master_offset_ms = master_offset_ms;
+				if (std::fabs(raw_master_offset - static_cast<double>(master_offset_ms)) > 0.001) {
+					obs_data_set_int(settings_, kMasterOffsetKey, master_offset_ms);
+				}
 
 				bool effective_delay_changed = false;
 				for (int i = 0; i < MAX_SUB_CH; ++i) {

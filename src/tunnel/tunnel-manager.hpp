@@ -58,13 +58,15 @@ namespace ods::tunnel {
 
 		/// 自動配置先に cloudflared.exe が存在する場合のみパスを返す。
 		static bool get_auto_cloudflared_path_if_exists(std::string &out);
+		/// 自動配置先へ cloudflared.exe を配置し、利用可能な絶対パスを返す。
+		static bool ensure_auto_cloudflared_path(std::string &out, std::string &err);
 		/// パスを `%LOCALAPPDATA%` 基準の環境変数表現へ正規化する。
 		static std::string to_localappdata_env_path(const std::string &path);
 		/// cloudflared の自動ダウンロード処理が進行中かを返す。
 		bool cloudflared_downloading() const;
 
 		/// cloudflared を起動する。
-		/// @param exe_path cloudflared.exe のフルパス（"auto" または空で自動取得）
+		/// @param exe_path cloudflared.exe の解決指定（"auto" / "%PATH%" / 絶対パス）
 		bool start(const std::string &exe_path, int ws_port);
 		/// 起動中の cloudflared を停止する。
 		void stop();
@@ -132,6 +134,8 @@ namespace ods::tunnel {
 		static bool resolve_cloudflared_path(const std::string &requested,
 											 std::string       &out,
 											 std::string       &err);
+		/// `%PATH%` から cloudflared.exe を探索する。
+		static bool search_path_cloudflared(std::string &out);
 		/// cloudflared 出力ログから要約エラーを抽出する。
 		static bool extract_cloudflared_error(const std::string &text, std::string &out);
 	};

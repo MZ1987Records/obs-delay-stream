@@ -206,6 +206,12 @@ namespace ods::tunnel {
 		return file_exists(out);
 	}
 
+	bool TunnelManager::ensure_auto_cloudflared_path(std::string &out, std::string &err) {
+		out = get_default_cloudflared_path();
+		if (file_exists(out)) return true;
+		return download_cloudflared(out, err);
+	}
+
 	std::string TunnelManager::to_localappdata_env_path(const std::string &path) {
 		std::string base = get_local_appdata_dir();
 		if (base.empty()) return path;
@@ -240,6 +246,12 @@ namespace ods::tunnel {
 	bool TunnelManager::resolve_cloudflared_path(const std::string &requested,
 												 std::string       &out,
 												 std::string       &err) {
+		if (!requested.empty() && _stricmp(requested.c_str(), "%PATH%") == 0) {
+			if (search_path_cloudflared(out)) return true;
+			err = "cloudflared.exe が %PATH% から見つかりません。";
+			return false;
+		}
+
 		bool is_auto = requested.empty() || _stricmp(requested.c_str(), "auto") == 0;
 		if (!is_auto) {
 			std::string expanded = expand_allowed_env_vars(requested);
@@ -247,7 +259,7 @@ namespace ods::tunnel {
 				out = expanded;
 				return true;
 			}
-			err = "cloudflared.exe が見つかりません。パスを確認するか、空欄にして自動取得を使用してください。";
+			err = "cloudflared.exe が見つかりません。パスを確認するか、解決モードを変更してください。";
 			return false;
 		}
 
@@ -256,6 +268,16 @@ namespace ods::tunnel {
 
 		blog(LOG_INFO, "[obs-delay-stream] cloudflared auto-download: %s", out.c_str());
 		return download_cloudflared(out, err);
+	}
+
+	bool TunnelManager::search_path_cloudflared(std::string &out) {
+		char  path[MAX_PATH] = {};
+		DWORD n              = SearchPathA(nullptr, "cloudflared.exe", nullptr, MAX_PATH, path, nullptr);
+		if (n > 0 && n < MAX_PATH) {
+			out = path;
+			return true;
+		}
+		return false;
 	}
 
 	// ============================================================

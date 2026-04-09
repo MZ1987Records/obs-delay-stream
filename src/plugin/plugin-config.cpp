@@ -70,7 +70,12 @@ namespace ods::plugin {
 		obs_data_set_default_int(settings, "active_tab", 0);
 		obs_data_set_default_bool(settings, "rtmp_url_auto", true);
 		obs_data_set_default_string(settings, "rtmp_url", "");
-		obs_data_set_default_string(settings, "cloudflared_exe_path", "auto");
+		obs_data_set_default_bool(settings, kRtspUseRtmpUrlKey, true);
+		obs_data_set_default_string(settings, kRtspUrlKey, "");
+		obs_data_set_default_string(settings, kFfmpegExePathKey, "auto");
+		obs_data_set_default_int(settings, kFfmpegExePathModeKey, static_cast<int>(ExePathMode::Auto));
+		obs_data_set_default_string(settings, kCloudflaredExePathKey, "auto");
+		obs_data_set_default_int(settings, kCloudflaredExePathModeKey, static_cast<int>(ExePathMode::Auto));
 		for (int i = 0; i < MAX_SUB_CH; ++i) {
 			const auto base_delay_key = make_sub_base_delay_key(i);
 			obs_data_set_default_int(settings, base_delay_key.data(), 0);

@@ -21,6 +21,8 @@
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
+#include "widgets/mode-text-row-widget.hpp"
+#include "widgets/path-mode-row-widget.hpp"
 #include "widgets/pulldown-row-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 #include "widgets/text-button-widget.hpp"
@@ -62,7 +64,6 @@ using ods::plugin::SubChannelCtx;
 using ods::sync::FlowResult;
 using ods::sync::FlowPhase;
 using ods::network::LatencyResult;
-using ods::network::RtmpProbeResult;
 using namespace ods::core;
 using namespace ods::widgets;
 
@@ -146,11 +147,15 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		schedule_stepper_inject(ctx);
 		break;
 	case 2:
+		schedule_path_mode_row_inject(ctx);
 		break;
 	case 3:
 		schedule_flow_progress_inject(ctx);
 		break;
 	case 4:
+		schedule_flow_progress_inject(ctx);
+		schedule_path_mode_row_inject(ctx);
+		schedule_mode_text_row_inject(ctx);
 		break;
 	case 5:
 		schedule_stepper_inject(ctx);
@@ -282,10 +287,18 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 		d->request_props_refresh_for_tabs({3, 4}, "flow.on_update");
 	};
 	d->flow.on_progress = [d]() {
-		const FlowResult res = d->flow.result();
-		const int        pct = res.ping_total_count > 0
-								   ? res.ping_sent_count * 100 / res.ping_total_count
-								   : 0;
+		const FlowResult res   = d->flow.result();
+		const FlowPhase  phase = d->flow.phase();
+		int              pct   = 0;
+		if (phase == FlowPhase::WsMeasuring) {
+			pct = res.ping_total_count > 0
+					  ? res.ping_sent_count * 100 / res.ping_total_count
+					  : 0;
+		} else if (phase == FlowPhase::RtspE2eMeasuring || phase == FlowPhase::RtspE2eDone) {
+			pct = res.rtsp_e2e_total_sets > 0
+					  ? res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets
+					  : 0;
+		}
 		update_flow_progress(d->context, pct);
 	};
 	d->flow.on_ch_measured = [d](int, LatencyResult) {
@@ -306,10 +319,6 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 			}
 			d->request_props_refresh_for_tabs({3, 5}, "flow.on_apply_sub_base_delays");
 		});
-	};
-	d->rtmp_measure.prober.on_result = [d](RtmpProbeResult r) {
-		d->rtmp_measure.apply_result(r);
-		d->request_props_refresh_for_tabs({4}, "rtmp.prober.on_result");
 	};
 	d->tunnel.on_url_ready = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -362,7 +371,6 @@ void DelayStreamFilter::clear_event_callbacks(DelayStreamData *d) {
 	d->flow.on_ch_measured           = nullptr;
 	d->flow.on_apply_master          = nullptr;
 	d->flow.on_apply_sub_base_delays = nullptr;
-	d->rtmp_measure.prober.on_result = nullptr;
 	d->tunnel.on_url_ready           = nullptr;
 	d->tunnel.on_error               = nullptr;
 	d->tunnel.on_stopped             = nullptr;
@@ -451,7 +459,6 @@ void DelayStreamFilter::destroy(void *data) {
 	uint64_t      my_gen                 = d->singleton_generation;
 	if (!d->is_duplicate_instance) {
 		d->flow.reset();
-		d->rtmp_measure.prober.cancel();
 		d->tunnel.stop();
 		d->router.stop();
 		clear_event_callbacks(d.get());

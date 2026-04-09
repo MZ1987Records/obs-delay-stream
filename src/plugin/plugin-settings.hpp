@@ -7,8 +7,24 @@ namespace ods::plugin {
 
 	struct DelayStreamData;
 
-	inline constexpr char kMasterBaseDelayKey[] = "master_base_delay_ms";
-	inline constexpr char kMasterOffsetKey[]    = "master_offset_ms";
+	inline constexpr char kMasterBaseDelayKey[]        = "master_base_delay_ms";
+	inline constexpr char kMasterOffsetKey[]           = "master_offset_ms";
+	inline constexpr char kRtspUrlKey[]                = "rtsp_url";
+	inline constexpr char kRtspUseRtmpUrlKey[]         = "rtsp_url_use_rtmp";
+	inline constexpr char kFfmpegExePathKey[]          = "ffmpeg_exe_path";
+	inline constexpr char kFfmpegExePathModeKey[]      = "ffmpeg_exe_path_mode";
+	inline constexpr char kCloudflaredExePathKey[]     = "cloudflared_exe_path";
+	inline constexpr char kCloudflaredExePathModeKey[] = "cloudflared_exe_path_mode";
+	inline constexpr char kPathModeFromEnvPath[]       = "%PATH%";
+
+	enum class ExePathMode {
+		Auto     = 0, ///< 既定配置先から自動取得（未配置ならダウンロード）
+		FromPath = 1, ///< `%PATH%` から実行ファイルを探索する
+		Absolute = 2, ///< 絶対パスを手動指定する
+	};
+
+	/// 設定値を `ExePathMode` の有効範囲へ正規化する。
+	ExePathMode normalize_exe_path_mode(int raw_mode);
 
 	using SubSettingKey = std::array<char, 32>;
 
