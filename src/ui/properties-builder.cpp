@@ -430,29 +430,35 @@ namespace ods::ui {
 				flow_rtsp_e2e_buttons,
 				sizeof(flow_rtsp_e2e_buttons) / sizeof(flow_rtsp_e2e_buttons[0]));
 
-			if (is_rtsp_e2e_measuring) {
-				const int pct = (res.rtsp_e2e_total_sets > 0)
-									? (res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets)
-									: 0;
-				obs_properties_add_flow_progress(grp, "flow_s4_status", T_("FlowMeasureProgressLabel"), pct);
-			} else if (has_rtsp_e2e_result && res.rtsp_e2e_valid) {
-				const std::string summary = string_printf(
-					T_("RtspE2eResultFmt"),
-					res.rtsp_e2e_latency_ms,
-					res.rtsp_e2e_min_latency_ms,
-					res.rtsp_e2e_max_latency_ms);
-				const std::string status = string_printf(
-					"%s: %s",
-					T_("RtspE2eResult"),
-					summary.c_str());
-				obs_properties_add_text(grp, "flow_s4_status", status.c_str(), OBS_TEXT_INFO);
-			} else if (has_rtsp_e2e_result && !res.rtsp_e2e_valid) {
-				const std::string status = std::string(T_("RtspE2eError")) + res.rtsp_e2e_error;
-				obs_properties_add_text(grp, "flow_s4_status", status.c_str(), OBS_TEXT_INFO);
-			} else {
-				const std::string status =
-					string_printf("%s: %s", T_("RtspE2eResult"), T_("FlowNotMeasured"));
-				obs_properties_add_text(grp, "flow_s4_status", status.c_str(), OBS_TEXT_INFO);
+			{
+				int         pct = 0;
+				std::string bar_text_str;
+				const char *bar_text = nullptr;
+				if (is_rtsp_e2e_measuring) {
+					pct = (res.rtsp_e2e_total_sets > 0)
+							  ? (res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets)
+							  : 0;
+				} else if (has_rtsp_e2e_result && res.rtsp_e2e_valid) {
+					pct          = 100;
+					bar_text_str = string_printf(
+						T_("RtspE2eResultFmt"),
+						res.rtsp_e2e_latency_ms,
+						res.rtsp_e2e_min_latency_ms,
+						res.rtsp_e2e_max_latency_ms);
+					bar_text = bar_text_str.c_str();
+				} else if (has_rtsp_e2e_result && !res.rtsp_e2e_valid) {
+					pct          = 100;
+					bar_text_str = std::string(T_("RtspE2eError")) + res.rtsp_e2e_error;
+					bar_text     = bar_text_str.c_str();
+				} else {
+					bar_text = T_("FlowNotMeasured");
+				}
+				obs_properties_add_flow_progress(
+					grp,
+					"flow_s4_status",
+					nullptr,
+					pct,
+					bar_text);
 			}
 		}
 
@@ -538,35 +544,48 @@ namespace ods::ui {
 				flow_measure_buttons,
 				sizeof(flow_measure_buttons) / sizeof(flow_measure_buttons[0]));
 
-			if (is_ws_measuring) {
-				const int pct = (res.ping_total_count > 0)
-									? res.ping_sent_count * 100 / res.ping_total_count
-									: 0;
-				obs_properties_add_flow_progress(grp, "flow_s1_status", T_("FlowMeasureProgressLabel"), pct);
-			} else {
-				std::string step1_status_text;
-				if (is_ws_done_or_later) {
-					step1_status_text = T_("FlowMeasureDoneApplied");
-					for (int i = 0; i < sub_count; ++i) {
-						if (!res.channels[i].connected) continue;
-						const auto  memo_key = make_sub_memo_key(i);
-						const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : "";
-						std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
-						if (res.channels[i].measured) {
-							step1_status_text += string_printf(
-								"\n  Ch.%d %s : %d ms",
-								i + 1,
-								name.c_str(),
-								d->sub_channels[i].base_delay_ms);
-						} else {
-							step1_status_text +=
-								"\n  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
-						}
-					}
+			{
+				int         pct      = 0;
+				const char *bar_text = nullptr;
+				if (is_ws_measuring) {
+					pct = (res.ping_total_count > 0)
+							  ? res.ping_sent_count * 100 / res.ping_total_count
+							  : 0;
+				} else if (is_ws_done_or_later) {
+					pct      = 100;
+					bar_text = T_("FlowMeasureDoneShort");
 				} else {
-					step1_status_text = T_("FlowNotMeasured");
+					bar_text = T_("FlowNotMeasured");
 				}
-				obs_properties_add_text(grp, "flow_s1_status", step1_status_text.c_str(), OBS_TEXT_INFO);
+				obs_properties_add_flow_progress(
+					grp,
+					"flow_s1_status",
+					nullptr,
+					pct,
+					bar_text);
+			}
+
+			if (is_ws_done_or_later) {
+				std::string detail_text;
+				for (int i = 0; i < sub_count; ++i) {
+					if (!res.channels[i].connected) continue;
+					const auto  memo_key = make_sub_memo_key(i);
+					const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : "";
+					std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
+					if (!detail_text.empty()) detail_text += "\n";
+					if (res.channels[i].measured) {
+						detail_text += string_printf(
+							"  Ch.%d %s : %d ms",
+							i + 1,
+							name.c_str(),
+							d->sub_channels[i].base_delay_ms);
+					} else {
+						detail_text +=
+							"  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
+					}
+				}
+				if (!detail_text.empty())
+					obs_properties_add_text(grp, "flow_s1_detail", detail_text.c_str(), OBS_TEXT_INFO);
 			}
 
 			auto *retry_failed_btn = obs_properties_add_button2(

@@ -74,14 +74,22 @@ namespace ods::widgets {
 
 			int replaced = 0;
 			for (const auto &f : found) {
-				// "FLOWPROG|{value}|{row_label}" をパース
+				// "FLOWPROG|{value}|{row_label}|{bar_text}" をパース
 				const QString payload       = f.text.mid(static_cast<int>(sizeof(kMagic)) - 1);
-				const int     sep           = payload.indexOf(QLatin1Char('|'));
+				const int     sep1          = payload.indexOf(QLatin1Char('|'));
 				int           initial_value = 0;
 				QString       row_label;
-				if (sep >= 0) {
-					initial_value = payload.left(sep).toInt();
-					row_label     = payload.mid(sep + 1);
+				QString       bar_text;
+				if (sep1 >= 0) {
+					initial_value      = payload.left(sep1).toInt();
+					const QString rest = payload.mid(sep1 + 1);
+					const int     sep2 = rest.indexOf(QLatin1Char('|'));
+					if (sep2 >= 0) {
+						row_label = rest.left(sep2);
+						bar_text  = rest.mid(sep2 + 1);
+					} else {
+						row_label = rest;
+					}
 				} else {
 					initial_value = payload.toInt();
 				}
@@ -95,28 +103,25 @@ namespace ods::widgets {
 				QFormLayout::ItemRole role;
 				form->getWidgetPosition(f.label, &row, &role);
 				if (row < 0) continue;
-				const int      row_height    = std::max(f.label->sizeHint().height(), 24);
-				const QMargins text_margins  = f.label->contentsMargins();
-				int            top_margin    = text_margins.top();
-				int            bottom_margin = text_margins.bottom();
-				const int      label_margin  = std::max(0, f.label->margin());
-				top_margin += label_margin;
-				bottom_margin += label_margin;
-				if (top_margin == 0 && bottom_margin == 0) {
-					// OBS_TEXT_INFO の行間に寄せるため、既定の上下余白を持たせる。
-					top_margin    = 6;
-					bottom_margin = 6;
-				}
-				const int margins_vsum   = top_margin + bottom_margin;
-				const int control_height = std::max(20, row_height);
+				// bar_text の長短に関わらずバー高さを固定するため sizeHint() は使わない
+				const QMargins text_margins = f.label->contentsMargins();
+				constexpr int  kBarHeight   = 24;
+				constexpr int  kBarMarginV  = 6;
 
 				auto *bar = new QProgressBar(parent);
 				bar->setRange(0, 100);
 				bar->setValue(initial_value);
 				bar->setTextVisible(true);
-				bar->setFormat(QStringLiteral("%p%"));
+				if (!bar_text.isEmpty()) {
+					// % は QProgressBar フォーマット文字のためリテラル % を %% に変換する
+					QString fmt = bar_text;
+					fmt.replace(QLatin1Char('%'), QStringLiteral("%%"));
+					bar->setFormat(fmt);
+				} else {
+					bar->setFormat(QStringLiteral("%p%"));
+				}
 				bar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-				bar->setFixedHeight(control_height);
+				bar->setFixedHeight(kBarHeight);
 				bar->setStyleSheet(QStringLiteral(
 					"QProgressBar {"
 					" border:1px solid palette(mid);"
@@ -132,13 +137,13 @@ namespace ods::widgets {
 					"}"));
 				auto *bar_host = new QWidget(parent);
 				bar_host->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-				bar_host->setFixedHeight(control_height + margins_vsum);
+				bar_host->setFixedHeight(kBarHeight + kBarMarginV * 2);
 				auto *bar_lay = new QVBoxLayout(bar_host);
 				bar_lay->setContentsMargins(
 					text_margins.left(),
-					top_margin,
+					kBarMarginV,
 					text_margins.right(),
-					bottom_margin);
+					kBarMarginV);
 				bar_lay->setSpacing(0);
 				bar_lay->addWidget(bar);
 
@@ -201,10 +206,12 @@ namespace ods::widgets {
 		obs_properties_t *props,
 		const char       *prop_name,
 		const char       *row_label,
-		int               value) {
+		int               value,
+		const char       *bar_text) {
 		if (!props || !prop_name || !*prop_name) return nullptr;
-		const std::string payload =
-			"FLOWPROG|" + std::to_string(value) + "|" + (row_label ? row_label : "");
+		const std::string payload = "FLOWPROG|" + std::to_string(value) + "|" +
+									(row_label ? row_label : "") + "|" +
+									(bar_text ? bar_text : "");
 		return obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
 	}
 
