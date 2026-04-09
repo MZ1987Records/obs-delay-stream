@@ -428,16 +428,19 @@ namespace ods::ui {
 				"flow_rtsp_e2e_measure_controls_row",
 				T_("RtspE2eMeasure"),
 				flow_rtsp_e2e_buttons,
-				sizeof(flow_rtsp_e2e_buttons) / sizeof(flow_rtsp_e2e_buttons[0]));
+				sizeof(flow_rtsp_e2e_buttons) / sizeof(flow_rtsp_e2e_buttons[0]),
+				nullptr,
+				nullptr);
 
 			{
 				int         pct = 0;
 				std::string bar_text_str;
-				const char *bar_text = nullptr;
+				const char *bar_text = T_("FlowNotMeasured");
 				if (is_rtsp_e2e_measuring) {
-					pct = (res.rtsp_e2e_total_sets > 0)
-							  ? (res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets)
-							  : 0;
+					pct      = (res.rtsp_e2e_total_sets > 0)
+								   ? (res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets)
+								   : 0;
+					bar_text = T_("StatusMeasuring");
 				} else if (has_rtsp_e2e_result && res.rtsp_e2e_valid) {
 					pct          = 100;
 					bar_text_str = string_printf(
@@ -447,18 +450,17 @@ namespace ods::ui {
 						res.rtsp_e2e_max_latency_ms);
 					bar_text = bar_text_str.c_str();
 				} else if (has_rtsp_e2e_result && !res.rtsp_e2e_valid) {
-					pct          = 100;
-					bar_text_str = std::string(T_("RtspE2eError")) + res.rtsp_e2e_error;
-					bar_text     = bar_text_str.c_str();
-				} else {
-					bar_text = T_("FlowNotMeasured");
+					bar_text = T_("RtspE2eFailed");
 				}
-				obs_properties_add_flow_progress(
+				obs_properties_add_flow_progress(grp, "flow_s4_status", nullptr, pct, bar_text);
+			}
+
+			if (has_rtsp_e2e_result && !res.rtsp_e2e_valid && !res.rtsp_e2e_error.empty()) {
+				obs_properties_add_text(
 					grp,
-					"flow_s4_status",
-					nullptr,
-					pct,
-					bar_text);
+					"flow_s4_error_detail",
+					res.rtsp_e2e_error.c_str(),
+					OBS_TEXT_INFO);
 			}
 		}
 
@@ -542,20 +544,21 @@ namespace ods::ui {
 				"flow_measure_controls_row",
 				T_("FlowMeasureLabel"),
 				flow_measure_buttons,
-				sizeof(flow_measure_buttons) / sizeof(flow_measure_buttons[0]));
+				sizeof(flow_measure_buttons) / sizeof(flow_measure_buttons[0]),
+				nullptr,
+				nullptr);
 
 			{
 				int         pct      = 0;
-				const char *bar_text = nullptr;
+				const char *bar_text = T_("FlowNotMeasured");
 				if (is_ws_measuring) {
-					pct = (res.ping_total_count > 0)
-							  ? res.ping_sent_count * 100 / res.ping_total_count
-							  : 0;
+					pct      = (res.ping_total_count > 0)
+								   ? res.ping_sent_count * 100 / res.ping_total_count
+								   : 0;
+					bar_text = T_("StatusMeasuring");
 				} else if (is_ws_done_or_later) {
 					pct      = 100;
 					bar_text = T_("FlowMeasureDoneShort");
-				} else {
-					bar_text = T_("FlowNotMeasured");
 				}
 				obs_properties_add_flow_progress(
 					grp,
@@ -880,8 +883,6 @@ namespace ods::ui {
 				cb_ws_server_start,
 				d,
 				(!ws_running && has_sid),
-				UI_COLOR_START_BUTTON_BG,
-				UI_COLOR_BUTTON_TEXT,
 			},
 			{
 				"ws_server_stop_btn",
@@ -889,8 +890,6 @@ namespace ods::ui {
 				cb_ws_server_stop,
 				d,
 				(ws_running),
-				UI_COLOR_STOP_BUTTON_BG,
-				UI_COLOR_BUTTON_TEXT,
 			},
 		};
 		obs_properties_add_color_button_row(
@@ -898,7 +897,9 @@ namespace ods::ui {
 			"ws_server_controls_row",
 			T_("WsServerControls"),
 			ws_buttons,
-			sizeof(ws_buttons) / sizeof(ws_buttons[0]));
+			sizeof(ws_buttons) / sizeof(ws_buttons[0]),
+			ws_running ? UI_COLOR_STATUS_DOT_OK : UI_COLOR_STATUS_DOT_OFF,
+			ws_running ? T_("StatusRunning") : T_("StatusStopped"));
 		const std::string ws_firewall_note =
 			string_printf(T_("WsFirewallNoteFmt"), ws_port);
 		obs_property_t *fw_note_p = obs_properties_add_text(
@@ -965,8 +966,6 @@ namespace ods::ui {
 				cb_tunnel_start,
 				d,
 				(!tunnel_running && !tunnel_busy && ws_running),
-				UI_COLOR_START_BUTTON_BG,
-				UI_COLOR_BUTTON_TEXT,
 			},
 			{
 				"tunnel_stop_btn",
@@ -974,16 +973,22 @@ namespace ods::ui {
 				cb_tunnel_stop,
 				d,
 				tunnel_running,
-				UI_COLOR_STOP_BUTTON_BG,
-				UI_COLOR_BUTTON_TEXT,
 			},
 		};
+		const char *tunnel_status_dot  = tunnel_running                  ? UI_COLOR_STATUS_DOT_OK
+										 : (ts == TunnelState::Starting) ? UI_COLOR_STATUS_DOT_BUSY
+																		 : UI_COLOR_STATUS_DOT_OFF;
+		const char *tunnel_status_text = tunnel_running                  ? T_("StatusRunning")
+										 : (ts == TunnelState::Starting) ? T_("TunnelStarting")
+																		 : T_("StatusStopped");
 		obs_properties_add_color_button_row(
 			grp,
 			"tunnel_controls_row",
 			T_("TunnelControls"),
 			tunnel_buttons,
-			sizeof(tunnel_buttons) / sizeof(tunnel_buttons[0]));
+			sizeof(tunnel_buttons) / sizeof(tunnel_buttons[0]),
+			tunnel_status_dot,
+			tunnel_status_text);
 
 		show_tunnel_start_note = (!ws_running && !tunnel_running && !tunnel_busy);
 
