@@ -31,6 +31,9 @@ namespace ods::model {
 		int  sub_ch_count() const { return static_cast<int>(obs_data_get_int(s_, "sub_ch_count")); }
 		void set_sub_ch_count(int v) { obs_data_set_int(s_, "sub_ch_count", v); }
 
+		int  memo_auto_counter() const { return static_cast<int>(obs_data_get_int(s_, "sub_memo_auto_counter")); }
+		void set_memo_auto_counter(int v) { obs_data_set_int(s_, "sub_memo_auto_counter", v); }
+
 		// ============================================================
 		// チャンネル別フィールド
 		// ============================================================

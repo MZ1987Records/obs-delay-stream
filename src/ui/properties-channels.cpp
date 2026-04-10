@@ -33,27 +33,22 @@ namespace ods::ui::channels {
 			int         next     = ods::plugin::clamp_sub_ch_count(cur + 1);
 			int         added_ch = next - 1;
 			obs_data_t *s        = obs_source_get_settings(d->context);
+			ods::model::SettingsRepo repo(s);
 
-			const auto  memo_key = ods::plugin::make_sub_memo_key(added_ch);
-			const char *memo     = obs_data_get_string(s, memo_key.data());
-			if (!memo || !*memo) {
-				int counter = (int)obs_data_get_int(s, "sub_memo_auto_counter");
-				if (counter < 0) counter = 0;
-				std::string auto_memo = ods::plugin::make_default_sub_memo(counter);
-				obs_data_set_string(s, memo_key.data(), auto_memo.c_str());
-				obs_data_set_int(s, "sub_memo_auto_counter", counter + 1);
-				d->router.set_sub_memo(added_ch, auto_memo);
-			} else {
-				d->router.set_sub_memo(added_ch, memo);
+			std::string memo = repo.ch_memo(added_ch);
+			if (memo.empty()) {
+				int counter = std::max(repo.memo_auto_counter(), 0);
+				memo = ods::plugin::make_default_sub_memo(counter);
+				repo.set_ch_memo(added_ch, memo);
+				repo.set_memo_auto_counter(counter + 1);
 			}
-			{
-				const auto  code_key = ods::plugin::make_sub_code_key(added_ch);
-				std::string code     = ods::plugin::generate_stream_id(8);
-				obs_data_set_string(s, code_key.data(), code.c_str());
-				d->router.set_sub_code(added_ch, code);
-			}
+			d->router.set_sub_memo(added_ch, memo);
 
-			obs_data_set_int(s, "sub_ch_count", next);
+			std::string code = ods::plugin::generate_stream_id(8);
+			repo.set_ch_code(added_ch, code);
+			d->router.set_sub_code(added_ch, code);
+
+			repo.set_sub_ch_count(next);
 			obs_data_release(s);
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_add sub_ch_count %d -> %d", cur, next);
 			d->delay.sub_ch_count = next;
