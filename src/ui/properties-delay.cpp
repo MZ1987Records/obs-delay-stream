@@ -1,6 +1,7 @@
 #include "plugin/plugin-settings.hpp"
 #include "plugin/plugin-state.hpp"
 #include "ui/properties-delay.hpp"
+#include "viewmodel/delay-viewmodel.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 
@@ -15,7 +16,7 @@
 namespace ods::ui::delay {
 
 	using ods::plugin::DelayStreamData;
-	using ods::sync::FlowResult;
+	using ods::viewmodel::DelayViewModel;
 	using namespace ods::core;
 	using namespace ods::widgets;
 
@@ -43,35 +44,22 @@ namespace ods::ui::delay {
 		obs_properties_add_group(props, "grp_avatar_latency", T_("GroupAvatarLatency"), OBS_GROUP_NORMAL, grp);
 	}
 
-	void add_delay_summary_group(obs_properties_t *props, DelayStreamData *d) {
-		if (!props || !d) return;
+	void add_delay_summary_group(obs_properties_t *props, const DelayViewModel &vm) {
+		if (!props) return;
 		obs_properties_t *grp       = obs_properties_create();
-		const auto        snap      = d->delay.calc_all_delays();
-		const int         sub_count = snap.active_count;
-
-		int         selected_ch = 0;
-		obs_data_t *settings    = d->context ? obs_source_get_settings(d->context) : nullptr;
-		if (settings) {
-			selected_ch = static_cast<int>(obs_data_get_int(settings, "delay_table_selected_ch"));
-			if (selected_ch < 0 || selected_ch >= sub_count)
-				selected_ch = 0;
-		}
+		const int         sub_count = static_cast<int>(vm.channels.size());
 
 		std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
 		for (int i = 0; i < sub_count; ++i) {
-			const auto &sch          = snap.channels[i];
-			const auto  memo_key     = ods::plugin::make_sub_memo_key(i);
-			const char *memo         = settings ? obs_data_get_string(settings, memo_key.data()) : "";
-			channels[i].name         = (memo && *memo) ? memo : "";
-			channels[i].measured_ms  = sch.has_measurement ? static_cast<float>(d->delay.channels[i].measured_ms) : -1.0f;
-			channels[i].offset_ms    = d->delay.channels[i].offset_ms;
-			channels[i].raw_delay_ms = sch.has_measurement ? sch.raw_ms : 0;
-			channels[i].neg_max_ms   = snap.neg_max_ms;
-			channels[i].total_ms     = sch.has_measurement ? sch.total_ms : 0;
-			channels[i].warn         = sch.warn;
+			const auto &src      = vm.channels[i];
+			channels[i].name         = src.name.c_str();
+			channels[i].measured_ms  = src.measured_ms;
+			channels[i].offset_ms    = src.offset_ms;
+			channels[i].raw_delay_ms = src.raw_delay_ms;
+			channels[i].neg_max_ms   = src.neg_max_ms;
+			channels[i].total_ms     = src.total_ms;
+			channels[i].warn         = src.warn;
 		}
-
-		if (settings) obs_data_release(settings);
 
 		DelayTableLabels labels;
 		labels.hdr_ch       = T_("DelayTableColCh");
@@ -85,14 +73,14 @@ namespace ods::ui::delay {
 		obs_properties_add_delay_table(
 			grp,
 			"delay_table",
-			selected_ch,
+			vm.selected_ch,
 			sub_count,
 			channels.data(),
 			labels);
 
 		{
 			const std::string obs_delay_text =
-				string_printf(T_("ObsOutputDelayFmt"), snap.neg_max_ms);
+				string_printf(T_("ObsOutputDelayFmt"), vm.snapshot.neg_max_ms);
 			obs_properties_add_text(grp, "obs_output_delay", obs_delay_text.c_str(), OBS_TEXT_INFO);
 		}
 

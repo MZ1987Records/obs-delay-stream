@@ -18,6 +18,7 @@
 #include "ui/properties-channels.hpp"
 #include "ui/properties-delay.hpp"
 #include "ui/properties-url-share.hpp"
+#include "viewmodel/delay-viewmodel.hpp"
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
@@ -542,10 +543,14 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 		case 4:
 			ods::ui::add_master_group(props, d);
 			break;
-		case 5:
+		case 5: {
 			ods::ui::delay::add_avatar_latency_group(props, d);
-			ods::ui::delay::add_delay_summary_group(props, d);
+			obs_data_t *s5 = obs_source_get_settings(d->context);
+			auto vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
+			if (s5) obs_data_release(s5);
+			ods::ui::delay::add_delay_summary_group(props, vm);
 			break;
+		}
 		default:
 			break;
 		}
