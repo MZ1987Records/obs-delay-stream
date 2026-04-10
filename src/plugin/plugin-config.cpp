@@ -64,8 +64,9 @@ namespace ods::plugin {
 		obs_data_set_default_int(settings, "ping_count", DEFAULT_PING_COUNT);
 		obs_data_set_default_string(settings, "stream_id", "");
 		obs_data_set_default_string(settings, "host_ip_manual", "");
-		obs_data_set_default_int(settings, kMasterBaseDelayKey, 0);
-		obs_data_set_default_int(settings, kMasterOffsetKey, 0);
+		obs_data_set_default_int(settings, kAvatarLatencyKey, 200);
+		obs_data_set_default_int(settings, kMeasuredRtspE2eKey, 0);
+		obs_data_set_default_bool(settings, kRtspE2eMeasuredKey, false);
 		obs_data_set_default_int(settings, "delay_table_selected_ch", 0);
 		obs_data_set_default_int(settings, "active_tab", 0);
 		obs_data_set_default_bool(settings, "rtmp_url_auto", true);
@@ -77,8 +78,10 @@ namespace ods::plugin {
 		obs_data_set_default_string(settings, kCloudflaredExePathKey, "auto");
 		obs_data_set_default_int(settings, kCloudflaredExePathModeKey, static_cast<int>(ExePathMode::Auto));
 		for (int i = 0; i < MAX_SUB_CH; ++i) {
-			const auto base_delay_key = make_sub_base_delay_key(i);
-			obs_data_set_default_int(settings, base_delay_key.data(), 0);
+			const auto measured_key = make_sub_measured_key(i);
+			obs_data_set_default_int(settings, measured_key.data(), 0);
+			const auto ws_measured_key = make_sub_ws_measured_key(i);
+			obs_data_set_default_bool(settings, ws_measured_key.data(), false);
 			const auto offset_key = make_sub_offset_key(i);
 			obs_data_set_default_int(settings, offset_key.data(), 0);
 			const auto memo_key = make_sub_memo_key(i);

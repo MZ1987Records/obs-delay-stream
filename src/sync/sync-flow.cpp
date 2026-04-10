@@ -263,10 +263,10 @@ namespace ods::sync {
 			std::lock_guard<std::mutex> lk(mtx_);
 			if (phase_ != FlowPhase::RtspE2eDone) return false;
 			if (!result_.rtsp_e2e_valid) return false;
-			ms     = result_.proposed_master_delay_ms();
+			ms     = result_.rtsp_e2e_ms();
 			phase_ = FlowPhase::Complete;
 		}
-		if (on_apply_master) on_apply_master(ms);
+		if (on_rtsp_e2e_measured) on_rtsp_e2e_measured(ms);
 		if (on_update) on_update();
 		return true;
 	}
@@ -304,7 +304,7 @@ namespace ods::sync {
 				result_snapshot = result_;
 			}
 		}
-		if (all_done && on_apply_sub_base_delays) on_apply_sub_base_delays(result_snapshot);
+		if (all_done && on_ws_measured) on_ws_measured(result_snapshot);
 		if (on_ch_measured) on_ch_measured(i, r);
 		if (on_update) on_update();
 	}

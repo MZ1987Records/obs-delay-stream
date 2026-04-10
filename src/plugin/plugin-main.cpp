@@ -57,7 +57,7 @@ static obs_source_t *g_singleton_owner      = nullptr;
 static uint64_t      g_singleton_generation = 0;
 
 using ods::plugin::get_local_ip;
-using ods::plugin::make_sub_base_delay_key;
+using ods::plugin::make_sub_measured_key;
 using ods::plugin::DelayStreamData;
 using ods::plugin::UpdateCheckStatus;
 using ods::plugin::SubChannelCtx;
@@ -83,8 +83,7 @@ private:
 
 	static bool cb_measure_subchannel(obs_properties_t *, obs_property_t *, void *);
 
-	static void apply_sub_base_delay(DelayStreamData *, int, int);
-	static void apply_master_base_delay(DelayStreamData *, int);
+	static void save_measurement_and_recalc(DelayStreamData *);
 	static void queue_ui_safe(DelayStreamData *, std::function<void(DelayStreamData *)>);
 	static void setup_event_callbacks(DelayStreamData *);
 	static void clear_event_callbacks(DelayStreamData *);
@@ -94,22 +93,19 @@ private:
 	static void schedule_update_check(DelayStreamData *, std::weak_ptr<std::atomic<bool>>, bool);
 };
 
-// マスター遅延を設定へ書き戻し、必要ならバッファへ反映する。
-void DelayStreamFilter::apply_master_base_delay(DelayStreamData *d, int ms) {
+// 計測結果と計測済みフラグを OBS 設定に書き戻し、全チャンネル遅延を再計算する。
+void DelayStreamFilter::save_measurement_and_recalc(DelayStreamData *d) {
 	obs_data_t *settings = obs_source_get_settings(d->context);
-	obs_data_set_int(settings, ods::plugin::kMasterBaseDelayKey, ms);
-	d->master_base_delay_ms = ms;
-	d->master_buf.set_delay_ms(0);
+	obs_data_set_int(settings, ods::plugin::kMeasuredRtspE2eKey, d->measured_rtsp_e2e_ms);
+	obs_data_set_bool(settings, ods::plugin::kRtspE2eMeasuredKey, d->rtsp_e2e_measured);
 	for (int i = 0; i < MAX_SUB_CH; ++i) {
-		ods::audio::apply_sub_delay_to_buffer(d, i);
-		const int effective = ods::plugin::calc_effective_sub_delay_value_ms(
-			d->sub_channels[i].base_delay_ms,
-			d->sub_channels[i].offset_ms,
-			d->master_offset_ms,
-			d->master_base_delay_ms);
-		d->router.notify_apply_delay(i, effective, "manual_adjust");
+		const auto key = ods::plugin::make_sub_measured_key(i);
+		obs_data_set_int(settings, key.data(), d->sub_channels[i].measured_ms);
+		const auto ws_key = ods::plugin::make_sub_ws_measured_key(i);
+		obs_data_set_bool(settings, ws_key.data(), d->sub_channels[i].ws_measured);
 	}
 	obs_data_release(settings);
+	ods::plugin::recalc_all_delays(d);
 }
 
 // コールバックスレッドから OBS UI スレッドへ安全にディスパッチするヘルパー。
@@ -304,20 +300,23 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->flow.on_ch_measured = [d](int, LatencyResult) {
 		d->request_props_refresh_for_tabs({3}, "flow.on_ch_measured");
 	};
-	d->flow.on_apply_master = [d](int ms) {
-		queue_ui_safe(d, [ms](DelayStreamData *d) {
-			apply_master_base_delay(d, ms);
-			d->request_props_refresh_for_tabs({4, 5}, "flow.on_apply_master");
+	d->flow.on_rtsp_e2e_measured = [d](int rtsp_e2e_ms) {
+		queue_ui_safe(d, [rtsp_e2e_ms](DelayStreamData *d) {
+			d->measured_rtsp_e2e_ms = rtsp_e2e_ms;
+			d->rtsp_e2e_measured    = true;
+			save_measurement_and_recalc(d);
+			d->request_props_refresh_for_tabs({4, 5}, "flow.on_rtsp_e2e_measured");
 		});
 	};
-	d->flow.on_apply_sub_base_delays = [d](const FlowResult &res) {
+	d->flow.on_ws_measured = [d](const FlowResult &res) {
 		queue_ui_safe(d, [res](DelayStreamData *d) {
 			for (int i = 0; i < MAX_SUB_CH; ++i) {
-				const auto &ch = res.channels[i];
-				if (!ch.measured) continue;
-				apply_sub_base_delay(d, i, res.proposed_sub_delay_ms(i));
+				if (!res.channels[i].measured) continue;
+				d->sub_channels[i].measured_ms = res.ch_measured_ms(i);
+				d->sub_channels[i].ws_measured = true;
 			}
-			d->request_props_refresh_for_tabs({3, 5}, "flow.on_apply_sub_base_delays");
+			save_measurement_and_recalc(d);
+			d->request_props_refresh_for_tabs({3, 5}, "flow.on_ws_measured");
 		});
 	};
 	d->tunnel.on_url_ready = [d](const std::string &) {
@@ -350,12 +349,13 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->router.on_any_latency_result = [d](const std::string &sid, int ch, LatencyResult r) {
 		if (sid != d->get_stream_id()) return;
 		if (ch < 0 || ch >= MAX_SUB_CH) return;
-		// SyncFlow 実行中または完了後は proposed_delay が権威。raw latency で上書きしない。
 		if (d->flow.phase() != FlowPhase::Idle) return;
 		d->sub_channels[ch].measure.set_result(r, r.valid ? "" : T_("MeasureFailed"));
 		if (r.valid) {
 			queue_ui_safe(d, [ch, ms_val = static_cast<int>(std::lround(r.avg_latency_ms))](DelayStreamData *d) {
-				apply_sub_base_delay(d, ch, ms_val);
+				d->sub_channels[ch].measured_ms = ms_val;
+				d->sub_channels[ch].ws_measured = true;
+				save_measurement_and_recalc(d);
 				d->request_props_refresh_for_tabs({5}, "router.on_any_latency_result.apply");
 			});
 		} else {
@@ -366,15 +366,15 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 
 // 全コンポーネントのイベントコールバックを解除する。
 void DelayStreamFilter::clear_event_callbacks(DelayStreamData *d) {
-	d->flow.on_update                = nullptr;
-	d->flow.on_progress              = nullptr;
-	d->flow.on_ch_measured           = nullptr;
-	d->flow.on_apply_master          = nullptr;
-	d->flow.on_apply_sub_base_delays = nullptr;
-	d->tunnel.on_url_ready           = nullptr;
-	d->tunnel.on_error               = nullptr;
-	d->tunnel.on_stopped             = nullptr;
-	d->tunnel.on_download_state      = nullptr;
+	d->flow.on_update            = nullptr;
+	d->flow.on_progress          = nullptr;
+	d->flow.on_ch_measured       = nullptr;
+	d->flow.on_rtsp_e2e_measured = nullptr;
+	d->flow.on_ws_measured       = nullptr;
+	d->tunnel.on_url_ready       = nullptr;
+	d->tunnel.on_error           = nullptr;
+	d->tunnel.on_stopped         = nullptr;
+	d->tunnel.on_download_state  = nullptr;
 	d->router.clear_callbacks();
 }
 
@@ -494,22 +494,6 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 	return false;
 }
 
-void DelayStreamFilter::apply_sub_base_delay(DelayStreamData *d, int i, int ms) {
-	if (!d || i < 0 || i >= MAX_SUB_CH) return;
-	obs_data_t *settings       = obs_source_get_settings(d->context);
-	const auto  base_delay_key = make_sub_base_delay_key(i);
-	obs_data_set_int(settings, base_delay_key.data(), ms);
-	obs_data_release(settings);
-	d->sub_channels[i].base_delay_ms = ms;
-	ods::audio::apply_sub_delay_to_buffer(d, i);
-	const int effective = ods::plugin::calc_effective_sub_delay_value_ms(
-		d->sub_channels[i].base_delay_ms,
-		d->sub_channels[i].offset_ms,
-		d->master_offset_ms,
-		d->master_base_delay_ms);
-	d->router.notify_apply_delay(i, effective, "auto_measure");
-}
-
 obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 	obs_properties_t *props = obs_properties_create();
 	if (!data) return props;
@@ -559,7 +543,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			ods::ui::add_master_group(props, d);
 			break;
 		case 5:
-			ods::ui::delay::add_master_offset_group(props, d);
+			ods::ui::delay::add_avatar_latency_group(props, d);
 			ods::ui::delay::add_delay_summary_group(props, d);
 			break;
 		default:

@@ -1,6 +1,5 @@
 #include "plugin/plugin-settings.hpp"
 
-#include "audio/audio-processor.hpp"
 #include "core/constants.hpp"
 #include "plugin/plugin-helpers.hpp"
 #include "plugin/plugin-services.hpp"
@@ -23,8 +22,8 @@ namespace ods::plugin {
 		return key;
 	}
 
-	SubSettingKey make_sub_base_delay_key(int ch) {
-		return make_sub_key("delay_ms", ch);
+	SubSettingKey make_sub_measured_key(int ch) {
+		return make_sub_key("measured_ms", ch);
 	}
 	SubSettingKey make_sub_offset_key(int ch) {
 		return make_sub_key("adjust_ms", ch);
@@ -34,6 +33,9 @@ namespace ods::plugin {
 	}
 	SubSettingKey make_sub_code_key(int ch) {
 		return make_sub_key("code", ch);
+	}
+	SubSettingKey make_sub_ws_measured_key(int ch) {
+		return make_sub_key("ws_measured", ch);
 	}
 	SubSettingKey make_sub_remove_row_key(int ch) {
 		return make_sub_key("memo_remove_row", ch);
@@ -52,28 +54,59 @@ namespace ods::plugin {
 		}
 	}
 
-	int calc_sub_delay_raw_value_ms(int base_delay_ms,
-									int offset_ms,
-									int master_offset_ms,
-									int master_base_delay_ms) {
-		return base_delay_ms + offset_ms + master_offset_ms + master_base_delay_ms;
+	int calc_ch_raw_delay_ms(int rtsp_e2e_ms,
+							 int avatar_latency_ms,
+							 int ch_measured_ms,
+							 int offset_ms) {
+		return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms + offset_ms;
 	}
 
-	int calc_effective_sub_delay_value_ms(int base_delay_ms,
-										  int offset_ms,
-										  int master_offset_ms,
-										  int master_base_delay_ms) {
-		int effective = calc_sub_delay_raw_value_ms(base_delay_ms, offset_ms, master_offset_ms, master_base_delay_ms);
-		if (effective < 0) effective = 0;
-		return effective;
+	void recalc_all_delays(DelayStreamData *d) {
+		if (!d) return;
+		const int R         = d->measured_rtsp_e2e_ms;
+		const int A         = d->avatar_latency_ms;
+		const int sub_count = d->sub_ch_count;
+
+		// 全チャンネルの raw 値を算出し、負値の最大絶対値を求める。
+		std::array<int, MAX_SUB_CH>  raw{};
+		std::array<bool, MAX_SUB_CH> has_measurement{};
+		int                          neg_max = 0;
+		for (int i = 0; i < sub_count; ++i) {
+			has_measurement[i] = d->sub_channels[i].ws_measured;
+			if (!has_measurement[i]) {
+				raw[i] = 0;
+				continue;
+			}
+			raw[i] = calc_ch_raw_delay_ms(R, A, d->sub_channels[i].measured_ms, d->sub_channels[i].offset_ms);
+			if (raw[i] < 0 && -raw[i] > neg_max) {
+				neg_max = -raw[i];
+			}
+		}
+
+		// 各チャンネルの遅延を適用する。
+		for (int i = 0; i < sub_count; ++i) {
+			uint32_t ms = 0;
+			if (has_measurement[i]) {
+				int val = raw[i] + neg_max;
+				ms      = (val > 0) ? static_cast<uint32_t>(val) : 0;
+			}
+			d->sub_channels[i].buf.set_delay_ms(ms);
+		}
+		// 未使用チャンネルは遅延 0。
+		for (int i = sub_count; i < MAX_SUB_CH; ++i) {
+			d->sub_channels[i].buf.set_delay_ms(0);
+		}
+
+		// OBS オーディオ出力への遅延を適用する。
+		d->master_buf.set_delay_ms(static_cast<uint32_t>(neg_max));
 	}
 
 	namespace {
 
-		constexpr int kSubOffsetMinMs    = -3000;
-		constexpr int kSubOffsetMaxMs    = 3000;
-		constexpr int kMasterOffsetMinMs = -3000;
-		constexpr int kMasterOffsetMaxMs = 3000;
+		constexpr int kSubOffsetMinMs     = -3000;
+		constexpr int kSubOffsetMaxMs     = 3000;
+		constexpr int kAvatarLatencyMinMs = 0;
+		constexpr int kAvatarLatencyMaxMs = 5000;
 
 		// 既存設定（path文字列のみ）から cloudflared モードを推定する。
 		ExePathMode infer_cloudflared_mode_from_path(const char *raw_path) {
@@ -140,14 +173,10 @@ namespace ods::plugin {
 				apply_audio_codec_settings();
 				apply_stream_endpoint_settings();
 
-				bool effective_delay_changed = apply_delay_settings();
+				apply_delay_settings();
 
 				data_->rtmp_url_auto.store(obs_data_get_bool(settings_, "rtmp_url_auto"), std::memory_order_relaxed);
 				apply_ping_count();
-
-				if (effective_delay_changed) {
-					data_->request_props_refresh_for_tabs({3, 4, 5}, "update.effective_changed");
-				}
 				data_->prev_stream_id_has_user_value = obs_data_has_user_value(settings_, "stream_id");
 			}
 
@@ -311,43 +340,36 @@ namespace ods::plugin {
 				data_->set_host_ip(hip);
 			}
 
-			// マスター/サブ遅延を反映し、実効値変化の有無を返す。
-			bool apply_delay_settings() {
-				const int prev_master_base_delay = data_->master_base_delay_ms;
-				data_->master_base_delay_ms      = get_ms_int(settings_, kMasterBaseDelayKey);
-				// OBS本流は遅延させない。master_base_delay_ms はサブ配信側へ加算する。
-				data_->master_buf.set_delay_ms(0);
-
-				const int    prev_master_offset = data_->master_offset_ms;
-				const double raw_master_offset  = obs_data_get_double(settings_, kMasterOffsetKey);
-				int          master_offset_ms   = static_cast<int>(std::lround(raw_master_offset));
-				if (master_offset_ms < kMasterOffsetMinMs) {
-					master_offset_ms = kMasterOffsetMinMs;
-				} else if (master_offset_ms > kMasterOffsetMaxMs) {
-					master_offset_ms = kMasterOffsetMaxMs;
-				}
-				data_->master_offset_ms = master_offset_ms;
-				if (std::fabs(raw_master_offset - static_cast<double>(master_offset_ms)) > 0.001) {
-					obs_data_set_int(settings_, kMasterOffsetKey, master_offset_ms);
+			// アバターレイテンシ・計測結果・オフセットを反映し、全チャンネル遅延を再計算する。
+			void apply_delay_settings() {
+				// アバターレイテンシ
+				{
+					int avatar = static_cast<int>(obs_data_get_int(settings_, kAvatarLatencyKey));
+					if (avatar < kAvatarLatencyMinMs) avatar = kAvatarLatencyMinMs;
+					if (avatar > kAvatarLatencyMaxMs) avatar = kAvatarLatencyMaxMs;
+					data_->avatar_latency_ms = avatar;
 				}
 
-				bool effective_delay_changed = false;
+				// RTSP E2E 計測結果（OBS 設定から復元）
+				data_->measured_rtsp_e2e_ms =
+					static_cast<int>(obs_data_get_int(settings_, kMeasuredRtspE2eKey));
+				data_->rtsp_e2e_measured = obs_data_get_bool(settings_, kRtspE2eMeasuredKey);
+
 				for (int i = 0; i < MAX_SUB_CH; ++i) {
-					const int prev_base_delay = data_->sub_channels[i].base_delay_ms;
-					const int prev_offset     = data_->sub_channels[i].offset_ms;
+					// チャンネル計測結果（OBS 設定から復元）
+					const auto measured_key = make_sub_measured_key(i);
+					data_->sub_channels[i].measured_ms =
+						static_cast<int>(obs_data_get_int(settings_, measured_key.data()));
+					const auto ws_measured_key = make_sub_ws_measured_key(i);
+					data_->sub_channels[i].ws_measured =
+						obs_data_get_bool(settings_, ws_measured_key.data());
 
-					const auto base_delay_key            = make_sub_base_delay_key(i);
-					const int  new_base_delay_ms         = get_ms_int(settings_, base_delay_key.data());
-					data_->sub_channels[i].base_delay_ms = new_base_delay_ms;
-
+					// チャンネル別オフセット
 					const auto   offset_key    = make_sub_offset_key(i);
 					const double raw_offset_ms = obs_data_get_double(settings_, offset_key.data());
 					int          offset_ms     = static_cast<int>(std::lround(raw_offset_ms));
-					if (offset_ms < kSubOffsetMinMs) {
-						offset_ms = kSubOffsetMinMs;
-					} else if (offset_ms > kSubOffsetMaxMs) {
-						offset_ms = kSubOffsetMaxMs;
-					}
+					if (offset_ms < kSubOffsetMinMs) offset_ms = kSubOffsetMinMs;
+					if (offset_ms > kSubOffsetMaxMs) offset_ms = kSubOffsetMaxMs;
 					data_->sub_channels[i].offset_ms = offset_ms;
 					if (std::fabs(raw_offset_ms - static_cast<double>(offset_ms)) > 0.001) {
 						obs_data_set_int(settings_, offset_key.data(), offset_ms);
@@ -365,21 +387,10 @@ namespace ods::plugin {
 						obs_data_set_string(settings_, code_key.data(), code.c_str());
 					}
 					data_->router.set_sub_code(i, code);
-					ods::audio::apply_sub_delay_to_buffer(data_, i);
-
-					const int prev_raw       = calc_sub_delay_raw_value_ms(prev_base_delay, prev_offset, prev_master_offset, prev_master_base_delay);
-					const int new_raw        = calc_sub_delay_raw_value_ms(new_base_delay_ms, offset_ms, data_->master_offset_ms, data_->master_base_delay_ms);
-					const int prev_effective = calc_effective_sub_delay_value_ms(prev_base_delay, prev_offset, prev_master_offset, prev_master_base_delay);
-					const int new_effective  = calc_effective_sub_delay_value_ms(new_base_delay_ms, offset_ms, data_->master_offset_ms, data_->master_base_delay_ms);
-					if (prev_effective != new_effective) {
-						data_->router.notify_apply_delay(i, new_effective, "manual_adjust");
-						effective_delay_changed = true;
-					} else if (prev_raw != new_raw) {
-						effective_delay_changed = true;
-					}
 				}
 
-				return effective_delay_changed;
+				// 全チャンネル + master_buf の遅延を一括再計算する。
+				recalc_all_delays(data_);
 			}
 
 			// Ping 回数設定を正規化して flow へ適用する。

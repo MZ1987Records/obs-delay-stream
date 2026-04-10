@@ -7,8 +7,9 @@ namespace ods::plugin {
 
 	struct DelayStreamData;
 
-	inline constexpr char kMasterBaseDelayKey[]        = "master_base_delay_ms";
-	inline constexpr char kMasterOffsetKey[]           = "master_offset_ms";
+	inline constexpr char kAvatarLatencyKey[]          = "avatar_latency_ms";
+	inline constexpr char kMeasuredRtspE2eKey[]        = "measured_rtsp_e2e_ms";
+	inline constexpr char kRtspE2eMeasuredKey[]        = "rtsp_e2e_measured";
 	inline constexpr char kRtspUrlKey[]                = "rtsp_url";
 	inline constexpr char kRtspUseRtmpUrlKey[]         = "rtsp_url_use_rtmp";
 	inline constexpr char kFfmpegExePathKey[]          = "ffmpeg_exe_path";
@@ -29,23 +30,21 @@ namespace ods::plugin {
 	using SubSettingKey = std::array<char, 32>;
 
 	SubSettingKey make_sub_key(const char *suffix, int ch); ///< `sub{ch}_{suffix}` 形式の設定キーを生成する
-	SubSettingKey make_sub_base_delay_key(int ch);          ///< `sub{ch}_delay_ms` キーを生成する
+	SubSettingKey make_sub_measured_key(int ch);            ///< `sub{ch}_measured_ms` キーを生成する
 	SubSettingKey make_sub_offset_key(int ch);              ///< `sub{ch}_adjust_ms` キーを生成する
 	SubSettingKey make_sub_memo_key(int ch);                ///< `sub{ch}_memo` キーを生成する
 	SubSettingKey make_sub_code_key(int ch);                ///< `sub{ch}_code` キーを生成する
+	SubSettingKey make_sub_ws_measured_key(int ch);         ///< `sub{ch}_ws_measured` キーを生成する
 	SubSettingKey make_sub_remove_row_key(int ch);          ///< `sub{ch}_remove_row` キーを生成する
 
-	/// 補正前のサブ遅延値（base + offset + master_offset + master_base、0 未満許容）を計算する
-	int calc_sub_delay_raw_value_ms(int base_delay_ms,
-									int offset_ms,
-									int master_offset_ms,
-									int master_base_delay_ms);
+	/// 1 チャンネルの補正前遅延値（R - A - C[i] + offset[i]、負値許容）を計算する
+	int calc_ch_raw_delay_ms(int rtsp_e2e_ms,
+							 int avatar_latency_ms,
+							 int ch_measured_ms,
+							 int offset_ms);
 
-	/// 実適用するサブ遅延値（下限 0 を適用）を計算する
-	int calc_effective_sub_delay_value_ms(int base_delay_ms,
-										  int offset_ms,
-										  int master_offset_ms,
-										  int master_base_delay_ms);
+	/// 全チャンネルの遅延を一括再計算して DelayBuffer へ適用する
+	void recalc_all_delays(DelayStreamData *d);
 
 	/// OBS 設定値を `DelayStreamData` に反映する
 	void apply_settings(DelayStreamData *d, obs_data_t *settings);

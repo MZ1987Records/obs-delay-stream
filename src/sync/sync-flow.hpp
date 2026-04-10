@@ -107,19 +107,18 @@ namespace ods::sync {
 			return static_cast<int>(std::lround(max_latency_raw_ms()));
 		}
 
-		int proposed_sub_delay_ms(int ch_index) const {
+		/// チャンネル i の計測レイテンシを整数 ms で返す（未計測は 0）。
+		int ch_measured_ms(int ch_index) const {
 			if (ch_index < 0 || ch_index >= MAX_SUB_CH) return 0;
 			const auto &ch = channels[ch_index];
 			if (!ch.measured) return 0;
-			double proposed = max_latency_raw_ms() - ch.one_way_latency_ms;
-			if (proposed < 0.0) proposed = 0.0;
-			return static_cast<int>(std::lround(proposed));
+			return static_cast<int>(std::lround(ch.one_way_latency_ms));
 		}
 
-		int proposed_master_delay_ms() const {
-			double proposed = max_latency_raw_ms() + rtsp_e2e_latency_ms;
-			if (proposed < 0.0) proposed = 0.0;
-			return static_cast<int>(std::lround(proposed));
+		/// RTSP E2E 計測レイテンシを整数 ms で返す（無効時は 0）。
+		int rtsp_e2e_ms() const {
+			if (!rtsp_e2e_valid) return 0;
+			return static_cast<int>(std::lround(rtsp_e2e_latency_ms));
 		}
 	};
 
@@ -129,11 +128,11 @@ namespace ods::sync {
 	class SyncFlow {
 	public:
 
-		std::function<void()>                      on_update;                ///< GUI 再描画要求コールバック
-		std::function<void()>                      on_progress;              ///< 計測進捗の軽量通知（再構築不要）
-		std::function<void(int ch, LatencyResult)> on_ch_measured;           ///< 各 CH 計測完了通知
-		std::function<void(int master_ms)>         on_apply_master;          ///< マスター遅延書き込み要求
-		std::function<void(const FlowResult &)>    on_apply_sub_base_delays; ///< WebSocket 計測完了時の全 CH 遅延書き込み要求
+		std::function<void()>                      on_update;            ///< GUI 再描画要求コールバック
+		std::function<void()>                      on_progress;          ///< 計測進捗の軽量通知（再構築不要）
+		std::function<void(int ch, LatencyResult)> on_ch_measured;       ///< 各 CH 計測完了通知
+		std::function<void(int rtsp_e2e_ms)>       on_rtsp_e2e_measured; ///< RTSP E2E 計測結果通知
+		std::function<void(const FlowResult &)>    on_ws_measured;       ///< WebSocket 計測完了時の全 CH 計測結果通知
 
 		/// 初期状態へリセットして構築する。
 		SyncFlow();

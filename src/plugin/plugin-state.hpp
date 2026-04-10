@@ -317,8 +317,9 @@ namespace ods::plugin {
 		std::atomic<int>    ws_port{WS_PORT};                                  ///< WebSocket ポート番号
 		std::atomic<int>    ping_count_setting{DEFAULT_PING_COUNT};            ///< WebSocket 計測の ping 送信回数
 		int                 playback_buffer_ms   = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		int                 master_base_delay_ms = 0;                          ///< マスターチャンネルの基準遅延量 (ms)
-		int                 master_offset_ms     = 0;                          ///< 全サブチャンネル共通のオフセット (ms)
+		int                 avatar_latency_ms    = 0;                          ///< アバター同期レイテンシ (ms, 0-5000)
+		int                 measured_rtsp_e2e_ms = 0;                          ///< RTSP E2E 計測結果 (ms, OBS 設定に永続保存)
+		bool                rtsp_e2e_measured    = false;                      ///< RTSP E2E 計測済みフラグ
 		int                 sub_ch_count         = 1;                          ///< アクティブなサブチャンネル数
 		std::atomic<int>    active_tab{0};                                     ///< 設定UIの現在タブ（0-indexed）
 		DelayBuffer         master_buf;                                        ///< マスターチャンネルの遅延バッファ
@@ -336,10 +337,11 @@ namespace ods::plugin {
 		 * サブチャンネルの遅延状態。
 		 */
 		struct SubChannel {
-			int          base_delay_ms = 0; ///< ベース遅延 (ms)
-			int          offset_ms     = 0; ///< 手動補正オフセット (ms)
-			DelayBuffer  buf;               ///< 音声遅延バッファ
-			MeasureState measure;           ///< 計測状態
+			int          measured_ms = 0;     ///< WS 計測結果の片道レイテンシ (ms, OBS 設定に永続保存)
+			bool         ws_measured = false; ///< WS 計測済みフラグ
+			int          offset_ms   = 0;     ///< 手動補正オフセット (ms)
+			DelayBuffer  buf;                 ///< 音声遅延バッファ
+			MeasureState measure;             ///< 計測状態
 		};
 
 		std::array<SubChannel, MAX_SUB_CH> sub_channels; ///< サブチャンネルの状態配列

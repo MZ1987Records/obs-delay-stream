@@ -451,6 +451,10 @@ namespace ods::ui {
 					bar_text = bar_text_str.c_str();
 				} else if (has_rtsp_e2e_result && !res.rtsp_e2e_valid) {
 					bar_text = T_("RtspE2eFailed");
+				} else if (d->rtsp_e2e_measured) {
+					pct          = 100;
+					bar_text_str = string_printf(T_("MeasuredRtspE2eFmt"), d->measured_rtsp_e2e_ms);
+					bar_text     = bar_text_str.c_str();
 				}
 				obs_properties_add_flow_progress(grp, "flow_s4_status", nullptr, pct, bar_text);
 			}
@@ -548,6 +552,17 @@ namespace ods::ui {
 				nullptr,
 				nullptr);
 
+			// 保存済み計測結果の有無を判定する。
+			bool has_saved_ws = false;
+			if (!is_ws_measuring && !is_ws_done_or_later) {
+				for (int i = 0; i < sub_count; ++i) {
+					if (d->sub_channels[i].ws_measured) {
+						has_saved_ws = true;
+						break;
+					}
+				}
+			}
+
 			{
 				int         pct      = 0;
 				const char *bar_text = T_("FlowNotMeasured");
@@ -556,7 +571,7 @@ namespace ods::ui {
 								   ? res.ping_sent_count * 100 / res.ping_total_count
 								   : 0;
 					bar_text = T_("StatusMeasuring");
-				} else if (is_ws_done_or_later) {
+				} else if (is_ws_done_or_later || has_saved_ws) {
 					pct      = 100;
 					bar_text = T_("FlowMeasureDoneShort");
 				}
@@ -569,6 +584,7 @@ namespace ods::ui {
 			}
 
 			if (is_ws_done_or_later) {
+				// ライブフロー結果を表示する。
 				std::string detail_text;
 				for (int i = 0; i < sub_count; ++i) {
 					if (!res.channels[i].connected) continue;
@@ -581,11 +597,28 @@ namespace ods::ui {
 							"  Ch.%d %s : %d ms",
 							i + 1,
 							name.c_str(),
-							d->sub_channels[i].base_delay_ms);
+							res.ch_measured_ms(i));
 					} else {
 						detail_text +=
 							"  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
 					}
+				}
+				if (!detail_text.empty())
+					obs_properties_add_text(grp, "flow_s1_detail", detail_text.c_str(), OBS_TEXT_INFO);
+			} else if (has_saved_ws) {
+				// 保存済み計測結果を表示する。
+				std::string detail_text;
+				for (int i = 0; i < sub_count; ++i) {
+					if (!d->sub_channels[i].ws_measured) continue;
+					const auto  memo_key = make_sub_memo_key(i);
+					const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : "";
+					std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
+					if (!detail_text.empty()) detail_text += "\n";
+					detail_text += string_printf(
+						"  Ch.%d %s : %d ms",
+						i + 1,
+						name.c_str(),
+						d->sub_channels[i].measured_ms);
 				}
 				if (!detail_text.empty())
 					obs_properties_add_text(grp, "flow_s1_detail", detail_text.c_str(), OBS_TEXT_INFO);
@@ -1035,7 +1068,8 @@ namespace ods::ui {
 			obs_property_list_add_int(ping_count_p, "30", 30);
 			obs_property_list_add_int(ping_count_p, "40", 40);
 			obs_property_list_add_int(ping_count_p, "50", 50);
-			if (d->flow.phase() != FlowPhase::Idle) {
+			const FlowPhase phase = d->flow.phase();
+			if (phase == FlowPhase::WsMeasuring || phase == FlowPhase::RtspE2eMeasuring) {
 				obs_property_set_enabled(ping_count_p, false);
 			}
 		}
@@ -1063,15 +1097,7 @@ namespace ods::ui {
 
 	void add_master_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
-		obs_properties_t *grp                  = obs_properties_create();
-		int               master_base_delay_ms = 0;
-		{
-			obs_data_t *s = obs_source_get_settings(d->context);
-			if (s) {
-				master_base_delay_ms = static_cast<int>(obs_data_get_int(s, ods::plugin::kMasterBaseDelayKey));
-				obs_data_release(s);
-			}
-		}
+		obs_properties_t              *grp                = obs_properties_create();
 		const ObsModeTextRowOptionSpec url_mode_options[] = {
 			{T_("UrlModeAuto"), 1},
 			{T_("UrlModeManual"), 0},
@@ -1140,9 +1166,6 @@ namespace ods::ui {
 			T_("FfmpegExePath"),
 			ffmpeg_path_spec);
 		add_flow_rtsp_e2e_measure_section(grp, d);
-		const std::string master_delay_text =
-			string_printf(T_("MasterDelayFmt"), master_base_delay_ms);
-		obs_properties_add_text(grp, "master_base_delay_display", master_delay_text.c_str(), OBS_TEXT_INFO);
 		obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
 	}
 
