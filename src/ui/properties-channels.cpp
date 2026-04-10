@@ -30,15 +30,15 @@ namespace ods::ui::channels {
 			if (d->router_running.load()) return false;
 			int cur = d->delay.sub_ch_count;
 			if (cur >= MAX_SUB_CH) return false;
-			int         next     = ods::plugin::clamp_sub_ch_count(cur + 1);
-			int         added_ch = next - 1;
-			obs_data_t *s        = obs_source_get_settings(d->context);
+			int                      next     = ods::plugin::clamp_sub_ch_count(cur + 1);
+			int                      added_ch = next - 1;
+			obs_data_t              *s        = obs_source_get_settings(d->context);
 			ods::model::SettingsRepo repo(s);
 
 			std::string memo = repo.ch_memo(added_ch);
 			if (memo.empty()) {
 				int counter = std::max(repo.memo_auto_counter(), 0);
-				memo = ods::plugin::make_default_sub_memo(counter);
+				memo        = ods::plugin::make_default_sub_memo(counter);
 				repo.set_ch_memo(added_ch, memo);
 				repo.set_memo_auto_counter(counter + 1);
 			}
@@ -69,8 +69,8 @@ namespace ods::ui::channels {
 			if (cur <= 1) return false;
 			int ch = ctx->ch;
 			if (ch < 0 || ch >= cur) return false;
-			int         next = ods::plugin::clamp_sub_ch_count(cur - 1);
-			obs_data_t *s    = obs_source_get_settings(d->context);
+			int                      next = ods::plugin::clamp_sub_ch_count(cur - 1);
+			obs_data_t              *s    = obs_source_get_settings(d->context);
 			ods::model::SettingsRepo repo(s);
 			repo.shift_channels_down(ch);
 			for (int i = ch; i < MAX_SUB_CH - 1; ++i) {

@@ -51,7 +51,7 @@ namespace ods::ui::delay {
 
 		std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
 		for (int i = 0; i < sub_count; ++i) {
-			const auto &src      = vm.channels[i];
+			const auto &src          = vm.channels[i];
 			channels[i].name         = src.name.c_str();
 			channels[i].measured_ms  = src.measured_ms;
 			channels[i].offset_ms    = src.offset_ms;

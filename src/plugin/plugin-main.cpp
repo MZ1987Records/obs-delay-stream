@@ -97,7 +97,7 @@ private:
 
 // 計測結果と計測済みフラグを OBS 設定に書き戻し、全チャンネル遅延を再計算する。
 void DelayStreamFilter::save_measurement_and_recalc(DelayStreamData *d) {
-	obs_data_t *settings = obs_source_get_settings(d->context);
+	obs_data_t              *settings = obs_source_get_settings(d->context);
 	ods::model::SettingsRepo repo(settings);
 	repo.set_measured_rtsp_e2e_ms(d->delay.measured_rtsp_e2e_ms);
 	repo.set_rtsp_e2e_measured(d->delay.rtsp_e2e_measured);
@@ -546,7 +546,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 		case 5: {
 			ods::ui::delay::add_avatar_latency_group(props, d);
 			obs_data_t *s5 = obs_source_get_settings(d->context);
-			auto vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
+			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
 			if (s5) obs_data_release(s5);
 			ods::ui::delay::add_delay_summary_group(props, vm);
 			break;

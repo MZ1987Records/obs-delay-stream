@@ -31,9 +31,9 @@ namespace ods::viewmodel {
 			bool        warn;         ///< floor 補正の原因チャンネルか
 		};
 
-		DelaySnapshot            snapshot;    ///< 全チャンネル遅延計算結果
-		std::vector<ChDisplay>   channels;    ///< チャンネルごとの表示データ
-		int                      selected_ch; ///< テーブルで選択中のチャンネル
+		DelaySnapshot          snapshot;    ///< 全チャンネル遅延計算結果
+		std::vector<ChDisplay> channels;    ///< チャンネルごとの表示データ
+		int                    selected_ch; ///< テーブルで選択中のチャンネル
 
 		/// DelayState と obs_data から表示用 ViewModel を構築する。
 		static DelayViewModel build(const DelayState &delay, obs_data_t *settings) {
@@ -56,13 +56,13 @@ namespace ods::viewmodel {
 
 				const auto  memo_key = ods::plugin::make_sub_memo_key(i);
 				const char *memo     = settings ? obs_data_get_string(settings, memo_key.data()) : "";
-				ch.name         = (memo && *memo) ? memo : "";
-				ch.measured_ms  = sch.has_measurement ? static_cast<float>(delay.channels[i].measured_ms) : -1.0f;
-				ch.offset_ms    = delay.channels[i].offset_ms;
-				ch.raw_delay_ms = sch.has_measurement ? sch.raw_ms : 0;
-				ch.neg_max_ms   = vm.snapshot.neg_max_ms;
-				ch.total_ms     = sch.has_measurement ? sch.total_ms : 0;
-				ch.warn         = sch.warn;
+				ch.name              = (memo && *memo) ? memo : "";
+				ch.measured_ms       = sch.has_measurement ? static_cast<float>(delay.channels[i].measured_ms) : -1.0f;
+				ch.offset_ms         = delay.channels[i].offset_ms;
+				ch.raw_delay_ms      = sch.has_measurement ? sch.raw_ms : 0;
+				ch.neg_max_ms        = vm.snapshot.neg_max_ms;
+				ch.total_ms          = sch.has_measurement ? sch.total_ms : 0;
+				ch.warn              = sch.warn;
 			}
 
 			return vm;
