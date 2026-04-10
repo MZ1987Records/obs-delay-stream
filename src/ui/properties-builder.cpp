@@ -451,9 +451,9 @@ namespace ods::ui {
 					bar_text = bar_text_str.c_str();
 				} else if (has_rtsp_e2e_result && !res.rtsp_e2e_valid) {
 					bar_text = T_("RtspE2eFailed");
-				} else if (d->rtsp_e2e_measured) {
+				} else if (d->delay.rtsp_e2e_measured) {
 					pct          = 100;
-					bar_text_str = string_printf(T_("MeasuredRtspE2eFmt"), d->measured_rtsp_e2e_ms);
+					bar_text_str = string_printf(T_("MeasuredRtspE2eFmt"), d->delay.measured_rtsp_e2e_ms);
 					bar_text     = bar_text_str.c_str();
 				}
 				obs_properties_add_flow_progress(grp, "flow_s4_status", nullptr, pct, bar_text);
@@ -475,7 +475,7 @@ namespace ods::ui {
 
 			FlowPhase  phase     = d->flow.phase();
 			FlowResult res       = d->flow.result();
-			int        sub_count = d->sub_ch_count;
+			int        sub_count = d->delay.sub_ch_count;
 
 			const bool is_complete       = (phase == FlowPhase::Complete);
 			const bool is_ws_measuring   = (phase == FlowPhase::WsMeasuring);
@@ -556,7 +556,7 @@ namespace ods::ui {
 			bool has_saved_ws = false;
 			if (!is_ws_measuring && !is_ws_done_or_later) {
 				for (int i = 0; i < sub_count; ++i) {
-					if (d->sub_channels[i].ws_measured) {
+					if (d->delay.channels[i].ws_measured) {
 						has_saved_ws = true;
 						break;
 					}
@@ -609,7 +609,7 @@ namespace ods::ui {
 				// 保存済み計測結果を表示する。
 				std::string detail_text;
 				for (int i = 0; i < sub_count; ++i) {
-					if (!d->sub_channels[i].ws_measured) continue;
+					if (!d->delay.channels[i].ws_measured) continue;
 					const auto  memo_key = make_sub_memo_key(i);
 					const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : "";
 					std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
@@ -618,7 +618,7 @@ namespace ods::ui {
 						"  Ch.%d %s : %d ms",
 						i + 1,
 						name.c_str(),
-						d->sub_channels[i].measured_ms);
+						d->delay.channels[i].measured_ms);
 				}
 				if (!detail_text.empty())
 					obs_properties_add_text(grp, "flow_s1_detail", detail_text.c_str(), OBS_TEXT_INFO);

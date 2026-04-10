@@ -54,51 +54,22 @@ namespace ods::plugin {
 		}
 	}
 
-	int calc_ch_raw_delay_ms(int rtsp_e2e_ms,
-							 int avatar_latency_ms,
-							 int ch_measured_ms,
-							 int offset_ms) {
-		return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms + offset_ms;
-	}
-
+	// DelaySnapshot を計算し、結果を各 DelayBuffer へ適用する。
 	void recalc_all_delays(DelayStreamData *d) {
 		if (!d) return;
-		const int R         = d->measured_rtsp_e2e_ms;
-		const int A         = d->avatar_latency_ms;
-		const int sub_count = d->sub_ch_count;
+		const DelaySnapshot snap = d->delay.calc_all_delays();
 
-		// 全チャンネルの raw 値を算出し、負値の最大絶対値を求める。
-		std::array<int, MAX_SUB_CH>  raw{};
-		std::array<bool, MAX_SUB_CH> has_measurement{};
-		int                          neg_max = 0;
-		for (int i = 0; i < sub_count; ++i) {
-			has_measurement[i] = d->sub_channels[i].ws_measured;
-			if (!has_measurement[i]) {
-				raw[i] = 0;
-				continue;
-			}
-			raw[i] = calc_ch_raw_delay_ms(R, A, d->sub_channels[i].measured_ms, d->sub_channels[i].offset_ms);
-			if (raw[i] < 0 && -raw[i] > neg_max) {
-				neg_max = -raw[i];
-			}
-		}
-
-		// 各チャンネルの遅延を適用する。
-		for (int i = 0; i < sub_count; ++i) {
-			uint32_t ms = 0;
-			if (has_measurement[i]) {
-				int val = raw[i] + neg_max;
-				ms      = (val > 0) ? static_cast<uint32_t>(val) : 0;
-			}
+		for (int i = 0; i < snap.active_count; ++i) {
+			uint32_t ms = (snap.channels[i].total_ms > 0)
+							  ? static_cast<uint32_t>(snap.channels[i].total_ms)
+							  : 0;
 			d->sub_channels[i].buf.set_delay_ms(ms);
 		}
-		// 未使用チャンネルは遅延 0。
-		for (int i = sub_count; i < MAX_SUB_CH; ++i) {
+		for (int i = snap.active_count; i < MAX_SUB_CH; ++i) {
 			d->sub_channels[i].buf.set_delay_ms(0);
 		}
 
-		// OBS オーディオ出力への遅延を適用する。
-		d->master_buf.set_delay_ms(static_cast<uint32_t>(neg_max));
+		d->master_buf.set_delay_ms(static_cast<uint32_t>(snap.master_delay_ms));
 	}
 
 	namespace {
@@ -216,7 +187,7 @@ namespace ods::plugin {
 
 			// サブチャンネル数を正規化して関連状態へ適用する。
 			void apply_sub_channel_count() {
-				int  current          = data_->sub_ch_count;
+				int  current          = data_->delay.sub_ch_count;
 				bool has_sub_ch_count = obs_data_has_user_value(settings_, "sub_ch_count");
 				int  raw_v            = has_sub_ch_count ? (int)obs_data_get_int(settings_, "sub_ch_count") : current;
 				int  v                = raw_v;
@@ -235,7 +206,7 @@ namespace ods::plugin {
 						 v,
 						 clamped);
 				}
-				data_->sub_ch_count = clamped;
+				data_->delay.sub_ch_count = clamped;
 				data_->router.set_active_channels(clamped);
 				data_->flow.set_active_channels(clamped);
 				if (changed) data_->flow.reset();
@@ -342,26 +313,30 @@ namespace ods::plugin {
 
 			// アバターレイテンシ・計測結果・オフセットを反映し、全チャンネル遅延を再計算する。
 			void apply_delay_settings() {
+				auto &delay = data_->delay;
+
 				// アバターレイテンシ
 				{
 					int avatar = static_cast<int>(obs_data_get_int(settings_, kAvatarLatencyKey));
 					if (avatar < kAvatarLatencyMinMs) avatar = kAvatarLatencyMinMs;
 					if (avatar > kAvatarLatencyMaxMs) avatar = kAvatarLatencyMaxMs;
-					data_->avatar_latency_ms = avatar;
+					delay.avatar_latency_ms = avatar;
 				}
 
 				// RTSP E2E 計測結果（OBS 設定から復元）
-				data_->measured_rtsp_e2e_ms =
+				delay.measured_rtsp_e2e_ms =
 					static_cast<int>(obs_data_get_int(settings_, kMeasuredRtspE2eKey));
-				data_->rtsp_e2e_measured = obs_data_get_bool(settings_, kRtspE2eMeasuredKey);
+				delay.rtsp_e2e_measured = obs_data_get_bool(settings_, kRtspE2eMeasuredKey);
 
 				for (int i = 0; i < MAX_SUB_CH; ++i) {
+					auto &ch = delay.channels[i];
+
 					// チャンネル計測結果（OBS 設定から復元）
 					const auto measured_key = make_sub_measured_key(i);
-					data_->sub_channels[i].measured_ms =
+					ch.measured_ms =
 						static_cast<int>(obs_data_get_int(settings_, measured_key.data()));
 					const auto ws_measured_key = make_sub_ws_measured_key(i);
-					data_->sub_channels[i].ws_measured =
+					ch.ws_measured =
 						obs_data_get_bool(settings_, ws_measured_key.data());
 
 					// チャンネル別オフセット
@@ -370,7 +345,7 @@ namespace ods::plugin {
 					int          offset_ms     = static_cast<int>(std::lround(raw_offset_ms));
 					if (offset_ms < kSubOffsetMinMs) offset_ms = kSubOffsetMinMs;
 					if (offset_ms > kSubOffsetMaxMs) offset_ms = kSubOffsetMaxMs;
-					data_->sub_channels[i].offset_ms = offset_ms;
+					ch.offset_ms = offset_ms;
 					if (std::fabs(raw_offset_ms - static_cast<double>(offset_ms)) > 0.001) {
 						obs_data_set_int(settings_, offset_key.data(), offset_ms);
 					}

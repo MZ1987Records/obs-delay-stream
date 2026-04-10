@@ -49,7 +49,7 @@ namespace ods::ui::url_share {
 		std::vector<UrlShareRow> collect_sub_url_rows(DelayStreamData *d, obs_data_t *s) {
 			std::vector<UrlShareRow> rows;
 			if (!d || !s) return rows;
-			int sub_count = d->sub_ch_count;
+			int sub_count = d->delay.sub_ch_count;
 			rows.reserve(sub_count);
 			for (int i = 0; i < sub_count; ++i) {
 				const auto  memo_key = ods::plugin::make_sub_memo_key(i);

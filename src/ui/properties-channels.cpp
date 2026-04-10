@@ -27,7 +27,7 @@ namespace ods::ui::channels {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
 			if (d->router_running.load()) return false;
-			int cur = d->sub_ch_count;
+			int cur = d->delay.sub_ch_count;
 			if (cur >= MAX_SUB_CH) return false;
 			int         next     = ods::plugin::clamp_sub_ch_count(cur + 1);
 			int         added_ch = next - 1;
@@ -55,7 +55,7 @@ namespace ods::ui::channels {
 			obs_data_set_int(s, "sub_ch_count", next);
 			obs_data_release(s);
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_add sub_ch_count %d -> %d", cur, next);
-			d->sub_ch_count = next;
+			d->delay.sub_ch_count = next;
 			d->router.set_active_channels(next);
 			d->flow.set_active_channels(next);
 			d->flow.reset();
@@ -69,7 +69,7 @@ namespace ods::ui::channels {
 			if (!ctx || !ctx->d) return false;
 			auto *d = ctx->d;
 			if (d->router_running.load()) return false;
-			int cur = d->sub_ch_count;
+			int cur = d->delay.sub_ch_count;
 			if (cur <= 1) return false;
 			int ch = ctx->ch;
 			if (ch < 0 || ch >= cur) return false;
@@ -118,18 +118,18 @@ namespace ods::ui::channels {
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_remove sub_ch_count %d -> %d (remove ch=%d)", cur, next, ch + 1);
 
 			for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
-				d->sub_channels[i].measured_ms = d->sub_channels[i + 1].measured_ms;
-				d->sub_channels[i].ws_measured = d->sub_channels[i + 1].ws_measured;
-				d->sub_channels[i].offset_ms   = d->sub_channels[i + 1].offset_ms;
+				d->delay.channels[i].measured_ms = d->delay.channels[i + 1].measured_ms;
+				d->delay.channels[i].ws_measured = d->delay.channels[i + 1].ws_measured;
+				d->delay.channels[i].offset_ms   = d->delay.channels[i + 1].offset_ms;
 				d->sub_channels[i].measure.reset();
 			}
-			d->sub_channels[MAX_SUB_CH - 1].measured_ms = 0;
-			d->sub_channels[MAX_SUB_CH - 1].ws_measured = false;
-			d->sub_channels[MAX_SUB_CH - 1].offset_ms   = 0;
+			d->delay.channels[MAX_SUB_CH - 1].measured_ms = 0;
+			d->delay.channels[MAX_SUB_CH - 1].ws_measured = false;
+			d->delay.channels[MAX_SUB_CH - 1].offset_ms   = 0;
 			d->sub_channels[MAX_SUB_CH - 1].measure.reset();
 			ods::plugin::recalc_all_delays(d);
 
-			d->sub_ch_count = next;
+			d->delay.sub_ch_count = next;
 			d->router.set_active_channels(next);
 			d->flow.set_active_channels(next);
 			d->flow.reset();
@@ -143,7 +143,7 @@ namespace ods::ui::channels {
 			if (!ctx || !ctx->d) return false;
 			auto *d = ctx->d;
 			if (d->router_running.load()) return false;
-			int cur = d->sub_ch_count;
+			int cur = d->delay.sub_ch_count;
 			int ch  = ctx->ch;
 			if (ch <= 0 || ch >= cur) return false;
 			int prev = ch - 1;
@@ -188,9 +188,9 @@ namespace ods::ui::channels {
 			obs_data_set_string(s, ch_code_key.data(), prev_code.c_str());
 			obs_data_release(s);
 
-			std::swap(d->sub_channels[prev].measured_ms, d->sub_channels[ch].measured_ms);
-			std::swap(d->sub_channels[prev].ws_measured, d->sub_channels[ch].ws_measured);
-			std::swap(d->sub_channels[prev].offset_ms, d->sub_channels[ch].offset_ms);
+			std::swap(d->delay.channels[prev].measured_ms, d->delay.channels[ch].measured_ms);
+			std::swap(d->delay.channels[prev].ws_measured, d->delay.channels[ch].ws_measured);
+			std::swap(d->delay.channels[prev].offset_ms, d->delay.channels[ch].offset_ms);
 			ods::plugin::recalc_all_delays(d);
 			d->sub_channels[prev].measure.reset();
 			d->sub_channels[ch].measure.reset();
@@ -212,7 +212,7 @@ namespace ods::ui::channels {
 			auto *d = ctx->d;
 			if (d->router_running.load()) return false;
 			int ch  = ctx->ch;
-			int cur = d->sub_ch_count;
+			int cur = d->delay.sub_ch_count;
 			if (ch < 0 || ch >= cur - 1) return false;
 			SubChannelCtx next_ctx{d, ch + 1};
 			return cb_sub_swap_up(nullptr, nullptr, &next_ctx);
@@ -223,7 +223,7 @@ namespace ods::ui::channels {
 	void add_sub_channels_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
 		obs_properties_t *grp       = obs_properties_create();
-		int               sub_count = d->sub_ch_count;
+		int               sub_count = d->delay.sub_ch_count;
 		for (int i = 0; i < sub_count; ++i) {
 			d->sub_btn_ctx[i] = {d, i};
 
@@ -254,14 +254,14 @@ namespace ods::ui::channels {
 		obs_property_set_long_description(spc_bottom, " ");
 		obs_property_text_set_info_word_wrap(spc_bottom, false);
 		std::string add_label;
-		if (d->sub_ch_count >= MAX_SUB_CH) {
+		if (d->delay.sub_ch_count >= MAX_SUB_CH) {
 			add_label = T_("SubAddLimitReached");
 		} else {
-			add_label = string_printf(T_("SubAddFmt"), d->sub_ch_count + 1);
+			add_label = string_printf(T_("SubAddFmt"), d->delay.sub_ch_count + 1);
 		}
 		obs_property_t *add_p =
 			obs_properties_add_button2(grp, "sub_add_btn", add_label.c_str(), cb_sub_add, d);
-		if (d->router_running.load() || d->sub_ch_count >= MAX_SUB_CH) {
+		if (d->router_running.load() || d->delay.sub_ch_count >= MAX_SUB_CH) {
 			obs_property_set_enabled(add_p, false);
 		}
 		obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);

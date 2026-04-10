@@ -3,6 +3,7 @@
 #include "audio/probe-signal.hpp"
 #include "core/constants.hpp"
 #include "core/delay-buffer.hpp"
+#include "model/delay-state.hpp"
 #include "network/rtmp-prober.hpp"
 #include "network/rtsp-e2e-prober.hpp"
 #include "network/stream-router.hpp"
@@ -30,6 +31,8 @@ namespace ods::plugin {
 	using ods::core::WS_PORT;
 	using ods::core::DEFAULT_PING_COUNT;
 	using ods::core::PLAYBACK_BUFFER_DEFAULT_MS;
+	using ods::model::DelayState;
+	using ods::model::DelaySnapshot;
 
 	using ods::network::LatencyResult;
 	using ods::network::RtmpProber;
@@ -312,38 +315,31 @@ namespace ods::plugin {
 		std::shared_ptr<std::atomic<bool>> life_token =
 			std::make_shared<std::atomic<bool>>(true);
 
-		mutable std::mutex  stream_id_mtx;                                     ///< stream_id / host_ip / auto_ip を保護する mutex
-		std::string         stream_id;                                         ///< 配信 ID（例: "myshow2024"）
-		std::string         host_ip;                                           ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
-		std::string         auto_ip;                                           ///< 自動取得したローカル IP
-		std::atomic<int>    ws_port{WS_PORT};                                  ///< WebSocket ポート番号
-		std::atomic<int>    ping_count_setting{DEFAULT_PING_COUNT};            ///< WebSocket 計測の ping 送信回数
-		int                 playback_buffer_ms   = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		int                 avatar_latency_ms    = 0;                          ///< アバター同期レイテンシ (ms, 0-5000)
-		int                 measured_rtsp_e2e_ms = 0;                          ///< RTSP E2E 計測結果 (ms, OBS 設定に永続保存)
-		bool                rtsp_e2e_measured    = false;                      ///< RTSP E2E 計測済みフラグ
-		int                 sub_ch_count         = 1;                          ///< アクティブなサブチャンネル数
-		std::atomic<int>    active_tab{0};                                     ///< 設定UIの現在タブ（0-indexed）
-		DelayBuffer         master_buf;                                        ///< マスターチャンネルの遅延バッファ
-		RtmpMeasureState    rtmp_measure;                                      ///< RTMP 計測状態
-		RtspE2eMeasureState rtsp_e2e_measure;                                  ///< RTSP E2E 計測状態
-		StreamRouter        router;                                            ///< WebSocket ルーター
-		std::atomic<bool>   router_running{false};                             ///< WebSocket ルーター起動中フラグ
+		mutable std::mutex  stream_id_mtx;                                   ///< stream_id / host_ip / auto_ip を保護する mutex
+		std::string         stream_id;                                       ///< 配信 ID（例: "myshow2024"）
+		std::string         host_ip;                                         ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
+		std::string         auto_ip;                                         ///< 自動取得したローカル IP
+		std::atomic<int>    ws_port{WS_PORT};                                ///< WebSocket ポート番号
+		std::atomic<int>    ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
+		int                 playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
+		DelayState          delay;                                           ///< 遅延計算の入力値（MVVM Model 層）
+		std::atomic<int>    active_tab{0};                                   ///< 設定UIの現在タブ（0-indexed）
+		DelayBuffer         master_buf;                                      ///< マスターチャンネルの遅延バッファ
+		RtmpMeasureState    rtmp_measure;                                    ///< RTMP 計測状態
+		RtspE2eMeasureState rtsp_e2e_measure;                                ///< RTSP E2E 計測状態
+		StreamRouter        router;                                          ///< WebSocket ルーター
+		std::atomic<bool>   router_running{false};                           ///< WebSocket ルーター起動中フラグ
 
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
 		/// タブ選択ボタンのコールバック引数
 		std::array<TabCtx, 6> tab_btn_ctx;
 
-		/**
-		 * サブチャンネルの遅延状態。
-		 */
+		/// サブチャンネルの音声バッファと計測状態。
+		/// 遅延計算の入力値（measured_ms, ws_measured, offset_ms）は delay.channels[] に移動済み。
 		struct SubChannel {
-			int          measured_ms = 0;     ///< WS 計測結果の片道レイテンシ (ms, OBS 設定に永続保存)
-			bool         ws_measured = false; ///< WS 計測済みフラグ
-			int          offset_ms   = 0;     ///< 手動補正オフセット (ms)
-			DelayBuffer  buf;                 ///< 音声遅延バッファ
-			MeasureState measure;             ///< 計測状態
+			DelayBuffer  buf;     ///< 音声遅延バッファ
+			MeasureState measure; ///< 計測状態
 		};
 
 		std::array<SubChannel, MAX_SUB_CH> sub_channels; ///< サブチャンネルの状態配列

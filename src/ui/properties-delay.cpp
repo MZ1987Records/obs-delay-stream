@@ -46,7 +46,8 @@ namespace ods::ui::delay {
 	void add_delay_summary_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
 		obs_properties_t *grp       = obs_properties_create();
-		const int         sub_count = d->sub_ch_count;
+		const auto        snap      = d->delay.calc_all_delays();
+		const int         sub_count = snap.active_count;
 
 		int         selected_ch = 0;
 		obs_data_t *settings    = d->context ? obs_source_get_settings(d->context) : nullptr;
@@ -56,33 +57,18 @@ namespace ods::ui::delay {
 				selected_ch = 0;
 		}
 
-		// 全チャンネルの raw 値を算出し neg_max を求める。
-		const int R = d->measured_rtsp_e2e_ms;
-		const int A = d->avatar_latency_ms;
-
-		std::vector<int>  raw_vals(static_cast<size_t>(sub_count));
-		std::vector<bool> has_meas(static_cast<size_t>(sub_count));
-		int               neg_max = 0;
-		for (int i = 0; i < sub_count; ++i) {
-			has_meas[i] = d->sub_channels[i].ws_measured;
-			if (has_meas[i]) {
-				raw_vals[i] = ods::plugin::calc_ch_raw_delay_ms(R, A, d->sub_channels[i].measured_ms, d->sub_channels[i].offset_ms);
-				if (raw_vals[i] < 0 && -raw_vals[i] > neg_max)
-					neg_max = -raw_vals[i];
-			}
-		}
-
 		std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
 		for (int i = 0; i < sub_count; ++i) {
+			const auto &sch          = snap.channels[i];
 			const auto  memo_key     = ods::plugin::make_sub_memo_key(i);
 			const char *memo         = settings ? obs_data_get_string(settings, memo_key.data()) : "";
 			channels[i].name         = (memo && *memo) ? memo : "";
-			channels[i].measured_ms  = has_meas[i] ? static_cast<float>(d->sub_channels[i].measured_ms) : -1.0f;
-			channels[i].offset_ms    = d->sub_channels[i].offset_ms;
-			channels[i].raw_delay_ms = has_meas[i] ? raw_vals[i] : 0;
-			channels[i].neg_max_ms   = neg_max;
-			channels[i].total_ms     = has_meas[i] ? (raw_vals[i] + neg_max) : 0;
-			channels[i].warn         = has_meas[i] && neg_max > 0 && raw_vals[i] == -neg_max;
+			channels[i].measured_ms  = sch.has_measurement ? static_cast<float>(d->delay.channels[i].measured_ms) : -1.0f;
+			channels[i].offset_ms    = d->delay.channels[i].offset_ms;
+			channels[i].raw_delay_ms = sch.has_measurement ? sch.raw_ms : 0;
+			channels[i].neg_max_ms   = snap.neg_max_ms;
+			channels[i].total_ms     = sch.has_measurement ? sch.total_ms : 0;
+			channels[i].warn         = sch.warn;
 		}
 
 		if (settings) obs_data_release(settings);
@@ -106,7 +92,7 @@ namespace ods::ui::delay {
 
 		{
 			const std::string obs_delay_text =
-				string_printf(T_("ObsOutputDelayFmt"), neg_max);
+				string_printf(T_("ObsOutputDelayFmt"), snap.neg_max_ms);
 			obs_properties_add_text(grp, "obs_output_delay", obs_delay_text.c_str(), OBS_TEXT_INFO);
 		}
 

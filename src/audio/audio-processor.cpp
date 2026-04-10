@@ -55,7 +55,7 @@ namespace ods::audio {
 		bool ws_send_enabled = d->ws_send_enabled.load(std::memory_order_relaxed);
 		bool router_running  = d->router_running.load(std::memory_order_relaxed);
 		bool has_sid         = !d->get_stream_id().empty();
-		int  sub_count       = d->sub_ch_count;
+		int  sub_count       = d->delay.sub_ch_count;
 
 		if (is_enabled) {
 			d->master_buf.process(in, out, frames);

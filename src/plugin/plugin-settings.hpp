@@ -37,12 +37,6 @@ namespace ods::plugin {
 	SubSettingKey make_sub_ws_measured_key(int ch);         ///< `sub{ch}_ws_measured` キーを生成する
 	SubSettingKey make_sub_remove_row_key(int ch);          ///< `sub{ch}_remove_row` キーを生成する
 
-	/// 1 チャンネルの補正前遅延値（R - A - C[i] + offset[i]、負値許容）を計算する
-	int calc_ch_raw_delay_ms(int rtsp_e2e_ms,
-							 int avatar_latency_ms,
-							 int ch_measured_ms,
-							 int offset_ms);
-
 	/// 全チャンネルの遅延を一括再計算して DelayBuffer へ適用する
 	void recalc_all_delays(DelayStreamData *d);
 
