@@ -458,7 +458,8 @@ namespace ods::network {
 
 	} // namespace
 
-	RtspE2eProber::RtspE2eProber() = default;
+	RtspE2eProber::RtspE2eProber()
+		: detector_(probe_signal_) {}
 
 	RtspE2eProber::~RtspE2eProber() {
 		cancel();
@@ -518,6 +519,7 @@ namespace ods::network {
 	}
 
 	RtspE2eResult RtspE2eProber::run_single_probe(const std::string &ffmpeg_exe_path) {
+		detector_.reset();
 		RtspE2eResult       result;
 		std::string         ffmpeg_stderr;
 		PROCESS_INFORMATION pi{};
@@ -578,7 +580,7 @@ namespace ods::network {
 			if (!impulse_sent_.load(std::memory_order_acquire)) {
 				const auto now = std::chrono::steady_clock::now();
 				if (now - ready_tp > std::chrono::seconds(RTSP_E2E_READY_TIMEOUT_S)) {
-					result.error_msg = "インパルス注入待機がタイムアウトしました。";
+					result.error_msg = "プローブ注入待機がタイムアウトしました。";
 					break;
 				}
 				continue;
@@ -591,25 +593,24 @@ namespace ods::network {
 			}
 			if (t0 == std::chrono::steady_clock::time_point{}) continue;
 
-			bool detected = false;
-			for (size_t i = 0; i < n; ++i) {
-				const int v = static_cast<int>(samples[i]);
-				if (std::abs(v) > RTSP_DETECT_THRESHOLD) {
-					detected = true;
-					break;
-				}
-			}
-			if (detected) {
+			auto det = detector_.feed(samples.data(), n);
+			if (det.detected) {
 				const auto t1 = std::chrono::steady_clock::now();
-				result.valid  = true;
+				// サブサンプル精度のタイミング補正（放物線ピーク補間済み）
+				const double correction_s =
+					(static_cast<double>(n) - det.peak_offset) / 48000.0;
+				const auto t_detected = t1 - std::chrono::duration_cast<
+												 std::chrono::steady_clock::duration>(
+												 std::chrono::duration<double>(correction_s));
+				result.valid          = true;
 				result.latency_ms =
-					std::chrono::duration<double, std::milli>(t1 - t0).count();
+					std::chrono::duration<double, std::milli>(t_detected - t0).count();
 				break;
 			}
 
 			const auto now = std::chrono::steady_clock::now();
 			if (now - t0 > std::chrono::seconds(RTSP_E2E_TIMEOUT_S)) {
-				result.error_msg = "インパルス検出がタイムアウトしました。";
+				result.error_msg = "プローブ検出がタイムアウトしました。";
 				break;
 			}
 		}
@@ -630,7 +631,7 @@ namespace ods::network {
 			} else if (!ready_notified) {
 				result.error_msg = "RTSP 音声の受信開始を確認できませんでした。";
 			} else {
-				result.error_msg = "インパルスを検出できませんでした。";
+				result.error_msg = "プローブを検出できませんでした。";
 			}
 		}
 		if (!result.valid) {
@@ -694,6 +695,19 @@ namespace ods::network {
 				result.latency_ms = (latencies_ms[mid - 1] + latencies_ms[mid]) / 2.0;
 			} else {
 				result.latency_ms = latencies_ms[mid];
+			}
+
+			// MAD 安定性チェック: ばらつきが大きすぎる場合は失敗扱い
+			std::vector<double> abs_devs;
+			abs_devs.reserve(latencies_ms.size());
+			for (double v : latencies_ms)
+				abs_devs.push_back(std::abs(v - result.latency_ms));
+			std::sort(abs_devs.begin(), abs_devs.end());
+			const double mad = abs_devs[abs_devs.size() / 2];
+			if (mad > 4.0) {
+				result.valid     = false;
+				result.error_msg = "計測結果のばらつきが大きすぎます (MAD " +
+								   std::to_string(static_cast<int>(std::round(mad))) + " ms)。";
 			}
 		} else if (!running_.load(std::memory_order_acquire)) {
 			result.error_msg = "計測はキャンセルされました。";

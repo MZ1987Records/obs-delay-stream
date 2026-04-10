@@ -66,14 +66,16 @@ namespace ods::audio {
 					dst[f] = out[f * num_channels + c];
 			}
 
-			// RTSP E2E 計測用インパルスは 1 回だけ注入する。
+			// RTSP E2E 計測用チャープ信号は 1 回だけ加算注入する。
 			if (d->inject_impulse.exchange(false, std::memory_order_acq_rel)) {
-				const int inject_n = std::min<int>(RTSP_IMPULSE_SAMPLES, static_cast<int>(frames));
+				const auto &chirp    = d->probe_signal.waveform();
+				const int   inject_n = std::min<int>(static_cast<int>(chirp.size()),
+													 static_cast<int>(frames));
 				for (uint32_t c = 0; c < num_channels; ++c) {
 					if (!audio->data[c]) continue;
 					float *dst = reinterpret_cast<float *>(audio->data[c]);
 					for (int i = 0; i < inject_n; ++i)
-						dst[i] = RTSP_IMPULSE_AMP;
+						dst[i] += chirp[static_cast<size_t>(i)];
 				}
 			}
 

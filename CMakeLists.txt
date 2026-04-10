@@ -61,6 +61,7 @@ add_library(obs-delay-stream MODULE
   src/plugin/plugin-settings.cpp
   src/plugin/plugin-helpers.cpp
   src/audio/audio-processor.cpp
+  src/audio/probe-signal.cpp
   src/ui/props-refresh.cpp
   src/ui/table-theme.cpp
   src/ui/url-share-renderer.cpp

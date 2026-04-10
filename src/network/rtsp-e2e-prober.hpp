@@ -2,9 +2,10 @@
 
 /**
  * RTSP ストリームを FFmpeg サブプロセスで受信し、
- * 注入インパルスの到達時刻から E2E 遅延を算出する。
+ * 注入プローブ信号の到達時刻から E2E 遅延を算出する。
  */
 
+#include "audio/probe-signal.hpp"
 #include "core/constants.hpp"
 
 #include <atomic>
@@ -47,7 +48,7 @@ namespace ods::network {
 
 		/// RTSP E2E 計測を開始する。
 		bool start(const std::string &rtsp_url, const std::string &ffmpeg_path_hint);
-		/// インパルス注入完了時刻を通知する。
+		/// プローブ注入完了時刻を通知する。
 		void notify_impulse_sent(std::chrono::steady_clock::time_point t0);
 		/// 実行中の計測をキャンセルする。
 		void cancel();
@@ -69,9 +70,12 @@ namespace ods::network {
 		mutable std::mutex mtx_;                                                     ///< 共有結果の排他制御
 		RtspE2eResult      last_result_;                                             ///< 直近計測結果
 
-		std::atomic<bool>                     impulse_sent_{false}; ///< インパルス送信済みフラグ
-		std::chrono::steady_clock::time_point t0_{};                ///< インパルス注入時刻
+		std::atomic<bool>                     impulse_sent_{false}; ///< プローブ送信済みフラグ
+		std::chrono::steady_clock::time_point t0_{};                ///< プローブ注入時刻
 		std::mutex                            t0_mtx_;              ///< t0_ の排他制御
+
+		ods::audio::ProbeSignal   probe_signal_; ///< チャープリファレンス
+		ods::audio::ProbeDetector detector_;     ///< チャープ相関検出器
 	};
 
 } // namespace ods::network

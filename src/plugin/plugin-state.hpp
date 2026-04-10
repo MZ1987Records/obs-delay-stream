@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/probe-signal.hpp"
 #include "core/constants.hpp"
 #include "core/delay-buffer.hpp"
 #include "network/rtmp-prober.hpp"
@@ -297,14 +298,15 @@ namespace ods::plugin {
 	 * OBS フィルタ全体の実行状態。
 	 */
 	struct DelayStreamData {
-		obs_source_t     *context               = nullptr; ///< OBS フィルタコンテキスト
-		bool              is_duplicate_instance = false;   ///< 二重起動されたインスタンスか
-		bool              owns_singleton_slot   = false;   ///< シングルトンスロットを確保しているか
-		uint64_t          singleton_generation  = 0;       ///< シングルトン世代番号（重複判定用）
-		std::atomic<bool> destroying{false};               ///< デストラクタ実行中フラグ
-		std::atomic<bool> enabled{true};                   ///< フィルタ有効フラグ
-		std::atomic<bool> ws_send_enabled{true};           ///< WebSocket 音声送信有効フラグ
-		std::atomic<bool> inject_impulse{false};           ///< RTSP E2E 計測用インパルス注入フラグ
+		obs_source_t           *context               = nullptr; ///< OBS フィルタコンテキスト
+		bool                    is_duplicate_instance = false;   ///< 二重起動されたインスタンスか
+		bool                    owns_singleton_slot   = false;   ///< シングルトンスロットを確保しているか
+		uint64_t                singleton_generation  = 0;       ///< シングルトン世代番号（重複判定用）
+		std::atomic<bool>       destroying{false};               ///< デストラクタ実行中フラグ
+		std::atomic<bool>       enabled{true};                   ///< フィルタ有効フラグ
+		std::atomic<bool>       ws_send_enabled{true};           ///< WebSocket 音声送信有効フラグ
+		std::atomic<bool>       inject_impulse{false};           ///< RTSP E2E 計測用プローブ注入フラグ
+		ods::audio::ProbeSignal probe_signal;                    ///< RTSP E2E 計測用チャープ信号
 
 		/// 非同期タスクがフィルタ生存中かチェックするトークン
 		std::shared_ptr<std::atomic<bool>> life_token =
