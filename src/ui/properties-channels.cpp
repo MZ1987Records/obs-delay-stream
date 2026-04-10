@@ -1,5 +1,6 @@
 #include "core/string-format.hpp"
 #include "core/constants.hpp"
+#include "model/settings-repo.hpp"
 #include "plugin/plugin-config.hpp"
 #include "plugin/plugin-settings.hpp"
 #include "plugin/plugin-state.hpp"
@@ -75,57 +76,22 @@ namespace ods::ui::channels {
 			if (ch < 0 || ch >= cur) return false;
 			int         next = ods::plugin::clamp_sub_ch_count(cur - 1);
 			obs_data_t *s    = obs_source_get_settings(d->context);
+			ods::model::SettingsRepo repo(s);
+			repo.shift_channels_down(ch);
 			for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
-				const auto measured_from = ods::plugin::make_sub_measured_key(i + 1);
-				const auto measured_to   = ods::plugin::make_sub_measured_key(i);
-				int        v             = static_cast<int>(obs_data_get_int(s, measured_from.data()));
-				obs_data_set_int(s, measured_to.data(), v);
-
-				const auto ws_measured_from = ods::plugin::make_sub_ws_measured_key(i + 1);
-				const auto ws_measured_to   = ods::plugin::make_sub_ws_measured_key(i);
-				obs_data_set_bool(s, ws_measured_to.data(), obs_data_get_bool(s, ws_measured_from.data()));
-
-				const auto offset_from = ods::plugin::make_sub_offset_key(i + 1);
-				const auto offset_to   = ods::plugin::make_sub_offset_key(i);
-				int        ov          = static_cast<int>(obs_data_get_int(s, offset_from.data()));
-				obs_data_set_int(s, offset_to.data(), ov);
-
-				const auto  memo_from = ods::plugin::make_sub_memo_key(i + 1);
-				const auto  memo_to   = ods::plugin::make_sub_memo_key(i);
-				const char *m         = obs_data_get_string(s, memo_from.data());
-				obs_data_set_string(s, memo_to.data(), m ? m : "");
-				d->router.set_sub_memo(i, m ? m : "");
-
-				const auto  code_from = ods::plugin::make_sub_code_key(i + 1);
-				const auto  code_to   = ods::plugin::make_sub_code_key(i);
-				const char *c         = obs_data_get_string(s, code_from.data());
-				obs_data_set_string(s, code_to.data(), c ? c : "");
-				d->router.set_sub_code(i, c ? c : "");
+				d->router.set_sub_memo(i, repo.ch_memo(i));
+				d->router.set_sub_code(i, repo.ch_code(i));
 			}
-			{
-				const auto measured_last = ods::plugin::make_sub_measured_key(MAX_SUB_CH - 1);
-				obs_data_set_int(s, measured_last.data(), 0);
-				const auto ws_measured_last = ods::plugin::make_sub_ws_measured_key(MAX_SUB_CH - 1);
-				obs_data_set_bool(s, ws_measured_last.data(), false);
-				const auto offset_last = ods::plugin::make_sub_offset_key(MAX_SUB_CH - 1);
-				obs_data_set_int(s, offset_last.data(), 0);
-				const auto code_last = ods::plugin::make_sub_code_key(MAX_SUB_CH - 1);
-				obs_data_set_string(s, code_last.data(), "");
-				d->router.set_sub_code(MAX_SUB_CH - 1, "");
-			}
-			obs_data_set_int(s, "sub_ch_count", next);
+			d->router.set_sub_code(MAX_SUB_CH - 1, "");
+			repo.set_sub_ch_count(next);
 			obs_data_release(s);
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_remove sub_ch_count %d -> %d (remove ch=%d)", cur, next, ch + 1);
 
 			for (int i = ch; i < MAX_SUB_CH - 1; ++i) {
-				d->delay.channels[i].measured_ms = d->delay.channels[i + 1].measured_ms;
-				d->delay.channels[i].ws_measured = d->delay.channels[i + 1].ws_measured;
-				d->delay.channels[i].offset_ms   = d->delay.channels[i + 1].offset_ms;
+				d->delay.channels[i] = d->delay.channels[i + 1];
 				d->sub_channels[i].measure.reset();
 			}
-			d->delay.channels[MAX_SUB_CH - 1].measured_ms = 0;
-			d->delay.channels[MAX_SUB_CH - 1].ws_measured = false;
-			d->delay.channels[MAX_SUB_CH - 1].offset_ms   = 0;
+			d->delay.channels[MAX_SUB_CH - 1] = {};
 			d->sub_channels[MAX_SUB_CH - 1].measure.reset();
 			ods::plugin::recalc_all_delays(d);
 
@@ -150,54 +116,18 @@ namespace ods::ui::channels {
 
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (!s) return false;
-			const auto prev_measured_key = ods::plugin::make_sub_measured_key(prev);
-			const auto ch_measured_key   = ods::plugin::make_sub_measured_key(ch);
-			const auto prev_ws_meas_key  = ods::plugin::make_sub_ws_measured_key(prev);
-			const auto ch_ws_meas_key    = ods::plugin::make_sub_ws_measured_key(ch);
-			const auto prev_adj_key      = ods::plugin::make_sub_offset_key(prev);
-			const auto ch_adj_key        = ods::plugin::make_sub_offset_key(ch);
-			const auto prev_memo_key     = ods::plugin::make_sub_memo_key(prev);
-			const auto ch_memo_key       = ods::plugin::make_sub_memo_key(ch);
-			const auto prev_code_key     = ods::plugin::make_sub_code_key(prev);
-			const auto ch_code_key       = ods::plugin::make_sub_code_key(ch);
-
-			const int         prev_measured    = static_cast<int>(obs_data_get_int(s, prev_measured_key.data()));
-			const int         ch_measured      = static_cast<int>(obs_data_get_int(s, ch_measured_key.data()));
-			const bool        prev_ws_measured = obs_data_get_bool(s, prev_ws_meas_key.data());
-			const bool        ch_ws_measured   = obs_data_get_bool(s, ch_ws_meas_key.data());
-			const int         prev_adj         = static_cast<int>(obs_data_get_int(s, prev_adj_key.data()));
-			const int         ch_adj           = static_cast<int>(obs_data_get_int(s, ch_adj_key.data()));
-			const char       *prev_memo_raw    = obs_data_get_string(s, prev_memo_key.data());
-			const char       *ch_memo_raw      = obs_data_get_string(s, ch_memo_key.data());
-			const char       *prev_code_raw    = obs_data_get_string(s, prev_code_key.data());
-			const char       *ch_code_raw      = obs_data_get_string(s, ch_code_key.data());
-			const std::string prev_memo        = prev_memo_raw ? prev_memo_raw : "";
-			const std::string ch_memo          = ch_memo_raw ? ch_memo_raw : "";
-			const std::string prev_code        = prev_code_raw ? prev_code_raw : "";
-			const std::string ch_code          = ch_code_raw ? ch_code_raw : "";
-
-			obs_data_set_int(s, prev_measured_key.data(), ch_measured);
-			obs_data_set_int(s, ch_measured_key.data(), prev_measured);
-			obs_data_set_bool(s, prev_ws_meas_key.data(), ch_ws_measured);
-			obs_data_set_bool(s, ch_ws_meas_key.data(), prev_ws_measured);
-			obs_data_set_int(s, prev_adj_key.data(), ch_adj);
-			obs_data_set_int(s, ch_adj_key.data(), prev_adj);
-			obs_data_set_string(s, prev_memo_key.data(), ch_memo.c_str());
-			obs_data_set_string(s, ch_memo_key.data(), prev_memo.c_str());
-			obs_data_set_string(s, prev_code_key.data(), ch_code.c_str());
-			obs_data_set_string(s, ch_code_key.data(), prev_code.c_str());
+			ods::model::SettingsRepo repo(s);
+			repo.swap_channels(prev, ch);
+			d->router.set_sub_memo(prev, repo.ch_memo(prev));
+			d->router.set_sub_memo(ch, repo.ch_memo(ch));
+			d->router.set_sub_code(prev, repo.ch_code(prev));
+			d->router.set_sub_code(ch, repo.ch_code(ch));
 			obs_data_release(s);
 
-			std::swap(d->delay.channels[prev].measured_ms, d->delay.channels[ch].measured_ms);
-			std::swap(d->delay.channels[prev].ws_measured, d->delay.channels[ch].ws_measured);
-			std::swap(d->delay.channels[prev].offset_ms, d->delay.channels[ch].offset_ms);
+			std::swap(d->delay.channels[prev], d->delay.channels[ch]);
 			ods::plugin::recalc_all_delays(d);
 			d->sub_channels[prev].measure.reset();
 			d->sub_channels[ch].measure.reset();
-			d->router.set_sub_memo(prev, ch_memo);
-			d->router.set_sub_memo(ch, prev_memo);
-			d->router.set_sub_code(prev, ch_code);
-			d->router.set_sub_code(ch, prev_code);
 
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_swap_up ch=%d <-> ch=%d", ch + 1, prev + 1);
 			d->flow.reset();

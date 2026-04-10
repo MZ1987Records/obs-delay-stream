@@ -18,6 +18,7 @@
 #include "ui/properties-channels.hpp"
 #include "ui/properties-delay.hpp"
 #include "ui/properties-url-share.hpp"
+#include "model/settings-repo.hpp"
 #include "viewmodel/delay-viewmodel.hpp"
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
@@ -97,13 +98,12 @@ private:
 // 計測結果と計測済みフラグを OBS 設定に書き戻し、全チャンネル遅延を再計算する。
 void DelayStreamFilter::save_measurement_and_recalc(DelayStreamData *d) {
 	obs_data_t *settings = obs_source_get_settings(d->context);
-	obs_data_set_int(settings, ods::plugin::kMeasuredRtspE2eKey, d->delay.measured_rtsp_e2e_ms);
-	obs_data_set_bool(settings, ods::plugin::kRtspE2eMeasuredKey, d->delay.rtsp_e2e_measured);
+	ods::model::SettingsRepo repo(settings);
+	repo.set_measured_rtsp_e2e_ms(d->delay.measured_rtsp_e2e_ms);
+	repo.set_rtsp_e2e_measured(d->delay.rtsp_e2e_measured);
 	for (int i = 0; i < MAX_SUB_CH; ++i) {
-		const auto key = ods::plugin::make_sub_measured_key(i);
-		obs_data_set_int(settings, key.data(), d->delay.channels[i].measured_ms);
-		const auto ws_key = ods::plugin::make_sub_ws_measured_key(i);
-		obs_data_set_bool(settings, ws_key.data(), d->delay.channels[i].ws_measured);
+		repo.set_ch_measured_ms(i, d->delay.channels[i].measured_ms);
+		repo.set_ch_ws_measured(i, d->delay.channels[i].ws_measured);
 	}
 	obs_data_release(settings);
 	ods::plugin::recalc_all_delays(d);
