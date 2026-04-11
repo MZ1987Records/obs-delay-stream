@@ -323,6 +323,9 @@ namespace ods::plugin {
 					delay.avatar_latency_ms = avatar;
 				}
 
+				// 再生バッファ
+				delay.playback_buffer_ms = data_->playback_buffer_ms;
+
 				// RTSP E2E 計測結果（OBS 設定から復元）
 				delay.measured_rtsp_e2e_ms =
 					static_cast<int>(obs_data_get_int(settings_, kMeasuredRtspE2eKey));

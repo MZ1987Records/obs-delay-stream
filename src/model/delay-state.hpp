@@ -15,7 +15,7 @@ namespace ods::model {
 	 */
 	struct DelaySnapshot {
 		struct ChDelay {
-			int  raw_ms          = 0;     ///< R - A - C[i] + offset[i]（負値許容）
+			int  raw_ms          = 0;     ///< R - A - C[i] - B + offset[i]（負値許容）
 			int  total_ms        = 0;     ///< raw_ms + neg_max（バッファ適用値）
 			bool has_measurement = false; ///< WS 計測済みか
 			bool warn            = false; ///< floor 補正の原因チャンネルか
@@ -43,6 +43,7 @@ namespace ods::model {
 		int  measured_rtsp_e2e_ms = 0;     ///< RTSP E2E 計測結果 (ms, OBS 設定に永続保存)
 		bool rtsp_e2e_measured    = false; ///< RTSP E2E 計測済みフラグ
 		int  avatar_latency_ms    = 0;     ///< アバター同期レイテンシ (ms, 0-5000)
+		int  playback_buffer_ms   = 0;     ///< 再生バッファ量 (ms)
 		int  sub_ch_count         = 1;     ///< アクティブなサブチャンネル数
 
 		std::array<ChDelay, MAX_SUB_CH> channels{}; ///< チャンネルごとの遅延入力
@@ -51,8 +52,10 @@ namespace ods::model {
 		static int calc_ch_raw_delay_ms(int rtsp_e2e_ms,
 										int avatar_latency_ms,
 										int ch_measured_ms,
+										int playback_buffer_ms,
 										int offset_ms) {
-			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms + offset_ms;
+			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms
+				   - playback_buffer_ms + offset_ms;
 		}
 
 		/// 全チャンネルの遅延を一括計算してスナップショットを返す。
@@ -62,6 +65,7 @@ namespace ods::model {
 
 			const int R = measured_rtsp_e2e_ms;
 			const int A = avatar_latency_ms;
+			const int B = playback_buffer_ms;
 
 			for (int i = 0; i < sub_ch_count; ++i) {
 				auto &out           = snap.channels[i];
@@ -70,7 +74,7 @@ namespace ods::model {
 					out.raw_ms = 0;
 					continue;
 				}
-				out.raw_ms = calc_ch_raw_delay_ms(R, A, channels[i].measured_ms, channels[i].offset_ms);
+				out.raw_ms = calc_ch_raw_delay_ms(R, A, channels[i].measured_ms, B, channels[i].offset_ms);
 				if (out.raw_ms < 0 && -out.raw_ms > snap.neg_max_ms) {
 					snap.neg_max_ms = -out.raw_ms;
 				}

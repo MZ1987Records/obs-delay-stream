@@ -142,10 +142,11 @@ classDiagram
 ```
 R = measured_rtsp_e2e_ms      (RTSP E2E 計測結果)
 A = avatar_latency_ms         (アバターレイテンシ)
+B = playback_buffer_ms        (再生バッファ量)
 C[i] = sub_channels[i].measured_ms  (チャンネル i の WS 計測結果)
 offset[i] = sub_channels[i].offset_ms  (チャンネル i の手動補正)
 
-raw[i]   = R - A - C[i] + offset[i]
+raw[i]   = R - A - C[i] - B + offset[i]
 neg_max  = max(0, max(-raw[i] for all measured i where raw[i] < 0))
 
 ch_delay[i] = raw[i] + neg_max   (各チャンネルの DelayBuffer 適用値)
