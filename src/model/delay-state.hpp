@@ -54,8 +54,7 @@ namespace ods::model {
 										int ch_measured_ms,
 										int playback_buffer_ms,
 										int offset_ms) {
-			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms
-				   - playback_buffer_ms + offset_ms;
+			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms - playback_buffer_ms + offset_ms;
 		}
 
 		/// 全チャンネルの遅延を一括計算してスナップショットを返す。
