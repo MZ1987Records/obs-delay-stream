@@ -693,6 +693,11 @@ namespace ods::ui {
 							table_channels[i].measured_ms = d->delay.channels[i].measured_ms;
 					}
 				}
+				// フロー結果で埋まらなかったチャンネルに保存済み計測値をフォールバック
+				for (int i = 0; i < sub_count; ++i) {
+					if (table_channels[i].measured_ms == -1 && d->delay.channels[i].ws_measured)
+						table_channels[i].measured_ms = d->delay.channels[i].measured_ms;
+				}
 
 				FlowTableLabels tbl_labels{};
 				tbl_labels.hdr_ch              = T_("FlowTableColCh");
