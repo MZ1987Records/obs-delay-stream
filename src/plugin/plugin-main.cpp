@@ -30,6 +30,7 @@
 #include "widgets/pulldown-row-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 #include "widgets/text-button-widget.hpp"
+#include "widgets/url-table-widget.hpp"
 
 #include <QApplication>
 #include <QTimer>
@@ -154,6 +155,7 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		break;
 	case 2:
 		schedule_path_mode_row_inject(ctx);
+		schedule_url_table_inject(ctx);
 		break;
 	case 3:
 		schedule_flow_progress_inject(ctx);

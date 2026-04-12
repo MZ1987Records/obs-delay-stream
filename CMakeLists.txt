@@ -79,6 +79,7 @@ add_library(obs-delay-stream MODULE
   src/widgets/delay-table-widget.cpp
   src/widgets/flow-progress-widget.cpp
   src/widgets/flow-table-widget.cpp
+  src/widgets/url-table-widget.cpp
   src/widgets/widget-payload-utils.cpp
   src/network/opus-encoder.cpp
   src/network/stream-router.cpp

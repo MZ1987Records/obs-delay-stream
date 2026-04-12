@@ -3,13 +3,13 @@
 #include "plugin/plugin-utils.hpp"
 #include "ui/properties-url-share.hpp"
 #include "ui/props-refresh.hpp"
-#include "ui/table-theme.hpp"
 #include "ui/url-share-renderer.hpp"
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/path-mode-row-widget.hpp"
+#include "widgets/url-table-widget.hpp"
 
-#include <QApplication>
-#include <QColor>
+#include <algorithm>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -78,6 +78,7 @@ namespace ods::ui::url_share {
 				if (!d || !d->context) return;
 				ods::widgets::schedule_color_button_row_inject(d->context);
 				ods::widgets::schedule_path_mode_row_inject(d->context);
+				ods::widgets::schedule_url_table_inject(d->context);
 			});
 			return true;
 		}
@@ -121,29 +122,26 @@ namespace ods::ui::url_share {
 					obs_properties_add_bool(grp, "url_share_show_list", T_("UrlShareShowList"));
 				obs_property_set_modified_callback2(show_list_p, cb_show_list_changed, d);
 
-				auto                  rows  = collect_sub_url_rows(d, s);
-				auto                  theme = make_table_theme_colors(QApplication::palette());
-				UrlConfirmThemeColors theme_colors;
-				theme_colors.table_bg    = theme.table_bg.name(QColor::HexRgb).toStdString();
-				theme_colors.header_bg   = theme.header_bg.name(QColor::HexRgb).toStdString();
-				theme_colors.header_text = theme.header_text.name(QColor::HexRgb).toStdString();
-				theme_colors.row_bg      = theme.row_bg.name(QColor::HexRgb).toStdString();
-				theme_colors.alt_row_bg  = theme.alt_row_bg.name(QColor::HexRgb).toStdString();
-				theme_colors.text        = theme.text.name(QColor::HexRgb).toStdString();
-				theme_colors.border      = theme.border.name(QColor::HexRgb).toStdString();
-				theme_colors.link        = theme.link.name(QColor::HexRgb).toStdString();
-				const bool  linkify_urls = (ts != TunnelState::Starting);
-				std::string list_html    = build_url_confirm_html_text(
-					rows,
-					T_("NotConfigured"),
-					&theme_colors,
-					linkify_urls);
+				auto rows = collect_sub_url_rows(d, s);
 				obs_data_release(s);
-				obs_property_t *list_info_p = obs_properties_add_text(
+
+				ods::widgets::UrlTableInfo tbl_info{};
+				tbl_info.ch_count = static_cast<int>(rows.size());
+				tbl_info.linkify  = (ts != TunnelState::Starting);
+				{
+					const char *nc = T_("NotConfigured");
+					std::strncpy(tbl_info.not_configured, nc ? nc : "-", sizeof(tbl_info.not_configured) - 1);
+				}
+				for (int i = 0; i < tbl_info.ch_count && i < ods::widgets::UrlTableInfo::kMaxCh; ++i) {
+					auto &dst       = tbl_info.rows[i];
+					dst.ch_1indexed = rows[i].ch_1indexed;
+					std::strncpy(dst.name, rows[i].name.c_str(), sizeof(dst.name) - 1);
+					std::strncpy(dst.url, rows[i].url.c_str(), sizeof(dst.url) - 1);
+				}
+				obs_property_t *list_info_p = ods::widgets::obs_properties_add_url_table(
 					grp,
 					"url_confirm_list_html",
-					list_html.c_str(),
-					OBS_TEXT_INFO);
+					tbl_info);
 				obs_property_text_set_info_word_wrap(list_info_p, false);
 				obs_property_set_visible(list_info_p, show_list);
 			}
