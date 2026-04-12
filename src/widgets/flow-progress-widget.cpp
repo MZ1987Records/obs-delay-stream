@@ -105,8 +105,8 @@ namespace ods::widgets {
 				if (row < 0) continue;
 				// bar_text の長短に関わらずバー高さを固定するため sizeHint() は使わない
 				const QMargins text_margins = f.label->contentsMargins();
-				constexpr int  kBarHeight   = 24;
-				constexpr int  kBarMarginV  = 6;
+				constexpr int  kBarHeight   = 14;
+				constexpr int  kBarMarginV  = 2;
 
 				auto *bar = new QProgressBar(parent);
 				bar->setRange(0, 100);
