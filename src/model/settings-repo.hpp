@@ -147,6 +147,33 @@ namespace ods::model {
 		void set_rtsp_e2e_measured(bool v) {
 			obs_data_set_bool(s_, plugin::kRtspE2eMeasuredKey, v);
 		}
+
+		// ============================================================
+		// トンネル設定
+		// ============================================================
+
+		int tunnel_mode_raw() const {
+			return static_cast<int>(obs_data_get_int(s_, plugin::kTunnelModeKey));
+		}
+		void set_tunnel_mode(int v) {
+			obs_data_set_int(s_, plugin::kTunnelModeKey, v);
+		}
+
+		std::string tunnel_token() const {
+			const char *t = obs_data_get_string(s_, plugin::kTunnelTokenKey);
+			return t ? t : "";
+		}
+		void set_tunnel_token(const std::string &v) {
+			obs_data_set_string(s_, plugin::kTunnelTokenKey, v.c_str());
+		}
+
+		std::string tunnel_domain() const {
+			const char *d = obs_data_get_string(s_, plugin::kTunnelDomainKey);
+			return d ? d : "";
+		}
+		void set_tunnel_domain(const std::string &v) {
+			obs_data_set_string(s_, plugin::kTunnelDomainKey, v.c_str());
+		}
 	};
 
 } // namespace ods::model

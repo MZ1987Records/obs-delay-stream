@@ -16,7 +16,15 @@ namespace ods::plugin {
 	inline constexpr char kFfmpegExePathModeKey[]      = "ffmpeg_exe_path_mode";
 	inline constexpr char kCloudflaredExePathKey[]     = "cloudflared_exe_path";
 	inline constexpr char kCloudflaredExePathModeKey[] = "cloudflared_exe_path_mode";
+	inline constexpr char kTunnelModeKey[]             = "tunnel_mode";
+	inline constexpr char kTunnelTokenKey[]            = "tunnel_token";
+	inline constexpr char kTunnelDomainKey[]           = "tunnel_domain";
 	inline constexpr char kPathModeFromEnvPath[]       = "%PATH%";
+
+	enum class TunnelMode {
+		QuickTunnel = 0, ///< 無料・認証不要（起動毎にドメインが変わる）
+		NamedTunnel = 1, ///< トークンベース（ドメイン固定）
+	};
 
 	enum class ExePathMode {
 		Auto     = 0, ///< 既定配置先から自動取得（未配置ならダウンロード）

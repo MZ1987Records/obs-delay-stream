@@ -168,6 +168,23 @@ namespace ods::ui {
 			return false;
 		}
 
+		// トンネルモード変更時にトークン/ドメイン欄の表示を切り替える。
+		bool cb_tunnel_mode_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+			if (!priv || !props || !settings) return false;
+			auto *d = static_cast<DelayStreamData *>(priv);
+			int mode = static_cast<int>(obs_data_get_int(settings, ods::plugin::kTunnelModeKey));
+			bool named = (mode == static_cast<int>(ods::plugin::TunnelMode::NamedTunnel));
+			if (auto *p = obs_properties_get(props, ods::plugin::kTunnelTokenKey))
+				obs_property_set_visible(p, named);
+			if (auto *p = obs_properties_get(props, ods::plugin::kTunnelDomainKey))
+				obs_property_set_visible(p, named);
+			props_ui_with_preserved_scroll([d]() {
+				if (!d || !d->context) return;
+				schedule_color_button_row_inject(d->context);
+			});
+			return true;
+		}
+
 		// cloudflared トンネル起動を要求する。
 		bool cb_tunnel_start(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
@@ -178,9 +195,18 @@ namespace ods::ui {
 				s,
 				ods::plugin::kCloudflaredExePathModeKey,
 				ods::plugin::kCloudflaredExePathKey);
+			int mode = static_cast<int>(obs_data_get_int(s, ods::plugin::kTunnelModeKey));
+			std::string token;
+			std::string domain;
+			if (mode == static_cast<int>(ods::plugin::TunnelMode::NamedTunnel)) {
+				const char *t = obs_data_get_string(s, ods::plugin::kTunnelTokenKey);
+				const char *dm = obs_data_get_string(s, ods::plugin::kTunnelDomainKey);
+				token  = t ? t : "";
+				domain = dm ? dm : "";
+			}
 			obs_data_release(s);
 			int ws_port = d->ws_port.load(std::memory_order_relaxed);
-			d->tunnel.start(exe, ws_port);
+			d->tunnel.start(exe, ws_port, token, domain);
 			d->request_props_refresh_for_tabs({2}, "cb_tunnel_start");
 			return false;
 		}
@@ -1094,6 +1120,40 @@ namespace ods::ui {
 			T_("CloudflaredExePath"),
 			cloudflared_path_spec);
 
+		// トンネルモード選択（Quick Tunnel / Named Tunnel）
+		{
+			obs_data_t *s = obs_source_get_settings(d->context);
+			int cur_mode = s ? static_cast<int>(obs_data_get_int(s, ods::plugin::kTunnelModeKey)) : 0;
+			if (s) obs_data_release(s);
+			bool is_named = (cur_mode == static_cast<int>(ods::plugin::TunnelMode::NamedTunnel));
+
+			obs_property_t *mode_p = obs_properties_add_list(
+				grp, ods::plugin::kTunnelModeKey, T_("TunnelModeLabel"),
+				OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+			obs_property_list_add_int(mode_p, T_("TunnelModeQuick"),
+				static_cast<int>(ods::plugin::TunnelMode::QuickTunnel));
+			obs_property_list_add_int(mode_p, T_("TunnelModeNamed"),
+				static_cast<int>(ods::plugin::TunnelMode::NamedTunnel));
+			obs_property_set_modified_callback2(mode_p, cb_tunnel_mode_changed, d);
+			if (tunnel_running || tunnel_busy) {
+				obs_property_set_enabled(mode_p, false);
+			}
+
+			obs_property_t *token_p = obs_properties_add_text(
+				grp, ods::plugin::kTunnelTokenKey, T_("TunnelTokenLabel"), OBS_TEXT_PASSWORD);
+			obs_property_set_visible(token_p, is_named);
+			if (tunnel_running || tunnel_busy) {
+				obs_property_set_enabled(token_p, false);
+			}
+
+			obs_property_t *domain_p = obs_properties_add_text(
+				grp, ods::plugin::kTunnelDomainKey, T_("TunnelDomainLabel"), OBS_TEXT_DEFAULT);
+			obs_property_set_visible(domain_p, is_named);
+			if (tunnel_running || tunnel_busy) {
+				obs_property_set_enabled(domain_p, false);
+			}
+		}
+
 		const ObsColorButtonSpec tunnel_buttons[] = {
 			{
 				"tunnel_start_btn",
@@ -1126,6 +1186,19 @@ namespace ods::ui {
 			tunnel_status_text);
 
 		std::string tunnel_domain      = extract_host_from_url(turl);
+		// Named Tunnel モードではユーザー設定ドメインをフォールバック表示
+		std::string named_domain_fallback;
+		if (tunnel_domain.empty()) {
+			obs_data_t *s2 = obs_source_get_settings(d->context);
+			if (s2) {
+				int m = static_cast<int>(obs_data_get_int(s2, ods::plugin::kTunnelModeKey));
+				if (m == static_cast<int>(ods::plugin::TunnelMode::NamedTunnel)) {
+					const char *dd = obs_data_get_string(s2, ods::plugin::kTunnelDomainKey);
+					if (dd && *dd) named_domain_fallback = dd;
+				}
+				obs_data_release(s2);
+			}
+		}
 		const char *tunnel_domain_text = nullptr;
 		if (cloudflared_downloading || cloudflared_dl_running) {
 			tunnel_domain_text = T_("CloudflaredDownloading");
@@ -1133,6 +1206,8 @@ namespace ods::ui {
 			tunnel_domain_text = T_("TunnelStarting");
 		} else if (!tunnel_domain.empty()) {
 			tunnel_domain_text = tunnel_domain.c_str();
+		} else if (!named_domain_fallback.empty()) {
+			tunnel_domain_text = named_domain_fallback.c_str();
 		} else {
 			tunnel_domain_text = T_("TunnelUnassignedDomain");
 		}

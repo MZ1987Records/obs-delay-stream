@@ -4,11 +4,18 @@
  * cloudflared を子プロセスとして起動し、
  * 取得したパブリックURL (wss://) を返す。
  *
- * cloudflared:
+ * 2つのモードをサポートする:
+ *
+ * Quick Tunnel（既定）:
  *   起動: cloudflared.exe tunnel --url http://localhost:<WS_PORT>
  *   URL取得: stderr に出力される "https://xxxx.trycloudflare.com" を捕捉
- *   URL形式: https:// → wss:// に変換
- *   ※ 無料・認証不要・固定でない（起動毎にURLが変わる）
+ *   ※ 無料・認証不要・起動毎にドメインが変わる
+ *
+ * Named Tunnel（トークンベース）:
+ *   起動: cloudflared.exe tunnel run --token <TOKEN>
+ *   接続検出: ログの "Registered tunnel connection" で判定
+ *   URL: ユーザー指定ドメインから wss:// を構成
+ *   ※ Cloudflare アカウント必要・ドメイン固定
  */
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -46,11 +53,14 @@ namespace ods::tunnel {
 		stop();
 	}
 
-	bool TunnelManager::start(const std::string &exe_path, int ws_port) {
+	bool TunnelManager::start(const std::string &exe_path, int ws_port,
+							   const std::string &token, const std::string &domain) {
 		if (state_.load() == TunnelState::Running ||
 			state_.load() == TunnelState::Starting) return false;
 
 		ws_port_ = ws_port;
+		token_   = token;
+		named_domain_ = domain;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			url_   = "";
@@ -398,7 +408,12 @@ namespace ods::tunnel {
 	}
 
 	bool TunnelManager::run_cloudflared() {
-		const std::string args = "tunnel --url http://localhost:" + std::to_string(ws_port_);
+		std::string args;
+		if (!token_.empty()) {
+			args = "tunnel run --token " + token_;
+		} else {
+			args = "tunnel --url http://localhost:" + std::to_string(ws_port_);
+		}
 
 		if (!launch_process(exe_path_, args)) {
 			if (!last_launch_error_.empty())
@@ -408,7 +423,14 @@ namespace ods::tunnel {
 			return false;
 		}
 
-		// ファイルからURLを読み取る
+		bool ok = token_.empty() ? poll_quick_tunnel_url() : poll_named_tunnel_ready();
+		if (!ok) return false;
+
+		monitor_process_until_exit();
+		return true;
+	}
+
+	bool TunnelManager::poll_quick_tunnel_url() {
 		std::string tunnel_url;
 		std::string accum;
 		auto        deadline = std::chrono::steady_clock::now() + std::chrono::seconds(CLOUDFLARED_URL_TIMEOUT_S);
@@ -439,7 +461,6 @@ namespace ods::tunnel {
 			fbuf.resize(bytes_read);
 			accum = fbuf;
 
-			// エラーログ検出
 			{
 				std::string emsg;
 				if (extract_cloudflared_error(accum, emsg)) {
@@ -448,7 +469,6 @@ namespace ods::tunnel {
 				}
 			}
 
-			// 行単位で解析
 			size_t pos = 0;
 			while (true) {
 				auto        nl   = accum.find('\n', pos);
@@ -478,7 +498,7 @@ namespace ods::tunnel {
 						host      = candidate.substr(7, he == std::string::npos ? std::string::npos : he - 7);
 					}
 					if (!_stricmp(host.c_str(), "api.trycloudflare.com")) {
-						continue; // API URLは除外
+						continue;
 					}
 					tunnel_url = candidate;
 					blog(LOG_INFO, "[obs-delay-stream] cloudflared URL found: %s", candidate.c_str());
@@ -487,7 +507,6 @@ namespace ods::tunnel {
 			}
 			if (!tunnel_url.empty()) break;
 
-			// プロセス終了チェック
 			DWORD exit_code = STILL_ACTIVE;
 			{
 				std::lock_guard<std::mutex> lk(proc_mtx_);
@@ -517,8 +536,76 @@ namespace ods::tunnel {
 		set_url(tunnel_url);
 		state_ = TunnelState::Running;
 		if (on_url_ready) on_url_ready(tunnel_url);
+		return true;
+	}
 
-		// プロセス終了監視
+	bool TunnelManager::poll_named_tunnel_ready() {
+		auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(CLOUDFLARED_URL_TIMEOUT_S);
+
+		while (!stop_requested_ && std::chrono::steady_clock::now() < deadline) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(CLOUDFLARED_POLL_INTV_MS));
+
+			HANDLE hRead = CreateFileA(
+				log_file_path_.c_str(),
+				GENERIC_READ,
+				FILE_SHARE_READ | FILE_SHARE_WRITE,
+				nullptr,
+				OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL,
+				nullptr);
+			if (hRead == INVALID_HANDLE_VALUE) continue;
+
+			DWORD fsize = GetFileSize(hRead, nullptr);
+			if (fsize == 0 || fsize == INVALID_FILE_SIZE) {
+				CloseHandle(hRead);
+				continue;
+			}
+			std::string fbuf(fsize, '\0');
+			DWORD       bytes_read = 0;
+			BOOL        r          = ReadFile(hRead, &fbuf[0], fsize, &bytes_read, nullptr);
+			CloseHandle(hRead);
+			if (!r || bytes_read == 0) continue;
+			fbuf.resize(bytes_read);
+
+			{
+				std::string emsg;
+				if (extract_cloudflared_error(fbuf, emsg)) {
+					set_error(emsg);
+					return false;
+				}
+			}
+
+			// Named Tunnel は "Registered tunnel connection" で接続確立を検出
+			if (fbuf.find("Registered tunnel connection") != std::string::npos ||
+				fbuf.find("registered connIndex") != std::string::npos) {
+				std::string tunnel_url = "wss://" + named_domain_;
+				blog(LOG_INFO, "[obs-delay-stream] named tunnel connected: %s", named_domain_.c_str());
+				set_url(tunnel_url);
+				state_ = TunnelState::Running;
+				if (on_url_ready) on_url_ready(tunnel_url);
+				return true;
+			}
+
+			DWORD exit_code = STILL_ACTIVE;
+			{
+				std::lock_guard<std::mutex> lk(proc_mtx_);
+				if (proc_handle_ != INVALID_HANDLE_VALUE)
+					GetExitCodeProcess(proc_handle_, &exit_code);
+				else
+					break;
+			}
+			if (exit_code != STILL_ACTIVE) {
+				set_error("cloudflared が終了しました。ログを確認してください。");
+				return false;
+			}
+		}
+
+		set_error("Named Tunnel の接続確立がタイムアウトしました。\n"
+				  "トークンとネットワーク接続を確認してください。");
+		return false;
+	}
+
+	void TunnelManager::monitor_process_until_exit() {
 		while (!stop_requested_) {
 			DWORD exit_code = STILL_ACTIVE;
 			{
@@ -531,7 +618,6 @@ namespace ods::tunnel {
 			if (exit_code != STILL_ACTIVE) break;
 			std::this_thread::sleep_for(std::chrono::milliseconds(CLOUDFLARED_POLL_INTV_MS));
 		}
-		return true;
 	}
 
 	// ============================================================
@@ -573,6 +659,9 @@ namespace ods::tunnel {
 
 			bool is_err_line =
 				contains(line, "failed to request quick Tunnel") ||
+				contains(line, "failed to unmarshal tunnel") ||
+				contains(line, "Unauthorized") ||
+				contains(line, "tunnel not found") ||
 				contains(line, " ERR ") ||
 				contains(line, "\tERR\t") ||
 				(contains(line, "failed to") &&

@@ -67,7 +67,11 @@ namespace ods::tunnel {
 
 		/// cloudflared を起動する。
 		/// @param exe_path cloudflared.exe の解決指定（"auto" / "%PATH%" / 絶対パス）
-		bool start(const std::string &exe_path, int ws_port);
+		/// @param ws_port  転送先 WebSocket ポート
+		/// @param token    Named Tunnel 用トークン（空なら Quick Tunnel）
+		/// @param domain   Named Tunnel 用ドメイン（空なら Quick Tunnel）
+		bool start(const std::string &exe_path, int ws_port,
+				   const std::string &token = "", const std::string &domain = "");
 		/// 起動中の cloudflared を停止する。
 		void stop();
 
@@ -86,6 +90,8 @@ namespace ods::tunnel {
 		std::string exe_path_;           ///< 実行中に使用する cloudflared パス
 		std::string requested_exe_path_; ///< ユーザー指定の元パス
 		int         ws_port_ = WS_PORT;  ///< トンネル転送先 WebSocket ポート
+		std::string token_;              ///< Named Tunnel 用トークン
+		std::string named_domain_;       ///< Named Tunnel 用ドメイン
 
 		std::string        url_;               ///< 取得済み公開 URL
 		std::string        error_;             ///< 公開用エラー文字列
@@ -115,6 +121,12 @@ namespace ods::tunnel {
 		void run_loop();
 		/// cloudflared 起動と URL 取得処理を実行する。
 		bool run_cloudflared();
+		/// Quick Tunnel ログから公開 URL を検出する。
+		bool poll_quick_tunnel_url();
+		/// Named Tunnel ログから接続確立を検出する。
+		bool poll_named_tunnel_ready();
+		/// cloudflared プロセスの終了を監視する。
+		void monitor_process_until_exit();
 
 		/// `%LOCALAPPDATA%` の実体パスを取得する。
 		static std::string get_local_appdata_dir();

@@ -291,6 +291,13 @@ namespace ods::plugin {
 				const ExePathMode cloudflared_mode     = normalize_exe_path_mode(cloudflared_mode_raw);
 				obs_data_set_int(settings_, kCloudflaredExePathModeKey, static_cast<int>(cloudflared_mode));
 
+				{
+					int tmode = static_cast<int>(obs_data_get_int(settings_, kTunnelModeKey));
+					if (tmode < 0 || tmode > static_cast<int>(TunnelMode::NamedTunnel)) {
+						obs_data_set_int(settings_, kTunnelModeKey, static_cast<int>(TunnelMode::QuickTunnel));
+					}
+				}
+
 				const char       *ffmpeg_path     = obs_data_get_string(settings_, kFfmpegExePathKey);
 				const int         ffmpeg_mode_raw = obs_data_has_user_value(settings_, kFfmpegExePathModeKey)
 														? static_cast<int>(obs_data_get_int(settings_, kFfmpegExePathModeKey))
