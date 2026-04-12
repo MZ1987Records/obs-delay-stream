@@ -21,11 +21,25 @@ namespace ods::ui::delay {
 	using namespace ods::core;
 	using namespace ods::widgets;
 
-	void add_delay_diagram_group(obs_properties_t *props, const DelayViewModel &vm) {
-		if (!props) return;
+	void add_delay_diagram_group(obs_properties_t *props, DelayStreamData *d, const DelayViewModel &vm) {
+		if (!props || !d) return;
 		obs_properties_t *grp       = obs_properties_create();
 		const int         sub_count = static_cast<int>(vm.channels.size());
 
+		// 想定アバター遅延ステッパー
+		obs_properties_add_stepper(
+			grp,
+			"avatar_latency_ms_stepper",
+			T_("AvatarLatencyLabel"),
+			ods::plugin::kAvatarLatencyKey,
+			0.0,
+			5000.0,
+			0.0,
+			0,
+			" ms",
+			true);
+
+		// タイミング図
 		DelayDiagramInfo info{};
 		info.R            = vm.rtsp_e2e_ms;
 		info.A            = vm.avatar_latency_ms;
@@ -41,6 +55,7 @@ namespace ods::ui::delay {
 		DelayDiagramLabels labels;
 		labels.legend_delay     = T_("DiagramDelay");
 		labels.legend_ws        = T_("DiagramWsLatency");
+		labels.legend_env       = T_("DiagramEnvLatency");
 		labels.legend_buf       = T_("DiagramPlaybackBuf");
 		labels.legend_avatar    = T_("DiagramAvatarLatency");
 		labels.legend_broadcast = T_("DiagramBroadcastLatency");
@@ -90,19 +105,6 @@ namespace ods::ui::delay {
 			sub_count,
 			channels.data(),
 			labels);
-
-		// 想定アバターレイテンシ ステッパー
-		obs_properties_add_stepper(
-			grp,
-			"avatar_latency_ms_stepper",
-			T_("AvatarLatencyLabel"),
-			ods::plugin::kAvatarLatencyKey,
-			0.0,
-			5000.0,
-			0.0,
-			0,
-			" ms",
-			true);
 
 		obs_properties_add_group(
 			props,

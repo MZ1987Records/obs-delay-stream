@@ -471,8 +471,6 @@ namespace ods::ui {
 		// SyncFlow パネル全体（接続状況/操作/進捗）を構築する。
 		void build_flow_panel(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
-			obs_properties_add_text(grp, "flow_desc", T_("FlowDesc"), OBS_TEXT_INFO);
-
 			FlowPhase  phase     = d->flow.phase();
 			FlowResult res       = d->flow.result();
 			int        sub_count = d->delay.sub_ch_count;

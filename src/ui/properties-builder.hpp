@@ -26,7 +26,7 @@ namespace ods::ui {
 	/// 同期フロー UI グループを追加する
 	void add_flow_group(obs_properties_t *props, ods::plugin::DelayStreamData *d);
 
-	/// マスター遅延 UI グループを追加する
+	/// マスターディレイ UI グループを追加する
 	void add_master_group(obs_properties_t *props, ods::plugin::DelayStreamData *d);
 
 } // namespace ods::ui
