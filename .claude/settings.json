@@ -34,6 +34,7 @@
       "Bash(pwd)",
       "Bash(sed *)",
       "Bash(jq *)",
+      "Bash(cmake *)",
       "Bash(xargs grep *)",
       "Bash(xargs wc *)",
       "Bash(cmake --build build *)",
