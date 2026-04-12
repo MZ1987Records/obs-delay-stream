@@ -678,12 +678,13 @@ namespace ods::ui {
 					tc.measured_ms = -1; // 未計測
 				}
 
-				if (is_ws_done_or_later) {
+				// 計測中もスキップ済みチャンネルの結果を維持する
+				if (is_ws_done_or_later || is_ws_measuring) {
 					for (int i = 0; i < sub_count; ++i) {
 						if (!res.channels[i].connected) continue;
 						if (res.channels[i].measured)
 							table_channels[i].measured_ms = res.ch_measured_ms(i);
-						else
+						else if (is_ws_done_or_later)
 							table_channels[i].measured_ms = -2; // 失敗
 					}
 				} else if (has_saved_ws) {
