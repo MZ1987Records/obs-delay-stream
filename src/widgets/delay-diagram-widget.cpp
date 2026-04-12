@@ -91,6 +91,8 @@ namespace ods::widgets {
 			QString lbl_broadcast;
 			QString lbl_lane_broadcast;
 			QString lbl_no_data;
+			QString lbl_no_data_rtsp;
+			QString lbl_no_data_ws;
 		};
 
 		// レーン内のセグメント 1 つ。
@@ -251,19 +253,56 @@ namespace ods::widgets {
 				return n + 1; // +1 for broadcast lane
 			}
 
+			int noDataLineCount() const {
+				int n = 0;
+				if (data_.R <= 0) ++n;
+				bool has_ws = false;
+				for (int i = 0; i < data_.ch_count && i < static_cast<int>(data_.channels.size()); ++i) {
+					if (data_.channels[i].measured_ms >= 0.0f) {
+						has_ws = true;
+						break;
+					}
+				}
+				if (!has_ws) ++n;
+				return std::max(n, 1);
+			}
+
 			int calcHeight() const {
-				if (!hasData()) return 40;
+				if (!hasData()) return 20 + noDataLineCount() * 20;
 				const int lanes = countVisibleLanes();
 				// 凡例2行: 1行目=レイテンシ系、2行目=自動調整ディレイ説明
 				return kMarginTop + kRulerH + kRulerMarginB + lanes * (kLaneH + kLaneGap) + kLegendMarginT + kLegendH + kLegendH + kMarginBottom;
 			}
 
 			void drawNoData(QPainter &p) const {
-				p.setPen(palette().color(QPalette::Disabled, QPalette::Text));
+				QStringList lines;
+				bool has_ws = false;
+				for (int i = 0; i < data_.ch_count && i < static_cast<int>(data_.channels.size()); ++i) {
+					if (data_.channels[i].measured_ms >= 0.0f) {
+						has_ws = true;
+						break;
+					}
+				}
+				if (!has_ws && !data_.lbl_no_data_ws.isEmpty())
+					lines << data_.lbl_no_data_ws;
+				if (data_.R <= 0 && !data_.lbl_no_data_rtsp.isEmpty())
+					lines << data_.lbl_no_data_rtsp;
+				if (lines.isEmpty())
+					lines << data_.lbl_no_data;
+
+				p.setPen(warningTextColor(palette()));
 				QFont f = font();
 				f.setPointSize(9);
 				p.setFont(f);
-				p.drawText(rect(), int(Qt::AlignCenter), data_.lbl_no_data);
+
+				const QFontMetrics fm(f);
+				const int          lineH  = fm.height() + 4;
+				const int          totalH = lines.size() * lineH;
+				int                y      = (height() - totalH) / 2;
+				for (const auto &line : lines) {
+					p.drawText(QRect(0, y, width(), lineH), int(Qt::AlignCenter), line);
+					y += lineH;
+				}
 			}
 
 			// ルーラー描画
@@ -464,7 +503,7 @@ namespace ods::widgets {
 
 		// ペイロード文字列をパースする。
 		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay
-		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data
+		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws
 		//       |ch0_measured|ch0_total|ch0_offset|ch1_measured|ch1_total|ch1_offset|...
 		bool parse_diagram_payload(const QString &text, DiagramData &out) {
 			QStringList fields;
@@ -474,7 +513,7 @@ namespace ods::widgets {
 				return false;
 
 			constexpr int kFixedFields = 6; // magic + R + A + buf + chCount + master_delay
-			constexpr int kLabelFields = 9;
+			constexpr int kLabelFields = 11;
 			if (fields.size() < kFixedFields + kLabelFields)
 				return false;
 
@@ -499,8 +538,10 @@ namespace ods::widgets {
 			out.lbl_broadcast      = fields[12];
 			out.lbl_lane_broadcast = fields[13];
 			out.lbl_no_data        = fields[14];
+			out.lbl_no_data_rtsp   = fields[15];
+			out.lbl_no_data_ws     = fields[16];
 
-			constexpr int kChFieldStart = kFixedFields + kLabelFields; // 15
+			constexpr int kChFieldStart = kFixedFields + kLabelFields; // 17
 			constexpr int kChFieldCount = 3;                           // measured_ms, total_ms, offset_ms
 			if (fields.size() < kChFieldStart + out.ch_count * kChFieldCount)
 				return false;
@@ -589,7 +630,7 @@ namespace ods::widgets {
 			return nullptr;
 
 		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay
-		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data
+		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws
 		//       |ch0_measured|ch0_total|...
 		std::string payload = "DDIAGRAM";
 		{
@@ -597,7 +638,7 @@ namespace ods::widgets {
 			std::snprintf(buf, sizeof(buf), "|%d|%d|%d|%d|%d", info.R, info.A, info.buf, info.ch_count, info.master_delay);
 			payload += buf;
 		}
-		// 9 label fields
+		// 11 label fields
 		for (const char *s : {
 				 labels.legend_delay,
 				 labels.legend_delay_desc,
@@ -607,7 +648,9 @@ namespace ods::widgets {
 				 labels.legend_avatar,
 				 labels.legend_broadcast,
 				 labels.lane_broadcast,
-				 labels.no_data}) {
+				 labels.no_data,
+				 labels.no_data_rtsp,
+				 labels.no_data_ws}) {
 			payload += '|';
 			payload += escape_field(s ? s : "");
 		}

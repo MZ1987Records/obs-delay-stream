@@ -41,6 +41,8 @@ namespace ods::widgets {
 		const char *legend_broadcast  = nullptr; ///< "OBS配信レイテンシ"
 		const char *lane_broadcast    = nullptr; ///< "配信" (レーンラベル)
 		const char *no_data           = nullptr; ///< "計測データなし"
+		const char *no_data_rtsp      = nullptr; ///< "OBS配信遅延が未計測です（…）"
+		const char *no_data_ws        = nullptr; ///< "WS配信遅延が未計測です（…）"
 	};
 
 	/// QFormLayout 用プレースホルダーとして OBS_TEXT_INFO プロパティを追加する

@@ -42,4 +42,8 @@ namespace ods::core {
 	static constexpr const char *UI_COLOR_STATUS_DOT_BUSY = "#FFAA00"; ///< 開始中・処理中ステータスの丸アイコン色
 	static constexpr const char *UI_COLOR_STATUS_DOT_OFF  = "#888888"; ///< 停止中ステータスの丸アイコン色
 
+	// UI 色（警告テキスト）
+	static constexpr const char *UI_COLOR_WARNING_LIGHT = "#DC2626"; ///< ライトテーマ用警告テキスト色
+	static constexpr const char *UI_COLOR_WARNING_DARK  = "#F87171"; ///< ダークテーマ用警告テキスト色
+
 } // namespace ods::core

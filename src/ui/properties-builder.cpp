@@ -48,8 +48,8 @@ namespace ods::ui {
 		static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
 		static constexpr char    kEmptyAbsolutePathSentinel[]  = "__OBS_DELAY_STREAM_EMPTY_ABSOLUTE_PATH__";
 
-		static constexpr char kWarningTextColorLight[] = "#DC2626"; // ライトテーマ用警告テキスト色
-		static constexpr char kWarningTextColorDark[]  = "#F87171"; // ダークテーマ用警告テキスト色
+		static constexpr const char *kWarningTextColorLight = ods::core::UI_COLOR_WARNING_LIGHT;
+		static constexpr const char *kWarningTextColorDark  = ods::core::UI_COLOR_WARNING_DARK;
 
 		// ============================================================
 		// namespace ローカル補助関数

@@ -1,10 +1,13 @@
 #pragma once
 
+#include "core/constants.hpp"
+
 #include <QAbstractScrollArea>
 #include <QColor>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPalette>
 #include <QPointer>
 #include <QScrollBar>
 #include <QTimer>
@@ -55,6 +58,13 @@ namespace ods::widgets {
 				area_ptr->verticalScrollBar()->setValue(restore_value);
 			});
 		}
+	}
+
+	/// パレットのテーマ（明/暗）に合った警告テキスト色を返す。
+	inline QColor warningTextColor(const QPalette &pal) {
+		const bool isDark = (pal.color(QPalette::Window).lightnessF() < 0.5);
+		return isDark ? QColor(ods::core::UI_COLOR_WARNING_DARK)
+					  : QColor(ods::core::UI_COLOR_WARNING_LIGHT);
 	}
 
 	/// 色付き四角マーク＋テキストのフォームラベル用ウィジェットを生成する。

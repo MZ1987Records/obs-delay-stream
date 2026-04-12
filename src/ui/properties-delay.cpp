@@ -64,6 +64,8 @@ namespace ods::ui::delay {
 		labels.legend_broadcast  = T_("DiagramBroadcastLatency");
 		labels.lane_broadcast    = T_("DiagramLaneBroadcast");
 		labels.no_data           = T_("DiagramNoData");
+		labels.no_data_rtsp      = T_("DiagramNoDataRtsp");
+		labels.no_data_ws        = T_("DiagramNoDataWs");
 		obs_properties_add_delay_diagram(grp, "delay_diagram", info, labels);
 
 		obs_properties_add_group(
