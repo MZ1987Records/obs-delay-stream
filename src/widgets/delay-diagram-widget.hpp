@@ -43,6 +43,7 @@ namespace ods::widgets {
 		const char *no_data           = nullptr; ///< "計測データなし"
 		const char *no_data_rtsp      = nullptr; ///< "OBS配信遅延が未計測です（…）"
 		const char *no_data_ws        = nullptr; ///< "WS配信遅延が未計測です（…）"
+		const char *help_text         = nullptr; ///< グループ末尾のヘルプテキスト
 	};
 
 	/// QFormLayout 用プレースホルダーとして OBS_TEXT_INFO プロパティを追加する

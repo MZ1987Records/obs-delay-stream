@@ -23,6 +23,7 @@
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QLabel>
+#include <QVBoxLayout>
 #include <QPainter>
 #include <QPen>
 #include <QSizePolicy>
@@ -93,6 +94,7 @@ namespace ods::widgets {
 			QString lbl_no_data;
 			QString lbl_no_data_rtsp;
 			QString lbl_no_data_ws;
+			QString help_text;
 		};
 
 		// レーン内のセグメント 1 つ。
@@ -513,7 +515,7 @@ namespace ods::widgets {
 				return false;
 
 			constexpr int kFixedFields = 6; // magic + R + A + buf + chCount + master_delay
-			constexpr int kLabelFields = 11;
+			constexpr int kLabelFields = 12;
 			if (fields.size() < kFixedFields + kLabelFields)
 				return false;
 
@@ -540,8 +542,9 @@ namespace ods::widgets {
 			out.lbl_no_data        = fields[14];
 			out.lbl_no_data_rtsp   = fields[15];
 			out.lbl_no_data_ws     = fields[16];
+			out.help_text          = fields[17];
 
-			constexpr int kChFieldStart = kFixedFields + kLabelFields; // 17
+			constexpr int kChFieldStart = kFixedFields + kLabelFields; // 18
 			constexpr int kChFieldCount = 3;                           // measured_ms, total_ms, offset_ms
 			if (fields.size() < kChFieldStart + out.ch_count * kChFieldCount)
 				return false;
@@ -596,10 +599,50 @@ namespace ods::widgets {
 				form->getWidgetPosition(ph.label, &row, &role);
 				if (row < 0) continue;
 
-				auto *widget = new DelayDiagramWidget(data, parent);
+				auto *container = new QWidget(parent);
+				auto *vlay      = new QVBoxLayout(container);
+				vlay->setContentsMargins(0, 0, 0, 0);
+				vlay->setSpacing(0);
+				vlay->addWidget(new DelayDiagramWidget(data, container));
+
+				// ヘルプボックス（左ボーダーアクセント付きコールアウト）
+				if (!data.help_text.isEmpty()) {
+					auto *help = new QLabel(data.help_text, container);
+					help->setTextFormat(Qt::RichText);
+					help->setWordWrap(true);
+					QFont hf = container->font();
+					hf.setPixelSize(11);
+					help->setFont(hf);
+
+					const QPalette pal    = container->palette();
+					const QColor   accent = pal.color(QPalette::Highlight);
+					const QColor   base   = pal.color(QPalette::Window);
+					const QColor   bg(
+						base.red() + (accent.red() - base.red()) * 10 / 100,
+						base.green() + (accent.green() - base.green()) * 10 / 100,
+						base.blue() + (accent.blue() - base.blue()) * 10 / 100);
+					QColor border = accent;
+					border.setAlpha(160);
+					QColor fg = pal.color(QPalette::Text);
+					fg.setAlpha(190);
+
+					help->setStyleSheet(
+						QStringLiteral(
+							"QLabel {"
+							" background-color: %1;"
+							" border: none;"
+							" border-left: 3px solid %2;"
+							" padding: 6px 10px;"
+							" color: %3;"
+							"}")
+							.arg(bg.name(QColor::HexArgb),
+								 border.name(QColor::HexArgb),
+								 fg.name(QColor::HexArgb)));
+					vlay->addWidget(help);
+				}
 
 				form->removeRow(row);
-				form->insertRow(row, widget);
+				form->insertRow(row, container);
 				++replaced_count;
 			}
 
@@ -638,7 +681,7 @@ namespace ods::widgets {
 			std::snprintf(buf, sizeof(buf), "|%d|%d|%d|%d|%d", info.R, info.A, info.buf, info.ch_count, info.master_delay);
 			payload += buf;
 		}
-		// 11 label fields
+		// 12 label fields
 		for (const char *s : {
 				 labels.legend_delay,
 				 labels.legend_delay_desc,
@@ -650,7 +693,8 @@ namespace ods::widgets {
 				 labels.lane_broadcast,
 				 labels.no_data,
 				 labels.no_data_rtsp,
-				 labels.no_data_ws}) {
+				 labels.no_data_ws,
+				 labels.help_text}) {
 			payload += '|';
 			payload += escape_field(s ? s : "");
 		}

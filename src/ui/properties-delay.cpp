@@ -66,6 +66,7 @@ namespace ods::ui::delay {
 		labels.no_data           = T_("DiagramNoData");
 		labels.no_data_rtsp      = T_("DiagramNoDataRtsp");
 		labels.no_data_ws        = T_("DiagramNoDataWs");
+		labels.help_text         = T_("DiagramHelpText");
 		obs_properties_add_delay_diagram(grp, "delay_diagram", info, labels);
 
 		obs_properties_add_group(
