@@ -6,6 +6,7 @@
 #include "ui/url-share-renderer.hpp"
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/path-mode-row-widget.hpp"
+#include "widgets/text-button-widget.hpp"
 #include "widgets/url-table-widget.hpp"
 
 #include <algorithm>
@@ -77,6 +78,7 @@ namespace ods::ui::url_share {
 			props_ui_with_preserved_scroll([d]() {
 				if (!d || !d->context) return;
 				ods::widgets::schedule_color_button_row_inject(d->context);
+				ods::widgets::schedule_text_button_inject(d->context);
 				ods::widgets::schedule_path_mode_row_inject(d->context);
 				ods::widgets::schedule_url_table_inject(d->context);
 			});

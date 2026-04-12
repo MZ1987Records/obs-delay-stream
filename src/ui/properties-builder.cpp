@@ -181,7 +181,7 @@ namespace ods::ui {
 			obs_data_release(s);
 			int ws_port = d->ws_port.load(std::memory_order_relaxed);
 			d->tunnel.start(exe, ws_port);
-			d->request_props_refresh_for_tabs({1}, "cb_tunnel_start");
+			d->request_props_refresh_for_tabs({2}, "cb_tunnel_start");
 			return false;
 		}
 
@@ -197,7 +197,7 @@ namespace ods::ui {
 					std::memory_order_acq_rel)) {
 				return false;
 			}
-			d->request_props_refresh_for_tabs({1}, "cb_cloudflared_download.begin");
+			d->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.begin");
 
 			auto life = std::weak_ptr<std::atomic<bool>>(d->life_token);
 			try {
@@ -224,11 +224,11 @@ namespace ods::ui {
 
 						ctx->data->manual_cloudflared_download_running.store(false, std::memory_order_release);
 						ods::plugin::maybe_persist_cloudflared_path_after_auto_ready(ctx->data->context);
-						ctx->data->request_props_refresh_for_tabs({1}, "cb_cloudflared_download.done"); }, ui_ctx.release(), false);
+						ctx->data->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.done"); }, ui_ctx.release(), false);
 				}).detach();
 			} catch (...) {
 				d->manual_cloudflared_download_running.store(false, std::memory_order_release);
-				d->request_props_refresh_for_tabs({1}, "cb_cloudflared_download.spawn_error");
+				d->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.spawn_error");
 			}
 			return false;
 		}
@@ -238,7 +238,7 @@ namespace ods::ui {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
 			d->tunnel.stop();
-			d->request_props_refresh_for_tabs({1}, "cb_tunnel_stop");
+			d->request_props_refresh_for_tabs({2}, "cb_tunnel_stop");
 			return false;
 		}
 
@@ -731,8 +731,8 @@ namespace ods::ui {
 		};
 		static const char *const kLocaleKeys[] = {
 			"TabPerformerNames",
-			"TabUrlSharing",
 			"TabAudioStreaming",
+			"TabUrlSharing",
 			"TabSyncLatency",
 			"TabRtmpLatency",
 			"TabFineAdjust",
