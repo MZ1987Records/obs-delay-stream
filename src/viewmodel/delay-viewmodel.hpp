@@ -22,13 +22,10 @@ namespace ods::viewmodel {
 	struct DelayViewModel {
 		/// チャンネルごとの表示用データ。
 		struct ChDisplay {
-			std::string name;         ///< メモ名（空文字列可）
-			float       measured_ms;  ///< 計測値（片道 ms）。未計測は -1.0f
-			int         offset_ms;    ///< チャンネル別補正オフセット
-			int         raw_delay_ms; ///< R - A - C[i] - B - offset[i]
-			int         neg_max_ms;   ///< 負値フロア補正量（全チャンネル共通）
-			int         total_ms;     ///< raw_delay_ms + neg_max_ms
-			bool        warn;         ///< floor 補正の原因チャンネルか
+			std::string name;        ///< メモ名（空文字列可）
+			float       measured_ms; ///< WS 配信遅延（片道 ms）。未計測は -1.0f
+			int         offset_ms;   ///< 想定環境遅延（チャンネル別補正オフセット）
+			int         total_ms;    ///< 自動調整ディレイ（バッファ適用値）
 		};
 
 		DelaySnapshot          snapshot;               ///< 全チャンネルディレイ計算結果
@@ -66,10 +63,7 @@ namespace ods::viewmodel {
 				ch.name              = (memo && *memo) ? memo : "";
 				ch.measured_ms       = sch.has_measurement ? static_cast<float>(delay.channels[i].measured_ms) : -1.0f;
 				ch.offset_ms         = delay.channels[i].offset_ms;
-				ch.raw_delay_ms      = sch.has_measurement ? sch.raw_ms : 0;
-				ch.neg_max_ms        = vm.snapshot.neg_max_ms;
 				ch.total_ms          = sch.has_measurement ? sch.total_ms : 0;
-				ch.warn              = sch.warn;
 			}
 
 			return vm;

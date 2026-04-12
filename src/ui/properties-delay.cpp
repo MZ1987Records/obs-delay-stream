@@ -79,27 +79,26 @@ namespace ods::ui::delay {
 		obs_properties_t *grp       = obs_properties_create();
 		const int         sub_count = static_cast<int>(vm.channels.size());
 
-		// 想定環境レイテンシ テーブル
+		// 想定環境遅延 テーブル
 		std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
 		for (int i = 0; i < sub_count; ++i) {
-			const auto &src          = vm.channels[i];
-			channels[i].name         = src.name.c_str();
-			channels[i].measured_ms  = src.measured_ms;
-			channels[i].offset_ms    = src.offset_ms;
-			channels[i].raw_delay_ms = src.raw_delay_ms;
-			channels[i].neg_max_ms   = src.neg_max_ms;
-			channels[i].total_ms     = src.total_ms;
-			channels[i].warn         = src.warn;
+			const auto &src         = vm.channels[i];
+			channels[i].name        = src.name.c_str();
+			channels[i].measured_ms = src.measured_ms;
+			channels[i].offset_ms   = src.offset_ms;
+			channels[i].total_ms    = src.total_ms;
 		}
+
+		// 合計 = R - A - B + neg_max（全チャンネル共通）
+		const int sum_ms = vm.rtsp_e2e_ms - vm.avatar_latency_ms - vm.playback_buffer_ms + vm.snapshot.neg_max_ms;
 
 		DelayTableLabels labels;
 		labels.hdr_ch       = T_("DelayTableColCh");
 		labels.hdr_name     = T_("DelayTableColName");
-		labels.hdr_measured = T_("DelayTableColMeasured");
-		labels.hdr_adjust   = T_("DelayTableColAdjust");
-		labels.hdr_raw      = T_("DelayTableColRaw");
-		labels.hdr_floor    = T_("DelayTableColFloor");
-		labels.hdr_total    = T_("DelayTableColTotal");
+		labels.hdr_auto     = T_("DelayTableColAuto");
+		labels.hdr_ws       = T_("DelayTableColWs");
+		labels.hdr_env      = T_("DelayTableColEnv");
+		labels.hdr_sum      = T_("DelayTableColSum");
 		labels.lbl_editor   = T_("DelayTableAdjustLabel");
 		labels.editor_color = "#8b5cf6";
 		labels.help_text    = T_("EnvLatencyHelpText");
@@ -109,6 +108,7 @@ namespace ods::ui::delay {
 			vm.selected_ch,
 			sub_count,
 			channels.data(),
+			sum_ms,
 			labels);
 
 		obs_properties_add_group(
