@@ -155,8 +155,8 @@ namespace ods::widgets {
 		// DelayDiagramWidget
 		// ============================================================
 
-		constexpr int kLaneH         = 28;
-		constexpr int kLaneGap       = 10;
+		constexpr int kLaneH         = 18;
+		constexpr int kLaneGap       = 6;
 		constexpr int kRulerH        = 20;
 		constexpr int kRulerMarginB  = 8;
 		constexpr int kLegendH       = 22;
@@ -276,7 +276,7 @@ namespace ods::widgets {
 
 			void drawNoData(QPainter &p) const {
 				QStringList lines;
-				bool has_ws = false;
+				bool        has_ws = false;
 				for (int i = 0; i < data_.ch_count && i < static_cast<int>(data_.channels.size()); ++i) {
 					if (data_.channels[i].measured_ms >= 0.0f) {
 						has_ws = true;
