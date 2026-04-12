@@ -60,7 +60,9 @@ namespace ods::sync {
 			   p == FlowPhase::RtspE2eMeasuring;
 	}
 
-	bool SyncFlow::start_ws_measurement(StreamRouter &router, const std::string &stream_id) {
+	bool SyncFlow::start_ws_measurement(StreamRouter      &router,
+										const std::string &stream_id,
+										const int         *skip_measured_ms) {
 		int active = MAX_SUB_CH;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
@@ -73,73 +75,47 @@ namespace ods::sync {
 			active = active_ch_;
 		}
 		reset();
-		int connected_count = 0;
+		int measure_count = 0;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			phase_ = FlowPhase::WsMeasuring;
 			for (int i = 0; i < active; ++i) {
-				result_.channels[i].ch        = i;
-				result_.channels[i].connected = (router.client_count(i) > 0);
-				result_.channels[i].measured  = false;
-				if (result_.channels[i].connected) ++connected_count;
-			}
-			result_.ping_total_count = connected_count * ping_count_;
-		}
-
-		if (connected_count == 0) {
-			std::lock_guard<std::mutex> lk(mtx_);
-			phase_ = FlowPhase::Idle;
-			return false;
-		}
-
-		router.on_any_ping_sent = [this](const std::string &, int, int) {
-			++ping_sent_count_;
-			if (on_progress) on_progress();
-		};
-
-		pending_count_ = connected_count;
-		int ch_index   = 0;
-		for (int i = 0; i < active; ++i) {
-			if (!result_.channels[i].connected) continue;
-			router.set_on_latency_result(i,
-										 [this, i](const std::string &, int, LatencyResult r) {
-											 on_ch_result(i, r);
-										 });
-			router.start_measurement(i, ping_count_, PING_INTV_MS, ch_index * PING_INTV_MS);
-			++ch_index;
-		}
-		if (on_update) on_update();
-		return true;
-	}
-
-	bool SyncFlow::retry_failed_channels(StreamRouter &router) {
-		int retry_count = 0;
-		int active      = MAX_SUB_CH;
-		{
-			std::lock_guard<std::mutex> lk(mtx_);
-			if (phase_ != FlowPhase::WsDone) return false;
-			active = active_ch_;
-
-			for (int i = 0; i < active; ++i) {
 				auto &ch     = result_.channels[i];
+				ch.ch        = i;
 				ch.connected = (router.client_count(i) > 0);
-				if (ch.connected && !ch.measured) ++retry_count;
-			}
-			if (retry_count == 0) return false;
+				ch.measured  = false;
 
-			// 進捗表示は「成功済み + 今回の再計測完了数」で更新する。
-			result_.completed_count  = result_.measured_count();
-			result_.ping_total_count = retry_count * ping_count_;
-			phase_                   = FlowPhase::WsMeasuring;
+				// スキップ対象: 接続中かつ計測済み値が渡されたチャンネル
+				if (ch.connected && skip_measured_ms && skip_measured_ms[i] >= 0) {
+					ch.measured           = true;
+					ch.one_way_latency_ms = static_cast<double>(skip_measured_ms[i]);
+					++result_.completed_count;
+				} else if (ch.connected) {
+					++measure_count;
+				}
+			}
+			result_.ping_total_count = measure_count * ping_count_;
 		}
 
-		ping_sent_count_.store(0, std::memory_order_relaxed);
+		if (measure_count == 0) {
+			// 計測対象がない場合は即完了にする。
+			std::lock_guard<std::mutex> lk(mtx_);
+			if (result_.connected_count() == 0) {
+				phase_ = FlowPhase::Idle;
+				return false;
+			}
+			phase_ = FlowPhase::WsDone;
+			if (on_ws_measured) on_ws_measured(result_);
+			if (on_update) on_update();
+			return true;
+		}
+
 		router.on_any_ping_sent = [this](const std::string &, int, int) {
 			++ping_sent_count_;
 			if (on_progress) on_progress();
 		};
 
-		pending_count_ = retry_count;
+		pending_count_ = measure_count;
 		int ch_index   = 0;
 		for (int i = 0; i < active; ++i) {
 			auto &ch = result_.channels[i];

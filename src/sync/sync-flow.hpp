@@ -150,9 +150,8 @@ namespace ods::sync {
 		bool busy() const;
 
 		/// WebSocket 計測（各 CH レイテンシ計測）を開始する。
-		bool start_ws_measurement(ods::network::StreamRouter &router, const std::string &stream_id);
-		/// WebSocket 計測で失敗した CH のみ再計測する。
-		bool retry_failed_channels(ods::network::StreamRouter &router);
+		/// @param skip_measured_ms  非 null の場合、要素 >= 0 の CH はスキップし結果をその値で埋める。
+		bool start_ws_measurement(ods::network::StreamRouter &router, const std::string &stream_id, const int *skip_measured_ms = nullptr);
 		/// RTSP E2E 計測を開始する。
 		bool start_rtsp_e2e_measurement(const std::string            &rtsp_url,
 										const std::string            &ffmpeg_path,

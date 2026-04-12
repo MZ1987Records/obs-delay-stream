@@ -24,6 +24,7 @@
 #include "widgets/delay-diagram-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
+#include "widgets/flow-table-widget.hpp"
 #include "widgets/mode-text-row-widget.hpp"
 #include "widgets/path-mode-row-widget.hpp"
 #include "widgets/pulldown-row-widget.hpp"
@@ -156,6 +157,7 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		break;
 	case 3:
 		schedule_flow_progress_inject(ctx);
+		schedule_flow_table_inject(ctx);
 		break;
 	case 4:
 		schedule_flow_progress_inject(ctx);

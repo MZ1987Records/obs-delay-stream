@@ -2,6 +2,7 @@
 
 #include "core/string-format.hpp"
 #include "core/constants.hpp"
+#include "model/settings-repo.hpp"
 #include "plugin/plugin-config.hpp"
 #include "plugin/plugin-helpers.hpp"
 #include "plugin/plugin-services.hpp"
@@ -12,6 +13,7 @@
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
+#include "widgets/flow-table-widget.hpp"
 #include "widgets/mode-text-row-widget.hpp"
 #include "widgets/path-mode-row-widget.hpp"
 #include "widgets/pulldown-row-widget.hpp"
@@ -23,6 +25,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #define T_(s) obs_module_text(s)
 
@@ -236,21 +239,35 @@ namespace ods::ui {
 			return false;
 		}
 
-		// WebSocket 計測フローを開始する。
+		// WebSocket 計測フローを開始する（計測済みチャンネルはスキップ）。
 		bool cb_flow_start(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
 			std::string sid = d->get_stream_id();
 			if (sid.empty()) return false;
-			d->flow.start_ws_measurement(d->router, sid);
+
+			int skip_ms[MAX_SUB_CH];
+			for (int i = 0; i < MAX_SUB_CH; ++i)
+				skip_ms[i] = d->delay.channels[i].ws_measured ? d->delay.channels[i].measured_ms : -1;
+			d->flow.start_ws_measurement(d->router, sid, skip_ms);
 			return false;
 		}
 
-		// 失敗したチャンネルのみ再計測する。
-		bool cb_flow_retry_failed(obs_properties_t *, obs_property_t *, void *priv) {
+		// 全チャンネルの WS 計測結果をクリアする。
+		bool cb_flow_clear_results(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
-			if (!d) return false;
-			d->flow.retry_failed_channels(d->router);
+			if (!d || !d->context) return false;
+			obs_data_t *s = obs_source_get_settings(d->context);
+			if (!s) return false;
+			ods::model::SettingsRepo repo(s);
+			for (int i = 0; i < MAX_SUB_CH; ++i) {
+				repo.set_ch_measured_ms(i, 0);
+				repo.set_ch_ws_measured(i, false);
+			}
+			obs_source_update(d->context, s);
+			obs_data_release(s);
+			d->flow.reset();
+			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_clear_results");
 			return false;
 		}
 
@@ -511,42 +528,42 @@ namespace ods::ui {
 				return "Ch." + std::to_string(ch + 1);
 			};
 
-			std::string connected_names;
-			std::string disconnected_names;
-			int         connected_count    = 0;
-			int         disconnected_count = 0;
+			int connected_count = 0;
 			for (int i = 0; i < sub_count; ++i) {
-				std::string name = format_sub_name(i);
-				if (d->router.client_count(i) > 0) {
-					if (!connected_names.empty()) connected_names += " ";
-					connected_names += name;
+				if (d->router.client_count(i) > 0)
 					++connected_count;
-				} else {
-					if (!disconnected_names.empty()) disconnected_names += " ";
-					disconnected_names += name;
-					++disconnected_count;
-				}
 			}
 
-			if (connected_count == 0) connected_names = T_("FlowNone");
-			if (disconnected_count == 0) disconnected_names = T_("FlowNone");
+			// 接続中で未計測のチャンネルが1つもなければ計測不要
+			int measurable_count = 0;
+			for (int i = 0; i < sub_count; ++i) {
+				if (d->router.client_count(i) <= 0) continue;
+				if (d->delay.channels[i].ws_measured) continue;
+				++measurable_count;
+			}
 
-			std::string status_text = std::string(T_("FlowConnected")) + connected_names +
-									  "\n" + T_("FlowDisconnected") + disconnected_names;
-			obs_properties_add_text(grp, "flow_connected", status_text.c_str(), OBS_TEXT_INFO);
+			// 保存済み計測結果の有無（リセットボタンの有効条件に使用）
+			bool has_any_ws_measured = false;
+			for (int i = 0; i < sub_count; ++i) {
+				if (d->delay.channels[i].ws_measured) {
+					has_any_ws_measured = true;
+					break;
+				}
+			}
 
 			const bool can_start_ws =
 				(phase == FlowPhase::Idle) ||
 				(phase == FlowPhase::WsDone) ||
 				(phase == FlowPhase::RtspE2eDone) ||
 				(phase == FlowPhase::Complete);
+			const bool               can_clear              = can_start_ws && has_any_ws_measured;
 			const ObsColorButtonSpec flow_measure_buttons[] = {
 				{
 					"flow_measure_start_btn",
 					T_("FlowMeasureStartShort"),
 					cb_flow_start,
 					d,
-					(can_start_ws && connected_count > 0),
+					(can_start_ws && measurable_count > 0),
 					nullptr,
 					nullptr,
 				},
@@ -556,6 +573,15 @@ namespace ods::ui {
 					cb_flow_reset,
 					d,
 					is_ws_measuring,
+					nullptr,
+					nullptr,
+				},
+				{
+					"flow_measure_clear_btn",
+					T_("FlowClearResults"),
+					cb_flow_clear_results,
+					d,
+					can_clear,
 					nullptr,
 					nullptr,
 				},
@@ -601,55 +627,49 @@ namespace ods::ui {
 					bar_text);
 			}
 
-			if (is_ws_done_or_later) {
-				// ライブフロー結果を表示する。
-				std::string detail_text;
+			// チャンネル一覧テーブル（接続状況＋計測結果）
+			{
+				std::vector<std::string>          name_buf(sub_count);
+				std::vector<FlowTableChannelInfo> table_channels(sub_count);
 				for (int i = 0; i < sub_count; ++i) {
-					if (!res.channels[i].connected) continue;
-					const auto  memo_key = make_sub_memo_key(i);
-					const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : "";
-					std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
-					if (!detail_text.empty()) detail_text += "\n";
-					if (res.channels[i].measured) {
-						detail_text += string_printf(
-							"  Ch.%d %s : %d ms",
-							i + 1,
-							name.c_str(),
-							res.ch_measured_ms(i));
-					} else {
-						detail_text +=
-							"  Ch." + std::to_string(i + 1) + " " + name + " : " + T_("FlowChFailed");
+					name_buf[i]    = format_sub_name(i);
+					auto &tc       = table_channels[i];
+					tc.name        = name_buf[i].c_str();
+					tc.connected   = (d->router.client_count(i) > 0);
+					tc.measured_ms = -1; // 未計測
+				}
+
+				if (is_ws_done_or_later) {
+					for (int i = 0; i < sub_count; ++i) {
+						if (!res.channels[i].connected) continue;
+						if (res.channels[i].measured)
+							table_channels[i].measured_ms = res.ch_measured_ms(i);
+						else
+							table_channels[i].measured_ms = -2; // 失敗
+					}
+				} else if (has_saved_ws) {
+					for (int i = 0; i < sub_count; ++i) {
+						if (d->delay.channels[i].ws_measured)
+							table_channels[i].measured_ms = d->delay.channels[i].measured_ms;
 					}
 				}
-				if (!detail_text.empty())
-					obs_properties_add_text(grp, "flow_s1_detail", detail_text.c_str(), OBS_TEXT_INFO);
-			} else if (has_saved_ws) {
-				// 保存済み計測結果を表示する。
-				std::string detail_text;
-				for (int i = 0; i < sub_count; ++i) {
-					if (!d->delay.channels[i].ws_measured) continue;
-					const auto  memo_key = make_sub_memo_key(i);
-					const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : "";
-					std::string name     = (memo && *memo) ? memo : ("Ch." + std::to_string(i + 1));
-					if (!detail_text.empty()) detail_text += "\n";
-					detail_text += string_printf(
-						"  Ch.%d %s : %d ms",
-						i + 1,
-						name.c_str(),
-						d->delay.channels[i].measured_ms);
-				}
-				if (!detail_text.empty())
-					obs_properties_add_text(grp, "flow_s1_detail", detail_text.c_str(), OBS_TEXT_INFO);
-			}
 
-			auto *retry_failed_btn = obs_properties_add_button2(
-				grp,
-				"flow_retry_btn",
-				T_("FlowRetryFailed"),
-				cb_flow_retry_failed,
-				d);
-			obs_property_set_enabled(retry_failed_btn,
-									 is_ws_done && (res.measured_count() < res.connected_count()));
+				FlowTableLabels tbl_labels{};
+				tbl_labels.hdr_ch              = T_("FlowTableColCh");
+				tbl_labels.hdr_name            = T_("FlowTableColName");
+				tbl_labels.hdr_status          = T_("FlowTableColStatus");
+				tbl_labels.hdr_result          = T_("FlowTableColResult");
+				tbl_labels.status_connected    = T_("FlowTableStatusConnected");
+				tbl_labels.status_disconnected = T_("FlowTableStatusDisconnected");
+				tbl_labels.result_failed       = T_("FlowChFailed");
+
+				obs_properties_add_flow_table(
+					grp,
+					"flow_table",
+					sub_count,
+					table_channels.data(),
+					tbl_labels);
+			}
 
 			if (s) obs_data_release(s);
 		}
