@@ -31,6 +31,7 @@ namespace ods::widgets {
 		const char *hdr_floor    = nullptr; ///< "補正" 列ヘッダー
 		const char *hdr_total    = nullptr; ///< "合計 ms" 列ヘッダー
 		const char *lbl_editor   = nullptr; ///< エディタ行ラベル（"Offset"）
+		const char *editor_color = nullptr; ///< エディタラベル先頭の色付き四角（HEX、nullptr で非表示）
 	};
 
 	obs_property_t *obs_properties_add_delay_table(

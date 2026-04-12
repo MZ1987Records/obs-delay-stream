@@ -104,7 +104,8 @@ namespace ods::widgets {
 							 int                               selected_ch,
 							 const std::vector<ParsedChannel> &channels,
 							 const QStringList                &labels, // hdr_ch,name,measured,offset,raw,floor,total,lbl_editor
-							 QWidget                          *parent = nullptr)
+							 const QString                    &editor_color = {},
+							 QWidget                          *parent       = nullptr)
 				: QWidget(parent), source_(source ? obs_source_get_ref(source) : nullptr), ch_count_(static_cast<int>(channels.size())), selected_ch_(selected_ch >= 0 && selected_ch < static_cast<int>(channels.size()) ? selected_ch : 0) {
 				auto *vlay = new QVBoxLayout(this);
 				vlay->setContentsMargins(0, 2, 0, 2);
@@ -248,6 +249,17 @@ namespace ods::widgets {
 				editor_label_base_ = labels.value(7).trimmed();
 				if (editor_label_base_.isEmpty())
 					editor_label_base_ = QStringLiteral("Offset");
+				{
+					QColor ec(editor_color);
+					if (ec.isValid()) {
+						auto *swatch = new QFrame(this);
+						swatch->setFixedSize(10, 10);
+						swatch->setStyleSheet(
+							QStringLiteral("background-color: %1; border-radius: 2px;")
+								.arg(ec.name(QColor::HexRgb)));
+						hlay->addWidget(swatch);
+					}
+				}
 				editor_label_ = new QLabel(this);
 				editor_label_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 				hlay->addWidget(editor_label_);
@@ -420,7 +432,8 @@ namespace ods::widgets {
 		bool parse_delay_table_payload(const QString              &text,
 									   int                        &selected_ch,
 									   QStringList                &labels,
-									   std::vector<ParsedChannel> &channels) {
+									   std::vector<ParsedChannel> &channels,
+									   QString                    &editor_color) {
 			QStringList fields;
 			if (!split_escaped_pipe_fields(text, fields))
 				return false;
@@ -458,6 +471,8 @@ namespace ods::widgets {
 				ch.warn         = (fields[idx++] == QLatin1String("1"));
 				channels.push_back(ch);
 			}
+			// editor_color（オプション、チャンネルデータの後ろ）
+			editor_color = (idx < static_cast<int>(fields.size())) ? fields[idx] : QString{};
 			return true;
 		}
 
@@ -489,7 +504,8 @@ namespace ods::widgets {
 				int                        selected_ch = 0;
 				QStringList                labels;
 				std::vector<ParsedChannel> channels;
-				if (!parse_delay_table_payload(ph.text, selected_ch, labels, channels))
+				QString                    editor_color;
+				if (!parse_delay_table_payload(ph.text, selected_ch, labels, channels, editor_color))
 					continue;
 
 				QWidget *parent = ph.label->parentWidget();
@@ -507,6 +523,7 @@ namespace ods::widgets {
 					selected_ch,
 					channels,
 					labels,
+					editor_color,
 					parent);
 
 				form->removeRow(row);
@@ -583,6 +600,9 @@ namespace ods::widgets {
 			payload += '|';
 			payload += (ch.warn ? "1" : "0");
 		}
+		// editor_color（オプション）
+		payload += '|';
+		payload += escape_field(labels.editor_color ? labels.editor_color : "");
 
 		return obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
 	}

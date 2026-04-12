@@ -37,7 +37,9 @@ namespace ods::ui::delay {
 			0.0,
 			0,
 			" ms",
-			true);
+			true,
+			7,
+			"#f59e0b");
 
 		// タイミング図
 		DelayDiagramInfo info{};
@@ -98,6 +100,7 @@ namespace ods::ui::delay {
 		labels.hdr_floor    = T_("DelayTableColFloor");
 		labels.hdr_total    = T_("DelayTableColTotal");
 		labels.lbl_editor   = T_("DelayTableAdjustLabel");
+		labels.editor_color = "#8b5cf6";
 		obs_properties_add_delay_table(
 			grp,
 			"delay_table",

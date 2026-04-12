@@ -21,6 +21,7 @@ namespace ods::widgets {
 	/// OBS プロパティへ色付きボタン行を追加する。
 	/// @param status_dot_color ボタン群右側に表示するステータス丸アイコンの色（CSS 文字列、nullptr で非表示）
 	/// @param status_text      ステータスラベルのテキスト（nullptr で非表示）
+	/// @param label_color      ラベル先頭に表示する色付き四角マークの色（HEX 文字列、nullptr で非表示）
 	obs_property_t *obs_properties_add_color_button_row(
 		obs_properties_t         *props,
 		const char               *prop_name,
@@ -28,7 +29,8 @@ namespace ods::widgets {
 		const ObsColorButtonSpec *buttons,
 		size_t                    button_count,
 		const char               *status_dot_color = nullptr,
-		const char               *status_text      = nullptr);
+		const char               *status_text      = nullptr,
+		const char               *label_color      = nullptr);
 
 	void schedule_color_button_row_inject(obs_source_t *source); ///< 色付きボタン行の inject を UI スレッドへ予約する
 

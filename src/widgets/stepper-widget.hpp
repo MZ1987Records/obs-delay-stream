@@ -15,7 +15,8 @@ namespace ods::widgets {
 		int               decimals,
 		const char       *suffix,
 		bool              store_as_int    = false,
-		int               max_input_chars = 7);
+		int               max_input_chars = 7,
+		const char       *label_color     = nullptr);
 
 	void schedule_stepper_inject(obs_source_t *source);
 

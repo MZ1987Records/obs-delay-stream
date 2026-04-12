@@ -1,6 +1,10 @@
 #pragma once
 
 #include <QAbstractScrollArea>
+#include <QColor>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QPointer>
 #include <QScrollBar>
 #include <QTimer>
@@ -51,6 +55,26 @@ namespace ods::widgets {
 				area_ptr->verticalScrollBar()->setValue(restore_value);
 			});
 		}
+	}
+
+	/// 色付き四角マーク＋テキストのフォームラベル用ウィジェットを生成する。
+	inline QWidget *create_colored_label(const QString &text, const QColor &color, QWidget *parent = nullptr) {
+		auto *widget = new QWidget(parent);
+		auto *lay    = new QHBoxLayout(widget);
+		lay->setContentsMargins(0, 0, 0, 0);
+		lay->setSpacing(4);
+
+		auto *swatch = new QFrame(widget);
+		swatch->setFixedSize(10, 10);
+		swatch->setStyleSheet(
+			QStringLiteral("background-color: %1; border-radius: 2px;").arg(color.name(QColor::HexRgb)));
+		lay->addWidget(swatch);
+
+		auto *lbl = new QLabel(text, widget);
+		lay->addWidget(lbl);
+		lay->addStretch(1);
+
+		return widget;
 	}
 
 } // namespace ods::widgets

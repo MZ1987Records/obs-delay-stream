@@ -285,7 +285,8 @@ namespace ods::widgets {
 										QString                       &row_label,
 										std::vector<ParsedButtonSpec> &buttons,
 										QString                       &status_dot_color,
-										QString                       &status_text) {
+										QString                       &status_text,
+										QString                       &label_color) {
 			QStringList fields;
 			if (!split_escaped_pipe_fields(text, fields))
 				return false;
@@ -317,6 +318,8 @@ namespace ods::widgets {
 			// ステータス表示用の 2 フィールドはオプション（後方互換）。
 			status_dot_color = (fields.size() >= expected_fields + 2) ? fields[expected_fields] : QString{};
 			status_text      = (fields.size() >= expected_fields + 2) ? fields[expected_fields + 1] : QString{};
+			// ラベル色フィールドはオプション。
+			label_color = (fields.size() >= expected_fields + 3) ? fields[expected_fields + 2] : QString{};
 			return true;
 		}
 
@@ -352,7 +355,8 @@ namespace ods::widgets {
 				std::vector<ParsedButtonSpec> buttons;
 				QString                       status_dot_color;
 				QString                       status_text;
-				if (!parse_color_button_payload(ph.text, binding_id, row_label, buttons, status_dot_color, status_text))
+				QString                       label_color;
+				if (!parse_color_button_payload(ph.text, binding_id, row_label, buttons, status_dot_color, status_text, label_color))
 					continue;
 
 				QWidget *parent = ph.label->parentWidget();
@@ -377,10 +381,15 @@ namespace ods::widgets {
 					parent);
 
 				form->removeRow(row);
-				if (!row_label.isEmpty())
-					form->insertRow(row, row_label, row_widget);
-				else
+				if (!row_label.isEmpty()) {
+					QColor color(label_color);
+					if (color.isValid())
+						form->insertRow(row, create_colored_label(row_label, color, parent), row_widget);
+					else
+						form->insertRow(row, row_label, row_widget);
+				} else {
 					form->insertRow(row, row_widget);
+				}
 				if (is_tab_selector_binding_id(binding_id.toStdString())) {
 					// タブ行と表示中グループの行間を詰める。
 					form->setVerticalSpacing(0);
@@ -410,7 +419,8 @@ namespace ods::widgets {
 		const ObsColorButtonSpec *buttons,
 		size_t                    button_count,
 		const char               *status_dot_color,
-		const char               *status_text) {
+		const char               *status_text,
+		const char               *label_color) {
 		if (!props || !prop_name || !*prop_name || !buttons || button_count == 0)
 			return nullptr;
 		if (obs_properties_get(props, prop_name))
@@ -477,6 +487,9 @@ namespace ods::widgets {
 		payload += escape_field(status_dot_color ? status_dot_color : "");
 		payload += "|";
 		payload += escape_field(status_text ? status_text : "");
+		// ラベル色フィールド（オプション）。
+		payload += "|";
+		payload += escape_field(label_color ? label_color : "");
 
 		obs_property_t *placeholder =
 			obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
