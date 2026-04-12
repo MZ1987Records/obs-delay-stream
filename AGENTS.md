@@ -2,6 +2,6 @@
 
 ## ルール
 
-- `src` 配下のコードを編集する前に、必ず `src/CLAUDE.md` を読むこと。
-- `src` 配下のコード変更は、`src/CLAUDE.md` の方針に従うこと。
-- OBS native UI（`obs_properties_t` / `obs_property_t`）の改修やクラッシュ調査を行う前に、必ず `.claude/skills/obs-native-ui-review/SKILL.md` を読むこと。
+- Claude Code で作業する際は、対象ディレクトリからリポジトリルートまで遡って見つかる `CLAUDE.md` をすべて読むこと。
+- `CLAUDE.md` の指示が競合する場合は、より深い階層（対象に近い側）の `CLAUDE.md` を優先すること。
+- ディレクトリ固有の指示は、同階層または下位階層の作業にのみ適用されるものとして扱うこと。
