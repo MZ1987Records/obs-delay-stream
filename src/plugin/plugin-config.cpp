@@ -85,7 +85,7 @@ namespace ods::plugin {
 			const auto ws_measured_key = make_sub_ws_measured_key(i);
 			obs_data_set_default_bool(settings, ws_measured_key.data(), false);
 			const auto offset_key = make_sub_offset_key(i);
-			obs_data_set_default_int(settings, offset_key.data(), 0);
+			obs_data_set_default_int(settings, offset_key.data(), 40);
 			const auto memo_key = make_sub_memo_key(i);
 			if (i == 0) {
 				std::string default_memo = make_default_sub_memo(0);
