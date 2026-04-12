@@ -48,6 +48,9 @@ namespace ods::ui {
 		static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
 		static constexpr char    kEmptyAbsolutePathSentinel[]  = "__OBS_DELAY_STREAM_EMPTY_ABSOLUTE_PATH__";
 
+		static constexpr char kWarningTextColorLight[] = "#DC2626"; // ライトテーマ用警告テキスト色
+		static constexpr char kWarningTextColorDark[]  = "#F87171"; // ダークテーマ用警告テキスト色
+
 		// ============================================================
 		// namespace ローカル補助関数
 		// ============================================================
@@ -432,11 +435,27 @@ namespace ods::ui {
 			const bool       is_rtsp_e2e_done      = (phase == FlowPhase::RtspE2eDone);
 			const bool       has_rtsp_e2e_result =
 				(is_rtsp_e2e_done || phase == FlowPhase::Complete);
+			const bool obs_streaming = ods::plugin::is_obs_streaming_active();
 			const bool can_start_rtsp_e2e_measure =
-				(phase == FlowPhase::Idle) ||
-				(phase == FlowPhase::WsDone) ||
-				(phase == FlowPhase::RtspE2eDone) ||
-				(phase == FlowPhase::Complete);
+				obs_streaming &&
+				((phase == FlowPhase::Idle) ||
+				 (phase == FlowPhase::WsDone) ||
+				 (phase == FlowPhase::RtspE2eDone) ||
+				 (phase == FlowPhase::Complete));
+
+			const bool rtsp_start_enabled = (!is_rtsp_e2e_measuring && can_start_rtsp_e2e_measure);
+			const bool rtsp_stop_enabled  = is_rtsp_e2e_measuring;
+
+			// 開始・停止が両方無効のとき、ユーザに次のアクションを促すヒントを表示する。
+			// 計測完了状態ではヒントを出さない。
+			const bool  rtsp_done = (d->delay.rtsp_e2e_measured || has_rtsp_e2e_result);
+			const char *rtsp_hint = nullptr;
+			if (!rtsp_start_enabled && !rtsp_stop_enabled && !rtsp_done) {
+				if (phase == FlowPhase::WsMeasuring)
+					rtsp_hint = T_("RtspE2eHintWsMeasuring");
+				else if (!obs_streaming)
+					rtsp_hint = T_("RtspE2eHintStartStreaming");
+			}
 
 			const ObsColorButtonSpec flow_rtsp_e2e_buttons[] = {
 				{
@@ -444,7 +463,7 @@ namespace ods::ui {
 					T_("FlowMeasureStartShort"),
 					cb_flow_start_rtsp_e2e,
 					d,
-					(!is_rtsp_e2e_measuring && can_start_rtsp_e2e_measure),
+					rtsp_start_enabled,
 					nullptr,
 					nullptr,
 				},
@@ -453,7 +472,7 @@ namespace ods::ui {
 					T_("FlowMeasureStopShort"),
 					cb_flow_reset,
 					d,
-					is_rtsp_e2e_measuring,
+					rtsp_stop_enabled,
 					nullptr,
 					nullptr,
 				},
@@ -465,8 +484,10 @@ namespace ods::ui {
 				flow_rtsp_e2e_buttons,
 				sizeof(flow_rtsp_e2e_buttons) / sizeof(flow_rtsp_e2e_buttons[0]),
 				nullptr,
-				nullptr,
-				"#14b8a6");
+				rtsp_hint,
+				"#14b8a6",
+				rtsp_hint ? kWarningTextColorLight : nullptr,
+				rtsp_hint ? kWarningTextColorDark : nullptr);
 
 			{
 				int         pct = 0;
@@ -556,14 +577,30 @@ namespace ods::ui {
 				(phase == FlowPhase::WsDone) ||
 				(phase == FlowPhase::RtspE2eDone) ||
 				(phase == FlowPhase::Complete);
-			const bool               can_clear              = can_start_ws && has_any_ws_measured;
+			const bool can_clear     = can_start_ws && has_any_ws_measured;
+			const bool start_enabled = (can_start_ws && measurable_count > 0);
+			const bool stop_enabled  = is_ws_measuring;
+
+			// 開始・停止が両方無効のとき、ユーザに次のアクションを促すヒントを表示する。
+			// 計測完了状態（全チャンネル計測済み）ではヒントを出さない。
+			const bool  ws_all_done = (has_any_ws_measured && measurable_count == 0);
+			const char *ws_hint     = nullptr;
+			if (!start_enabled && !stop_enabled && !ws_all_done) {
+				if (phase == FlowPhase::RtspE2eMeasuring)
+					ws_hint = T_("FlowHintRtspMeasuring");
+				else if (!d->router_running.load())
+					ws_hint = T_("FlowHintStartWsServer");
+				else if (connected_count == 0)
+					ws_hint = T_("FlowHintWaitConnection");
+			}
+
 			const ObsColorButtonSpec flow_measure_buttons[] = {
 				{
 					"flow_measure_start_btn",
 					T_("FlowMeasureStartShort"),
 					cb_flow_start,
 					d,
-					(can_start_ws && measurable_count > 0),
+					start_enabled,
 					nullptr,
 					nullptr,
 				},
@@ -572,7 +609,7 @@ namespace ods::ui {
 					T_("FlowMeasureStopShort"),
 					cb_flow_reset,
 					d,
-					is_ws_measuring,
+					stop_enabled,
 					nullptr,
 					nullptr,
 				},
@@ -593,8 +630,10 @@ namespace ods::ui {
 				flow_measure_buttons,
 				sizeof(flow_measure_buttons) / sizeof(flow_measure_buttons[0]),
 				nullptr,
-				nullptr,
-				"#2563eb");
+				ws_hint,
+				"#2563eb",
+				ws_hint ? kWarningTextColorLight : nullptr,
+				ws_hint ? kWarningTextColorDark : nullptr);
 
 			// 保存済み計測結果の有無を判定する。
 			bool has_saved_ws = false;

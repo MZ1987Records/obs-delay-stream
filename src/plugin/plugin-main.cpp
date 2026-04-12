@@ -289,6 +289,20 @@ const char *DelayStreamFilter::get_name(void *) {
 	return "obs-delay-stream";
 }
 
+// OBS フロントエンドイベント (配信開始/停止) でタブ 3・4 を再描画する。
+// obs-frontend-api.h の enum obs_frontend_event の値に対応する。
+constexpr int kFrontendStreamingStarted = 1;
+constexpr int kFrontendStreamingStopped = 3;
+
+void on_frontend_event(int event, void *private_data) {
+	if (event != kFrontendStreamingStarted &&
+		event != kFrontendStreamingStopped)
+		return;
+	auto *d = static_cast<DelayStreamData *>(private_data);
+	if (!d || d->destroying.load(std::memory_order_acquire)) return;
+	d->request_props_refresh_for_tabs({3, 4}, "frontend_streaming_state");
+}
+
 // 各コンポーネントのイベントコールバックを登録する。
 void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->flow.on_update = [d]() {
@@ -374,10 +388,12 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 			d->request_props_refresh_for_tabs({5}, "router.on_any_latency_result.invalid");
 		}
 	};
+	ods::plugin::add_obs_frontend_event_callback(on_frontend_event, d);
 }
 
 // 全コンポーネントのイベントコールバックを解除する。
 void DelayStreamFilter::clear_event_callbacks(DelayStreamData *d) {
+	ods::plugin::remove_obs_frontend_event_callback(on_frontend_event, d);
 	d->flow.on_update            = nullptr;
 	d->flow.on_progress          = nullptr;
 	d->flow.on_ch_measured       = nullptr;

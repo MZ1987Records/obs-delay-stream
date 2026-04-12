@@ -75,6 +75,20 @@ namespace ods::plugin {
 		return fn ? fn() : false;
 	}
 
+	void add_obs_frontend_event_callback(obs_frontend_event_cb callback, void *private_data) {
+		using add_cb_fn = void (*)(obs_frontend_event_cb, void *);
+		static add_cb_fn fn =
+			find_obs_symbol<add_cb_fn>("obs_frontend_add_event_callback");
+		if (fn) fn(callback, private_data);
+	}
+
+	void remove_obs_frontend_event_callback(obs_frontend_event_cb callback, void *private_data) {
+		using remove_cb_fn = void (*)(obs_frontend_event_cb, void *);
+		static remove_cb_fn fn =
+			find_obs_symbol<remove_cb_fn>("obs_frontend_remove_event_callback");
+		if (fn) fn(callback, private_data);
+	}
+
 	std::string get_obs_stream_url() {
 		using get_streaming_service_fn = obs_service_t *(*)();
 		using service_get_settings_fn  = obs_data_t *(*)(obs_service_t *);

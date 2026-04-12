@@ -115,7 +115,7 @@ namespace ods::widgets {
 		class ColorButtonRow : public QWidget {
 		public:
 
-			ColorButtonRow(obs_source_t *source, const char *binding_id, const std::vector<ParsedButtonSpec> &buttons, const QString &status_dot_color, const QString &status_text, QWidget *parent = nullptr)
+			ColorButtonRow(obs_source_t *source, const char *binding_id, const std::vector<ParsedButtonSpec> &buttons, const QString &status_dot_color, const QString &status_text, const QString &status_text_color_light, const QString &status_text_color_dark, QWidget *parent = nullptr)
 				: QWidget(parent),
 				  source_(source ? obs_source_get_ref(source) : nullptr),
 				  binding_id_(binding_id ? binding_id : "") {
@@ -167,10 +167,19 @@ namespace ods::widgets {
 					if (!status_dot_color.isEmpty()) {
 						html = QStringLiteral("<span style='color: ") +
 							   status_dot_color.toHtmlEscaped() +
-							   QStringLiteral("'>&#9679;</span> ") +
-							   status_text.toHtmlEscaped();
+							   QStringLiteral("'>&#9679;</span> ");
+					}
+					if (!status_text_color_light.isEmpty() || !status_text_color_dark.isEmpty()) {
+						const QColor   bg             = palette().color(QPalette::Window);
+						const bool     is_dark        = (bg.lightnessF() < 0.5);
+						const QString &resolved_color = is_dark ? status_text_color_dark : status_text_color_light;
+						html += QStringLiteral("<span style='color: ") +
+								resolved_color.toHtmlEscaped() +
+								QStringLiteral("'>") +
+								status_text.toHtmlEscaped() +
+								QStringLiteral("</span>");
 					} else {
-						html = status_text.toHtmlEscaped();
+						html += status_text.toHtmlEscaped();
 					}
 					auto *status_label = new QLabel(html);
 					status_label->setTextFormat(Qt::RichText);
@@ -286,7 +295,9 @@ namespace ods::widgets {
 										std::vector<ParsedButtonSpec> &buttons,
 										QString                       &status_dot_color,
 										QString                       &status_text,
-										QString                       &label_color) {
+										QString                       &label_color,
+										QString                       &status_text_color_light,
+										QString                       &status_text_color_dark) {
 			QStringList fields;
 			if (!split_escaped_pipe_fields(text, fields))
 				return false;
@@ -320,6 +331,9 @@ namespace ods::widgets {
 			status_text      = (fields.size() >= expected_fields + 2) ? fields[expected_fields + 1] : QString{};
 			// ラベル色フィールドはオプション。
 			label_color = (fields.size() >= expected_fields + 3) ? fields[expected_fields + 2] : QString{};
+			// ステータステキスト色フィールド（light / dark）はオプション。
+			status_text_color_light = (fields.size() >= expected_fields + 4) ? fields[expected_fields + 3] : QString{};
+			status_text_color_dark  = (fields.size() >= expected_fields + 5) ? fields[expected_fields + 4] : QString{};
 			return true;
 		}
 
@@ -356,7 +370,9 @@ namespace ods::widgets {
 				QString                       status_dot_color;
 				QString                       status_text;
 				QString                       label_color;
-				if (!parse_color_button_payload(ph.text, binding_id, row_label, buttons, status_dot_color, status_text, label_color))
+				QString                       status_text_color_light;
+				QString                       status_text_color_dark;
+				if (!parse_color_button_payload(ph.text, binding_id, row_label, buttons, status_dot_color, status_text, label_color, status_text_color_light, status_text_color_dark))
 					continue;
 
 				QWidget *parent = ph.label->parentWidget();
@@ -378,6 +394,8 @@ namespace ods::widgets {
 					buttons,
 					status_dot_color,
 					status_text,
+					status_text_color_light,
+					status_text_color_dark,
 					parent);
 
 				form->removeRow(row);
@@ -420,7 +438,9 @@ namespace ods::widgets {
 		size_t                    button_count,
 		const char               *status_dot_color,
 		const char               *status_text,
-		const char               *label_color) {
+		const char               *label_color,
+		const char               *status_text_color_light,
+		const char               *status_text_color_dark) {
 		if (!props || !prop_name || !*prop_name || !buttons || button_count == 0)
 			return nullptr;
 		if (obs_properties_get(props, prop_name))
@@ -490,6 +510,11 @@ namespace ods::widgets {
 		// ラベル色フィールド（オプション）。
 		payload += "|";
 		payload += escape_field(label_color ? label_color : "");
+		// ステータステキスト色フィールド — light / dark（オプション）。
+		payload += "|";
+		payload += escape_field(status_text_color_light ? status_text_color_light : "");
+		payload += "|";
+		payload += escape_field(status_text_color_dark ? status_text_color_dark : "");
 
 		obs_property_t *placeholder =
 			obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);

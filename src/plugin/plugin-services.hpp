@@ -11,6 +11,15 @@ namespace ods::plugin {
 	/// OBS の配信出力が現在アクティブか判定する
 	bool is_obs_streaming_active();
 
+	/// OBS フロントエンドイベントコールバックの型（obs-frontend-api.h 相当）
+	using obs_frontend_event_cb = void (*)(int event, void *private_data);
+
+	/// OBS フロントエンドイベントコールバックを登録する
+	void add_obs_frontend_event_callback(obs_frontend_event_cb callback, void *private_data);
+
+	/// OBS フロントエンドイベントコールバックを解除する
+	void remove_obs_frontend_event_callback(obs_frontend_event_cb callback, void *private_data);
+
 	/// OBS の出力設定から RTMP URL を取得する
 	std::string get_obs_stream_url();
 
