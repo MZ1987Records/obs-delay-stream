@@ -21,6 +21,7 @@ namespace ods::widgets {
 			float measured_ms; ///< ブラウザ配信レイテンシ C[i] (ms)。未計測は -1.0f
 			int   total_ms;    ///< チャンネルディレイ (ms)
 			int   offset_ms;   ///< チャンネル補正オフセット (ms)
+			bool  provisional; ///< 仮値（他チャンネルの最小計測値）を使用中か
 		};
 		static constexpr int kMaxCh = 20;
 		ChInfo               channels[kMaxCh]{};

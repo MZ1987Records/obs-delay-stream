@@ -4,6 +4,7 @@
 #include "plugin/plugin-settings.hpp"
 
 #include <obs-module.h>
+#include <climits>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,7 @@ namespace ods::viewmodel {
 			float       measured_ms; ///< WS 配信遅延（片道 ms）。未計測は -1.0f
 			int         offset_ms;   ///< 想定環境遅延（チャンネル別補正オフセット）
 			int         total_ms;    ///< 自動調整ディレイ（バッファ適用値）
+			bool        provisional; ///< 仮値（他チャンネルの最小計測値）を使用中か
 		};
 
 		DelaySnapshot          snapshot;               ///< 全チャンネルディレイ計算結果
@@ -53,6 +55,13 @@ namespace ods::viewmodel {
 					vm.selected_ch = 0;
 			}
 
+			// 仮値の基準: 計測済みチャンネルの最小 WS 遅延
+			int min_measured = INT_MAX;
+			for (int i = 0; i < sub_count; ++i) {
+				if (delay.channels[i].ws_measured && delay.channels[i].measured_ms < min_measured)
+					min_measured = delay.channels[i].measured_ms;
+			}
+
 			vm.channels.resize(static_cast<size_t>(sub_count));
 			for (int i = 0; i < sub_count; ++i) {
 				const auto &sch = vm.snapshot.channels[i];
@@ -61,9 +70,18 @@ namespace ods::viewmodel {
 				const auto  memo_key = ods::plugin::make_sub_memo_key(i);
 				const char *memo     = settings ? obs_data_get_string(settings, memo_key.data()) : "";
 				ch.name              = (memo && *memo) ? memo : "";
-				ch.measured_ms       = sch.has_measurement ? static_cast<float>(delay.channels[i].measured_ms) : -1.0f;
-				ch.offset_ms         = delay.channels[i].offset_ms;
-				ch.total_ms          = sch.has_measurement ? sch.total_ms : 0;
+				ch.provisional       = sch.provisional;
+				if (sch.has_measurement) {
+					ch.measured_ms = static_cast<float>(delay.channels[i].measured_ms);
+					ch.total_ms    = sch.total_ms;
+				} else if (sch.provisional) {
+					ch.measured_ms = static_cast<float>(min_measured);
+					ch.total_ms    = sch.total_ms;
+				} else {
+					ch.measured_ms = -1.0f;
+					ch.total_ms    = 0;
+				}
+				ch.offset_ms = delay.channels[i].offset_ms;
 			}
 
 			return vm;

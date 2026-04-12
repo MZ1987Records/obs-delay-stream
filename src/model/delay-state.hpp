@@ -3,6 +3,7 @@
 #include "core/constants.hpp"
 
 #include <array>
+#include <climits>
 
 namespace ods::model {
 
@@ -18,6 +19,7 @@ namespace ods::model {
 			int  raw_ms          = 0;     ///< R - A - C[i] - B - offset[i]（負値許容）
 			int  total_ms        = 0;     ///< raw_ms + neg_max（バッファ適用値）
 			bool has_measurement = false; ///< WS 計測済みか
+			bool provisional     = false; ///< 仮値（他チャンネルの最小計測値）を使用中か
 			bool warn            = false; ///< floor 補正の原因チャンネルか
 		};
 		std::array<ChDelay, MAX_SUB_CH> channels{};
@@ -66,22 +68,35 @@ namespace ods::model {
 			const int A = avatar_latency_ms;
 			const int B = playback_buffer_ms;
 
+			// 計測済みチャンネルの最小 WS 遅延を求める（仮値の基準）
+			int min_measured = INT_MAX;
+			for (int i = 0; i < sub_ch_count; ++i) {
+				if (channels[i].ws_measured && channels[i].measured_ms < min_measured)
+					min_measured = channels[i].measured_ms;
+			}
+			const bool has_any = (min_measured != INT_MAX);
+
 			for (int i = 0; i < sub_ch_count; ++i) {
 				auto &out           = snap.channels[i];
 				out.has_measurement = channels[i].ws_measured;
 				if (!out.has_measurement) {
-					out.raw_ms = 0;
-					continue;
+					if (!has_any) {
+						out.raw_ms = 0;
+						continue;
+					}
+					// 仮値として最小計測値を使用
+					out.provisional = true;
+					out.raw_ms      = calc_ch_raw_delay_ms(R, A, min_measured, B, channels[i].offset_ms);
+				} else {
+					out.raw_ms = calc_ch_raw_delay_ms(R, A, channels[i].measured_ms, B, channels[i].offset_ms);
 				}
-				out.raw_ms = calc_ch_raw_delay_ms(R, A, channels[i].measured_ms, B, channels[i].offset_ms);
-				if (out.raw_ms < 0 && -out.raw_ms > snap.neg_max_ms) {
+				if (out.raw_ms < 0 && -out.raw_ms > snap.neg_max_ms)
 					snap.neg_max_ms = -out.raw_ms;
-				}
 			}
 
 			for (int i = 0; i < sub_ch_count; ++i) {
 				auto &out = snap.channels[i];
-				if (out.has_measurement) {
+				if (out.has_measurement || out.provisional) {
 					int val      = out.raw_ms + snap.neg_max_ms;
 					out.total_ms = (val > 0) ? val : 0;
 					out.warn     = (snap.neg_max_ms > 0 && out.raw_ms == -snap.neg_max_ms);

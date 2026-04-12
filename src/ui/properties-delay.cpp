@@ -52,6 +52,7 @@ namespace ods::ui::delay {
 			info.channels[i].measured_ms = vm.channels[i].measured_ms;
 			info.channels[i].total_ms    = vm.channels[i].total_ms;
 			info.channels[i].offset_ms   = vm.channels[i].offset_ms;
+			info.channels[i].provisional = vm.channels[i].provisional;
 		}
 
 		DelayDiagramLabels labels;

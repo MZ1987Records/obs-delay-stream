@@ -66,6 +66,11 @@ namespace ods::widgets {
 		inline QColor colorBroadcast() {
 			return QColor(20, 184, 166);
 		} // #14b8a6
+		// 仮値チャンネル用に色のアルファを下げる
+		inline QColor dimmed(QColor c) {
+			c.setAlpha(100);
+			return c;
+		}
 
 		// 描画に必要なパース済みデータ。
 		struct DiagramData {
@@ -79,6 +84,7 @@ namespace ods::widgets {
 				float measured_ms = -1.0f;
 				int   total_ms    = 0;
 				int   offset_ms   = 0;
+				bool  provisional = false;
 			};
 			std::vector<Ch> channels;
 
@@ -120,24 +126,29 @@ namespace ods::widgets {
 		// レーンの構築
 		// ============================================================
 
-		Lane build_channel_lane(int ch_index, int total_ms, float C_ms, int offset, int A, int buf) {
+		Lane build_channel_lane(int ch_index, int total_ms, float C_ms, int offset, int A, int buf, bool provisional) {
 			Lane lane;
-			lane.label      = QStringLiteral("Ch.%1").arg(ch_index + 1);
-			const int C_int = static_cast<int>(std::round(C_ms));
+			lane.label       = provisional
+								   ? QStringLiteral("*Ch.%1").arg(ch_index + 1)
+								   : QStringLiteral("Ch.%1").arg(ch_index + 1);
+			const int  C_int = static_cast<int>(std::round(C_ms));
+			const auto clr   = [provisional](QColor c) {
+				return provisional ? dimmed(c) : c;
+			};
 			if (offset >= 0) {
 				lane.segments = {
-					{total_ms, colorDelay()},
-					{C_int, colorWs()},
-					{offset, colorEnv()},
-					{buf, colorBuf()},
-					{A, colorAvatar()},
+					{total_ms, clr(colorDelay())},
+					{C_int, clr(colorWs())},
+					{offset, clr(colorEnv())},
+					{buf, clr(colorBuf())},
+					{A, clr(colorAvatar())},
 				};
 			} else {
 				lane.segments = {
-					{total_ms, colorDelay()},
-					{C_int + offset, colorWs()},
-					{buf, colorBuf()},
-					{A, colorAvatar()},
+					{total_ms, clr(colorDelay())},
+					{C_int + offset, clr(colorWs())},
+					{buf, clr(colorBuf())},
+					{A, clr(colorAvatar())},
 				};
 			}
 			return lane;
@@ -191,7 +202,7 @@ namespace ods::widgets {
 					return;
 				}
 
-				// レーンを構築
+				// レーンを構築（計測済み + 仮値チャンネル）
 				std::vector<Lane> lanes;
 				for (int i = 0; i < data_.ch_count; ++i) {
 					if (i >= static_cast<int>(data_.channels.size())) break;
@@ -203,7 +214,8 @@ namespace ods::widgets {
 						ch.measured_ms,
 						ch.offset_ms,
 						data_.A,
-						data_.buf));
+						data_.buf,
+						ch.provisional));
 				}
 				lanes.push_back(build_broadcast_lane(
 					data_.lbl_lane_broadcast,
@@ -250,7 +262,7 @@ namespace ods::widgets {
 			int countVisibleLanes() const {
 				int n = 0;
 				for (int i = 0; i < data_.ch_count && i < static_cast<int>(data_.channels.size()); ++i) {
-					if (data_.channels[i].measured_ms >= 0.0f) ++n;
+					if (data_.channels[i].measured_ms >= 0.0f) ++n; // 計測済み + 仮値
 				}
 				return n + 1; // +1 for broadcast lane
 			}
@@ -506,7 +518,7 @@ namespace ods::widgets {
 		// ペイロード文字列をパースする。
 		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay
 		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws
-		//       |ch0_measured|ch0_total|ch0_offset|ch1_measured|ch1_total|ch1_offset|...
+		//       |ch0_measured|ch0_total|ch0_offset|ch0_provisional|ch1_measured|ch1_total|ch1_offset|ch1_provisional|...
 		bool parse_diagram_payload(const QString &text, DiagramData &out) {
 			QStringList fields;
 			if (!split_escaped_pipe_fields(text, fields))
@@ -545,7 +557,7 @@ namespace ods::widgets {
 			out.help_text          = fields[17];
 
 			constexpr int kChFieldStart = kFixedFields + kLabelFields; // 18
-			constexpr int kChFieldCount = 3;                           // measured_ms, total_ms, offset_ms
+			constexpr int kChFieldCount = 4;                           // measured_ms, total_ms, offset_ms, provisional
 			if (fields.size() < kChFieldStart + out.ch_count * kChFieldCount)
 				return false;
 
@@ -555,6 +567,7 @@ namespace ods::widgets {
 				out.channels[i].measured_ms = fields[idx++].toFloat();
 				out.channels[i].total_ms    = fields[idx++].toInt();
 				out.channels[i].offset_ms   = fields[idx++].toInt();
+				out.channels[i].provisional = (fields[idx++] == QLatin1String("1"));
 			}
 			return true;
 		}
@@ -674,7 +687,7 @@ namespace ods::widgets {
 
 		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay
 		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws
-		//       |ch0_measured|ch0_total|...
+		//       |ch0_measured|ch0_total|ch0_offset|ch0_provisional|...
 		std::string payload = "DDIAGRAM";
 		{
 			char buf[64];
@@ -698,7 +711,7 @@ namespace ods::widgets {
 			payload += '|';
 			payload += escape_field(s ? s : "");
 		}
-		// per-channel fields (3 per channel)
+		// per-channel fields (4 per channel)
 		for (int i = 0; i < info.ch_count; ++i) {
 			const auto &ch = info.channels[i];
 			char        nums[3][32];
@@ -711,6 +724,8 @@ namespace ods::widgets {
 			payload += nums[1];
 			payload += '|';
 			payload += nums[2];
+			payload += '|';
+			payload += ch.provisional ? '1' : '0';
 		}
 
 		return obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
