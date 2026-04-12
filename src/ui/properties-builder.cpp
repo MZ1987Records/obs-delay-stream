@@ -821,15 +821,22 @@ namespace ods::ui {
 		}
 
 		if (!d->is_duplicate_instance) {
-			const bool  ws_on     = d->router_running.load();
-			TunnelState ts_plugin = d->tunnel.state();
-			bool        tun_on   = (ts_plugin == TunnelState::Running);
-			bool        tun_busy = (ts_plugin == TunnelState::Starting);
-			const char *ws_color  = ws_on ? UI_COLOR_STATUS_DOT_OK : UI_COLOR_STATUS_DOT_OFF;
-			const char *tun_color = tun_on    ? UI_COLOR_STATUS_DOT_OK
+			const bool  ws_on      = d->router_running.load();
+			const bool  ws_paused  = !d->ws_send_enabled.load();
+			const bool  ws_no_dly  = !d->enabled.load();
+			const bool  ws_warn    = ws_on && (ws_paused || ws_no_dly);
+			TunnelState ts_plugin  = d->tunnel.state();
+			bool        tun_on    = (ts_plugin == TunnelState::Running);
+			bool        tun_busy  = (ts_plugin == TunnelState::Starting);
+			const char *ws_color   = ws_on ? (ws_warn ? UI_COLOR_STATUS_DOT_BUSY
+													  : UI_COLOR_STATUS_DOT_OK)
+										   : UI_COLOR_STATUS_DOT_OFF;
+			const char *tun_color  = tun_on    ? UI_COLOR_STATUS_DOT_OK
 									: tun_busy ? UI_COLOR_STATUS_DOT_BUSY
 											   : UI_COLOR_STATUS_DOT_OFF;
-			const char *ws_label  = ws_on ? T_("StatusRunning") : T_("StatusStopped");
+
+			std::string ws_status = ws_on ? T_("StatusRunning") : T_("StatusStopped");
+			if (ws_paused) ws_status += T_("WsPausedSuffix");
 			const char *tun_label = tun_on    ? T_("StatusRunning")
 									: tun_busy ? T_("TunnelStarting")
 											   : T_("StatusStopped");
@@ -837,7 +844,7 @@ namespace ods::ui {
 				"<span style='color:%s'>●</span> %s %s"
 				"&nbsp;&nbsp;|&nbsp;&nbsp;"
 				"<span style='color:%s'>●</span> %s %s",
-				ws_color, T_("PluginWsStatusLabel"), ws_label,
+				ws_color, T_("PluginWsStatusLabel"), ws_status.c_str(),
 				tun_color, T_("PluginTunnelStatusLabel"), tun_label);
 			obs_property_t *status_p =
 				obs_properties_add_text(grp, "plugin_status_info", "", OBS_TEXT_INFO);
@@ -1180,9 +1187,17 @@ namespace ods::ui {
 			const std::string eb = string_printf(T_("TunnelErrorFmt"), terr.c_str());
 			obs_properties_add_text(grp, "tunnel_error", eb.c_str(), OBS_TEXT_INFO);
 		}
-		obs_property_t *tunnel_help_p =
-			obs_properties_add_text(grp, "tunnel_domain_help", T_("TunnelDomainHelpText"), OBS_TEXT_INFO);
-		obs_property_text_set_info_word_wrap(tunnel_help_p, true);
+		{
+			const std::string help_html = string_printf(
+				"<table cellspacing='0' cellpadding='6'><tr>"
+				"<td width='3' bgcolor='#5599cc'></td>"
+				"<td><font color='#888888'>%s</font></td>"
+				"</tr></table>",
+				T_("TunnelDomainHelpText"));
+			obs_property_t *tunnel_help_p =
+				obs_properties_add_text(grp, "tunnel_domain_help", help_html.c_str(), OBS_TEXT_INFO);
+			obs_property_text_set_info_word_wrap(tunnel_help_p, true);
+		}
 
 		obs_properties_add_group(props, "grp_tunnel", T_("TunnelGroupTitle"), OBS_GROUP_NORMAL, grp);
 	}
