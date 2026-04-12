@@ -94,7 +94,7 @@ namespace ods::widgets {
 					buttons_.push_back(btn);
 				}
 
-				edit_->setEnabled(input_enabled);
+				apply_lineedit_readonly_look(edit_, !input_enabled);
 				loadFromSettings();
 				QTimer::singleShot(0, this, [this]() { updateButtonWidths(); });
 			}

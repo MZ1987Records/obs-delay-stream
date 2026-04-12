@@ -7,6 +7,7 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPalette>
 #include <QPointer>
 #include <QScrollBar>
@@ -85,6 +86,23 @@ namespace ods::widgets {
 		lay->addStretch(1);
 
 		return widget;
+	}
+
+	/// QLineEdit を「選択・コピー可能だが編集不可（無効化テキスト色）」に設定/解除する。
+	inline void apply_lineedit_readonly_look(QLineEdit *edit, bool readonly) {
+		if (!edit)
+			return;
+		edit->setEnabled(true);
+		edit->setReadOnly(readonly);
+		if (readonly) {
+			QPalette     pal           = edit->palette();
+			const QColor disabled_text = pal.color(QPalette::Disabled, QPalette::Text);
+			pal.setColor(QPalette::Active, QPalette::Text, disabled_text);
+			pal.setColor(QPalette::Inactive, QPalette::Text, disabled_text);
+			edit->setPalette(pal);
+		} else {
+			edit->setPalette(QPalette());
+		}
 	}
 
 } // namespace ods::widgets

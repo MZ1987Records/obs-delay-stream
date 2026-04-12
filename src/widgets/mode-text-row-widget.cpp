@@ -233,9 +233,8 @@ namespace ods::widgets {
 				if (!edit_)
 					return;
 				const bool is_manual_mode = (current_mode_ == manual_mode_value_);
-				const bool enabled        = text_enabled_ && is_manual_mode;
-				edit_->setEnabled(enabled);
-				edit_->setReadOnly(!enabled);
+				const bool editable       = text_enabled_ && is_manual_mode;
+				apply_lineedit_readonly_look(edit_, !editable);
 			}
 
 			HiddenModeTextProps get_hidden_props() {

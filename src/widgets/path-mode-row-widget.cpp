@@ -254,8 +254,7 @@ namespace ods::widgets {
 				if (mode_ == kModeAuto) {
 					if (auto_path_exists_) {
 						restore_edit_slot();
-						edit_->setReadOnly(true);
-						edit_->setEnabled(true);
+						apply_lineedit_readonly_look(edit_, true);
 						edit_->setText(auto_path_display_);
 					} else {
 						collapse_edit_slot();
@@ -267,8 +266,7 @@ namespace ods::widgets {
 
 				if (mode_ == kModeAbsolute) {
 					restore_edit_slot();
-					edit_->setReadOnly(false);
-					edit_->setEnabled(manual_enabled_);
+					apply_lineedit_readonly_look(edit_, !manual_enabled_);
 					edit_->setText(manual_path_);
 				} else {
 					collapse_edit_slot();
