@@ -11,3 +11,4 @@
 - UI-only state separated from runtime config
 - `data == NULL` assumptions audited
 - Settings migration covered when schema evolved
+- Injected widget destructors do not erase binding_id map entries (stale entries cleaned at registration)

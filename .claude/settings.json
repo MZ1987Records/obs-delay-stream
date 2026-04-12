@@ -2,8 +2,6 @@
   "env": {
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "true"
   },
-  "effortLevel": "high",
-  "showThinkingSummaries": true,
   "permissions": {
     "allow": [
       "Read",
@@ -45,7 +43,9 @@
       "Bash(./node_modules/.bin/vite build *)",
       "Bash(./node_modules/.bin/esbuild *)",
       "Bash(./node_modules/.bin/tsc *)",
-      "Bash(node_modules/.bin/tsc --noEmit)"
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Edit(/.claude/skills/obs-native-ui-review/**)",
+      "Edit(/.claude/skills/mvvm-architecture/**)"
     ],
     "deny": [
       "Bash(mkfs *)",
@@ -61,5 +61,7 @@
       "Bash(killall *)",
       "Bash(pkill *)"
     ]
-  }
+  },
+  "effortLevel": "high",
+  "showThinkingSummaries": true
 }

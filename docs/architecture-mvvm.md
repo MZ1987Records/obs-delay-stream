@@ -3,6 +3,8 @@
 本プロジェクトでは、OBS プラグイン API の制約下で MVVM 風の 3 層アーキテクチャを採用している。
 パラメータ追加・UI 改修を行う際は、このドキュメントに従うこと。
 
+> **Claude Code 利用時**: §4〜§6 のチェックリスト・禁止事項は `.claude/skills/mvvm-architecture/SKILL.md` としてスキル化されており、関連タスクで自動適用される。
+
 ---
 
 ## 1. 全体構造
@@ -245,6 +247,38 @@ get_properties(d)
 | ViewModel をメンバ変数やグローバルに保持する | スタックローカルで毎回構築して鮮度を保証する |
 | `obs_property_t*` をコールバック間でキャッシュする | OBS API はプロパティを毎回再構築する設計 |
 | 計算済みの表示データを `obs_data_t` に永続保存する | 入力値のみ保存し、表示データは都度計算する |
+| カスタムウィジェットがあるページで `return true` 後に inject を再スケジュールしない | `return true` は OBS の `RefreshProperties` を起動し、注入済みウィジェットを破壊する（§6.1 参照） |
+
+### 6.1 modified callback と `return true` のルール
+
+OBS の modified callback が `true` を返すと、OBS は `RefreshProperties()` を実行してダイアログ全体の Qt ウィジェットツリーを再構築する。この再構築は `OBS_TEXT_INFO` プレースホルダーを経由して注入されたカスタムウィジェット（ColorButtonRow, PulldownRow, StepperRow 等）を破壊する。
+
+**ルール**: カスタムウィジェットが存在するタブで `return true` する場合、直後にそのタブに必要な inject を再スケジュールすること。
+
+```cpp
+// ✓ 正しいパターン
+bool cb_xxx_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+    auto *d = static_cast<DelayStreamData *>(priv);
+    // ... visibility/enabled 変更 ...
+    props_ui_with_preserved_scroll([d]() {
+        if (!d || !d->context) return;
+        schedule_color_button_row_inject(d->context);
+        schedule_pulldown_row_inject(d->context);   // タブに応じて必要な inject を列挙
+        schedule_stepper_inject(d->context);
+    });
+    return true;
+}
+
+// ✗ 危険: inject なしの return true → カスタムウィジェットが消える
+bool cb_xxx_changed(...) {
+    obs_property_set_visible(p, show);
+    return true;
+}
+```
+
+**なぜ `return false` + `request_props_refresh_for_tabs` ではダメか**:
+
+OBS はプロパティダイアログ構築時にも modified callback を呼ぶ。その時点で `get_props_depth` は 0（`get_properties` は既に返っている）のため、`request_props_refresh` はガードを通過して再構築を要求する。結果、`get_properties` → ダイアログ構築 → callback → refresh → `get_properties` → … の無限ループになる。
 
 ---
 
