@@ -139,8 +139,8 @@ namespace ods::widgets {
 				lane.segments = {
 					{total_ms, clr(colorDelay())},
 					{C_int, clr(colorWs())},
-					{offset, clr(colorEnv())},
 					{buf, clr(colorBuf())},
+					{offset, clr(colorEnv())},
 					{A, clr(colorAvatar())},
 				};
 			} else {
@@ -422,8 +422,8 @@ namespace ods::widgets {
 				// 1行目: レイテンシ系の凡例（ディレイ以外）
 				const std::array<LegendItem, 5> row1Items = {{
 					{colorWs(), data_.lbl_ws},
-					{colorEnv(), data_.lbl_env},
 					{colorBuf(), data_.lbl_buf},
+					{colorEnv(), data_.lbl_env},
 					{colorAvatar(), data_.lbl_avatar},
 					{colorBroadcast(), data_.lbl_broadcast},
 				}};

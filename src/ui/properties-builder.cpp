@@ -820,6 +820,31 @@ namespace ods::ui {
 			}
 		}
 
+		if (!d->is_duplicate_instance) {
+			const bool  ws_on     = d->router_running.load();
+			TunnelState ts_plugin = d->tunnel.state();
+			bool        tun_on   = (ts_plugin == TunnelState::Running);
+			bool        tun_busy = (ts_plugin == TunnelState::Starting);
+			const char *ws_color  = ws_on ? UI_COLOR_STATUS_DOT_OK : UI_COLOR_STATUS_DOT_OFF;
+			const char *tun_color = tun_on    ? UI_COLOR_STATUS_DOT_OK
+									: tun_busy ? UI_COLOR_STATUS_DOT_BUSY
+											   : UI_COLOR_STATUS_DOT_OFF;
+			const char *ws_label  = ws_on ? T_("StatusRunning") : T_("StatusStopped");
+			const char *tun_label = tun_on    ? T_("StatusRunning")
+									: tun_busy ? T_("TunnelStarting")
+											   : T_("StatusStopped");
+			const std::string status_html = string_printf(
+				"<span style='color:%s'>●</span> %s %s"
+				"&nbsp;&nbsp;|&nbsp;&nbsp;"
+				"<span style='color:%s'>●</span> %s %s",
+				ws_color, T_("PluginWsStatusLabel"), ws_label,
+				tun_color, T_("PluginTunnelStatusLabel"), tun_label);
+			obs_property_t *status_p =
+				obs_properties_add_text(grp, "plugin_status_info", "", OBS_TEXT_INFO);
+			obs_property_set_long_description(status_p, status_html.c_str());
+			obs_property_text_set_info_word_wrap(status_p, false);
+		}
+
 		obs_properties_add_group(props, "grp_plugin", T_("Plugin"), OBS_GROUP_NORMAL, grp);
 	}
 
@@ -1155,6 +1180,10 @@ namespace ods::ui {
 			const std::string eb = string_printf(T_("TunnelErrorFmt"), terr.c_str());
 			obs_properties_add_text(grp, "tunnel_error", eb.c_str(), OBS_TEXT_INFO);
 		}
+		obs_property_t *tunnel_help_p =
+			obs_properties_add_text(grp, "tunnel_domain_help", T_("TunnelDomainHelpText"), OBS_TEXT_INFO);
+		obs_property_text_set_info_word_wrap(tunnel_help_p, true);
+
 		obs_properties_add_group(props, "grp_tunnel", T_("TunnelGroupTitle"), OBS_GROUP_NORMAL, grp);
 	}
 
