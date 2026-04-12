@@ -163,10 +163,9 @@ namespace ods::widgets {
 			}
 
 			~PathModeRow() override {
-				{
-					std::lock_guard<std::mutex> lock(g_path_mode_download_props_mutex);
-					g_path_mode_download_props.erase(binding_id_.toStdString());
-				}
+				// binding_id のマップ削除はここでは行わない。
+				// RefreshProperties 後の再 inject で同じ binding_id が必要になるため、
+				// 古いエントリは次回の obs_properties_add_path_mode_row で掃除される。
 				if (source_) {
 					obs_source_release(source_);
 					source_ = nullptr;
@@ -465,6 +464,16 @@ namespace ods::widgets {
 		const std::string binding_id = make_path_mode_binding_id(prop_name);
 		if (download_action_prop) {
 			std::lock_guard<std::mutex> lock(g_path_mode_download_props_mutex);
+			const std::string           prefix = std::string(prop_name) + "#";
+			for (auto it = g_path_mode_download_props.begin();
+				 it != g_path_mode_download_props.end();) {
+				if (it->first != binding_id &&
+					it->first.compare(0, prefix.size(), prefix) == 0) {
+					it = g_path_mode_download_props.erase(it);
+				} else {
+					++it;
+				}
+			}
 			g_path_mode_download_props[binding_id] = download_action_prop;
 		}
 

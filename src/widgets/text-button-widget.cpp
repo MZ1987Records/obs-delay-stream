@@ -100,9 +100,9 @@ namespace ods::widgets {
 			}
 
 			~TextButtonRow() override {
-				// OBS 側 action 参照を残すと次回 inject で誤参照するため明示削除する。
-				std::lock_guard<std::mutex> lock(g_text_button_action_props_mutex);
-				g_text_button_action_props.erase(binding_id_);
+				// binding_id のマップ削除はここでは行わない。
+				// RefreshProperties 後の再 inject で同じ binding_id が必要になるため、
+				// 古いエントリは次回の obs_properties_add_text_button_row で掃除される。
 				if (source_) {
 					obs_source_release(source_);
 					source_ = nullptr;
@@ -404,6 +404,16 @@ namespace ods::widgets {
 		const std::string binding_id = make_text_button_binding_id(prop_name);
 		{
 			std::lock_guard<std::mutex> lock(g_text_button_action_props_mutex);
+			const std::string           prefix = std::string(prop_name) + "#";
+			for (auto it = g_text_button_action_props.begin();
+				 it != g_text_button_action_props.end();) {
+				if (it->first != binding_id &&
+					it->first.compare(0, prefix.size(), prefix) == 0) {
+					it = g_text_button_action_props.erase(it);
+				} else {
+					++it;
+				}
+			}
 			g_text_button_action_props[binding_id] = action_props;
 		}
 

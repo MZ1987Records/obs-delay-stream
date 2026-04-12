@@ -186,11 +186,11 @@ namespace ods::widgets {
 			}
 
 			~ColorButtonRow() override {
-				{
-					// inject 後の古い binding が残らないように破棄時に必ず掃除する。
-					std::lock_guard<std::mutex> lock(g_color_button_action_props_mutex);
-					g_color_button_action_props.erase(binding_id_);
-				}
+				// binding_id のマップ削除はここでは行わない。
+				// RefreshProperties がウィジェットを再構築した場合、obs_properties_t（と
+				// その中の action_prop）はまだ生きているため、次の inject が同じ
+				// binding_id で再登録できるようにマップエントリを残す。
+				// 古いエントリは次回の obs_properties_add_color_button_row で掃除される。
 				if (source_) {
 					obs_source_release(source_);
 					source_ = nullptr;
@@ -498,6 +498,18 @@ namespace ods::widgets {
 
 		{
 			std::lock_guard<std::mutex> lock(g_color_button_action_props_mutex);
+			// 同じ prop_name の古い binding エントリを除去する。
+			// binding_id は "prop_name#seq" 形式なので、プレフィックス一致で旧世代を探す。
+			const std::string prefix = std::string(prop_name) + "#";
+			for (auto it = g_color_button_action_props.begin();
+				 it != g_color_button_action_props.end();) {
+				if (it->first != binding_id &&
+					it->first.compare(0, prefix.size(), prefix) == 0) {
+					it = g_color_button_action_props.erase(it);
+				} else {
+					++it;
+				}
+			}
 			g_color_button_action_props[binding_id] = action_props;
 		}
 		return placeholder;

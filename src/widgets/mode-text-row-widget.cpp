@@ -162,10 +162,9 @@ namespace ods::widgets {
 			}
 
 			~ModeTextRow() override {
-				{
-					std::lock_guard<std::mutex> lock(g_mode_text_props_mutex);
-					g_mode_text_props.erase(binding_id_.toStdString());
-				}
+				// binding_id のマップ削除はここでは行わない。
+				// RefreshProperties 後の再 inject で同じ binding_id が必要になるため、
+				// 古いエントリは次回の obs_properties_add_mode_text_row で掃除される。
 				if (source_) {
 					obs_source_release(source_);
 					source_ = nullptr;
@@ -509,6 +508,16 @@ namespace ods::widgets {
 		const std::string binding_id = make_mode_text_binding_id(prop_name);
 		{
 			std::lock_guard<std::mutex> lock(g_mode_text_props_mutex);
+			const std::string           prefix = std::string(prop_name) + "#";
+			for (auto it = g_mode_text_props.begin();
+				 it != g_mode_text_props.end();) {
+				if (it->first != binding_id &&
+					it->first.compare(0, prefix.size(), prefix) == 0) {
+					it = g_mode_text_props.erase(it);
+				} else {
+					++it;
+				}
+			}
 			g_mode_text_props[binding_id] = {mode_prop, text_prop};
 		}
 

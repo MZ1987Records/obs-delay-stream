@@ -112,11 +112,9 @@ namespace ods::widgets {
 			}
 
 			~PulldownRow() override {
-				{
-					// inject 後の古い binding が残らないように破棄時に掃除する。
-					std::lock_guard<std::mutex> lock(g_pulldown_list_props_mutex);
-					g_pulldown_list_props.erase(binding_id_);
-				}
+				// binding_id のマップ削除はここでは行わない。
+				// RefreshProperties 後の再 inject で同じ binding_id が必要になるため、
+				// 古いエントリは次回の obs_properties_add_pulldown_row で掃除される。
 				if (source_) {
 					obs_source_release(source_);
 					source_ = nullptr;
@@ -477,6 +475,16 @@ namespace ods::widgets {
 
 		{
 			std::lock_guard<std::mutex> lock(g_pulldown_list_props_mutex);
+			const std::string           prefix = std::string(prop_name) + "#";
+			for (auto it = g_pulldown_list_props.begin();
+				 it != g_pulldown_list_props.end();) {
+				if (it->first != binding_id &&
+					it->first.compare(0, prefix.size(), prefix) == 0) {
+					it = g_pulldown_list_props.erase(it);
+				} else {
+					++it;
+				}
+			}
 			g_pulldown_list_props[binding_id] = list_props;
 		}
 		return placeholder;
