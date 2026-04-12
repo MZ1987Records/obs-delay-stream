@@ -45,7 +45,9 @@
       "Bash(./node_modules/.bin/tsc *)",
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Edit(/.claude/skills/obs-native-ui-review/**)",
-      "Edit(/.claude/skills/mvvm-architecture/**)"
+      "Edit(/.claude/skills/mvvm-architecture/**)",
+      "Skill(mvvm-architecture)",
+      "Skill(mvvm-architecture:*)"
     ],
     "deny": [
       "Bash(mkfs *)",
