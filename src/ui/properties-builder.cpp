@@ -342,6 +342,17 @@ namespace ods::ui {
 			return false;
 		}
 
+		// 「高度な設定」チェックボックスのトグルでグループ表示を切り替える。
+		// grp_stream 内にカスタムウィジェットのプレースホルダーは無いため、
+		// return true による OBS の visible 更新だけで安全に動作する。
+		bool cb_show_advanced_changed(obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+			if (!props || !settings) return false;
+			bool show = obs_data_get_bool(settings, "show_advanced");
+			if (auto *p = obs_properties_get(props, "grp_stream"))
+				obs_property_set_visible(p, show);
+			return true;
+		}
+
 		// stream_id の有無に応じて関連ボタンの有効状態を切り替える。
 		bool cb_stream_id_changed(void *, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
 			if (!props || !settings) return false;
@@ -742,25 +753,43 @@ namespace ods::ui {
 
 	void add_stream_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
+
+		// チェックボックス（グループの外に配置）
+		obs_property_t *adv_p =
+			obs_properties_add_bool(props, "show_advanced", T_("ShowAdvancedSettings"));
+		obs_property_set_modified_callback(adv_p, cb_show_advanced_changed);
+
+		obs_data_t *settings = obs_source_get_settings(d->context);
+
+		// auto_ip の値を設定に書き込み、編集不可テキストボックスで表示する
+		if (settings)
+			obs_data_set_string(settings, "auto_ip_info", d->auto_ip.c_str());
+
 		obs_properties_t *grp = obs_properties_create();
-		obs_property_t   *sid_p =
-			obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
-		obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
-		obs_property_set_enabled(sid_p, false);
 		{
-			const std::string info = string_printf(T_("AutoIpFmt"), d->auto_ip.c_str());
-			obs_properties_add_text(grp, "auto_ip_info", info.c_str(), OBS_TEXT_INFO);
+			obs_property_t *auto_ip_p =
+				obs_properties_add_text(grp, "auto_ip_info", T_("AutoIpLabel"), OBS_TEXT_DEFAULT);
+			obs_property_set_enabled(auto_ip_p, false);
 		}
 		obs_property_t *ip_p =
 			obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
 		obs_property_t *port_p =
 			obs_properties_add_int(grp, "ws_port", T_("WsPort"), 1, 65535, 1);
+		obs_property_t *sid_p =
+			obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
+		obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
+		obs_property_set_enabled(sid_p, false);
 		if (d->router_running.load()) {
-			obs_property_set_enabled(sid_p, false);
 			obs_property_set_enabled(ip_p, false);
 			obs_property_set_enabled(port_p, false);
 		}
-		obs_properties_add_group(props, "grp_stream", T_("GroupStreamId"), OBS_GROUP_NORMAL, grp);
+		obs_property_t *grp_p =
+			obs_properties_add_group(props, "grp_stream", T_("GroupStreamId"), OBS_GROUP_NORMAL, grp);
+
+		// 初期状態: チェックされていなければグループを非表示
+		bool show = settings ? obs_data_get_bool(settings, "show_advanced") : false;
+		obs_property_set_visible(grp_p, show);
+		if (settings) obs_data_release(settings);
 	}
 
 	void add_ws_group(obs_properties_t *props, DelayStreamData *d, bool has_sid) {
@@ -1035,9 +1064,16 @@ namespace ods::ui {
 		} else {
 			tunnel_domain_text = T_("TunnelUnassignedDomain");
 		}
-		const std::string db =
-			string_printf(T_("TunnelAssignedDomainFmt"), tunnel_domain_text);
-		obs_properties_add_text(grp, "tunnel_domain_info", db.c_str(), OBS_TEXT_INFO);
+		{
+			obs_data_t *s = obs_source_get_settings(d->context);
+			if (s) {
+				obs_data_set_string(s, "tunnel_domain_info", tunnel_domain_text);
+				obs_data_release(s);
+			}
+		}
+		obs_property_t *td_p =
+			obs_properties_add_text(grp, "tunnel_domain_info", T_("TunnelAssignedDomainLabel"), OBS_TEXT_DEFAULT);
+		obs_property_set_enabled(td_p, false);
 
 		if (ts == TunnelState::Running && !turl.empty()) {
 			// URL 表示は「出演者別チャンネル」に集約
