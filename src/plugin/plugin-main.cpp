@@ -21,6 +21,7 @@
 #include "model/settings-repo.hpp"
 #include "viewmodel/delay-viewmodel.hpp"
 #include "widgets/color-buttons-widget.hpp"
+#include "widgets/delay-diagram-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
 #include "widgets/mode-text-row-widget.hpp"
@@ -102,8 +103,15 @@ void DelayStreamFilter::save_measurement_and_recalc(DelayStreamData *d) {
 	repo.set_measured_rtsp_e2e_ms(d->delay.measured_rtsp_e2e_ms);
 	repo.set_rtsp_e2e_measured(d->delay.rtsp_e2e_measured);
 	for (int i = 0; i < MAX_SUB_CH; ++i) {
-		repo.set_ch_measured_ms(i, d->delay.channels[i].measured_ms);
-		repo.set_ch_ws_measured(i, d->delay.channels[i].ws_measured);
+		auto &ch = d->delay.channels[i];
+		repo.set_ch_measured_ms(i, ch.measured_ms);
+		repo.set_ch_ws_measured(i, ch.ws_measured);
+		// 計測値が変わった結果、負のオフセットが C[i] を超える場合はクランプ
+		if (ch.ws_measured && ch.offset_ms < -ch.measured_ms) {
+			ch.offset_ms   = -ch.measured_ms;
+			const auto key = ods::plugin::make_sub_offset_key(i);
+			obs_data_set_int(settings, key.data(), ch.offset_ms);
+		}
 	}
 	obs_data_release(settings);
 	ods::plugin::recalc_all_delays(d);
@@ -156,6 +164,7 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		break;
 	case 5:
 		schedule_stepper_inject(ctx);
+		schedule_delay_diagram_inject(ctx);
 		schedule_delay_table_inject(ctx);
 		break;
 	default:
@@ -544,11 +553,11 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			ods::ui::add_master_group(props, d);
 			break;
 		case 5: {
-			ods::ui::delay::add_avatar_latency_group(props, d);
 			obs_data_t *s5 = obs_source_get_settings(d->context);
 			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
 			if (s5) obs_data_release(s5);
-			ods::ui::delay::add_delay_summary_group(props, vm);
+			ods::ui::delay::add_fine_tune_group(props, d, vm);
+			ods::ui::delay::add_delay_diagram_group(props, vm);
 			break;
 		}
 		default:

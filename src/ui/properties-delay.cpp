@@ -2,6 +2,7 @@
 #include "plugin/plugin-state.hpp"
 #include "ui/properties-delay.hpp"
 #include "viewmodel/delay-viewmodel.hpp"
+#include "widgets/delay-diagram-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/stepper-widget.hpp"
 
@@ -20,35 +21,47 @@ namespace ods::ui::delay {
 	using namespace ods::core;
 	using namespace ods::widgets;
 
-	void add_avatar_latency_group(obs_properties_t *props, DelayStreamData *d) {
-		if (!props || !d) return;
-		obs_properties_t *grp = obs_properties_create();
-		{
-			char info[256];
-			snprintf(info, sizeof(info), "%s", T_("AvatarLatencyInfoFmt"));
-			obs_property_t *info_p =
-				obs_properties_add_text(grp, "avatar_latency_info", info, OBS_TEXT_INFO);
-			obs_property_text_set_info_word_wrap(info_p, false);
-		}
-		obs_properties_add_stepper(
-			grp,
-			"avatar_latency_ms_stepper",
-			T_("AvatarLatencyLabel"),
-			ods::plugin::kAvatarLatencyKey,
-			0.0,
-			5000.0,
-			0.0,
-			0,
-			" ms",
-			true);
-		obs_properties_add_group(props, "grp_avatar_latency", T_("GroupAvatarLatency"), OBS_GROUP_NORMAL, grp);
-	}
-
-	void add_delay_summary_group(obs_properties_t *props, const DelayViewModel &vm) {
+	void add_delay_diagram_group(obs_properties_t *props, const DelayViewModel &vm) {
 		if (!props) return;
 		obs_properties_t *grp       = obs_properties_create();
 		const int         sub_count = static_cast<int>(vm.channels.size());
 
+		DelayDiagramInfo info{};
+		info.R            = vm.rtsp_e2e_ms;
+		info.A            = vm.avatar_latency_ms;
+		info.buf          = vm.playback_buffer_ms;
+		info.ch_count     = sub_count;
+		info.master_delay = vm.snapshot.master_delay_ms;
+		for (int i = 0; i < sub_count && i < DelayDiagramInfo::kMaxCh; ++i) {
+			info.channels[i].measured_ms = vm.channels[i].measured_ms;
+			info.channels[i].total_ms    = vm.channels[i].total_ms;
+			info.channels[i].offset_ms   = vm.channels[i].offset_ms;
+		}
+
+		DelayDiagramLabels labels;
+		labels.legend_delay     = T_("DiagramDelay");
+		labels.legend_ws        = T_("DiagramWsLatency");
+		labels.legend_buf       = T_("DiagramPlaybackBuf");
+		labels.legend_avatar    = T_("DiagramAvatarLatency");
+		labels.legend_broadcast = T_("DiagramBroadcastLatency");
+		labels.lane_broadcast   = T_("DiagramLaneBroadcast");
+		labels.no_data          = T_("DiagramNoData");
+		obs_properties_add_delay_diagram(grp, "delay_diagram", info, labels);
+
+		obs_properties_add_group(
+			props,
+			"grp_delay_diagram",
+			T_("GroupDelayDiagram"),
+			OBS_GROUP_NORMAL,
+			grp);
+	}
+
+	void add_fine_tune_group(obs_properties_t *props, DelayStreamData *d, const DelayViewModel &vm) {
+		if (!props || !d) return;
+		obs_properties_t *grp       = obs_properties_create();
+		const int         sub_count = static_cast<int>(vm.channels.size());
+
+		// 想定環境レイテンシ テーブル
 		std::vector<DelayTableChannelInfo> channels(static_cast<size_t>(sub_count));
 		for (int i = 0; i < sub_count; ++i) {
 			const auto &src          = vm.channels[i];
@@ -78,16 +91,23 @@ namespace ods::ui::delay {
 			channels.data(),
 			labels);
 
-		{
-			const std::string obs_delay_text =
-				string_printf(T_("ObsOutputDelayFmt"), vm.snapshot.neg_max_ms);
-			obs_properties_add_text(grp, "obs_output_delay", obs_delay_text.c_str(), OBS_TEXT_INFO);
-		}
+		// 想定アバターレイテンシ ステッパー
+		obs_properties_add_stepper(
+			grp,
+			"avatar_latency_ms_stepper",
+			T_("AvatarLatencyLabel"),
+			ods::plugin::kAvatarLatencyKey,
+			0.0,
+			5000.0,
+			0.0,
+			0,
+			" ms",
+			true);
 
 		obs_properties_add_group(
 			props,
-			"grp_delay_summary",
-			T_("GroupDelaySummary"),
+			"grp_fine_tune",
+			T_("GroupFineTune"),
 			OBS_GROUP_NORMAL,
 			grp);
 	}

@@ -25,15 +25,18 @@ namespace ods::viewmodel {
 			std::string name;         ///< メモ名（空文字列可）
 			float       measured_ms;  ///< 計測値（片道 ms）。未計測は -1.0f
 			int         offset_ms;    ///< チャンネル別補正オフセット
-			int         raw_delay_ms; ///< R - A - C[i] - B + offset[i]
+			int         raw_delay_ms; ///< R - A - C[i] - B - offset[i]
 			int         neg_max_ms;   ///< 負値フロア補正量（全チャンネル共通）
 			int         total_ms;     ///< raw_delay_ms + neg_max_ms
 			bool        warn;         ///< floor 補正の原因チャンネルか
 		};
 
-		DelaySnapshot          snapshot;    ///< 全チャンネル遅延計算結果
-		std::vector<ChDisplay> channels;    ///< チャンネルごとの表示データ
-		int                    selected_ch; ///< テーブルで選択中のチャンネル
+		DelaySnapshot          snapshot;               ///< 全チャンネル遅延計算結果
+		std::vector<ChDisplay> channels;               ///< チャンネルごとの表示データ
+		int                    selected_ch;            ///< テーブルで選択中のチャンネル
+		int                    rtsp_e2e_ms        = 0; ///< R: OBS 配信レイテンシ (ms)
+		int                    avatar_latency_ms  = 0; ///< A: アバターレイテンシ (ms)
+		int                    playback_buffer_ms = 0; ///< B: 再生バッファ (ms)
 
 		/// DelayState と obs_data から表示用 ViewModel を構築する。
 		static DelayViewModel build(const DelayState &delay, obs_data_t *settings) {
@@ -41,6 +44,10 @@ namespace ods::viewmodel {
 			vm.snapshot = delay.calc_all_delays();
 
 			const int sub_count = vm.snapshot.active_count;
+
+			vm.rtsp_e2e_ms        = delay.measured_rtsp_e2e_ms;
+			vm.avatar_latency_ms  = delay.avatar_latency_ms;
+			vm.playback_buffer_ms = delay.playback_buffer_ms;
 
 			vm.selected_ch = 0;
 			if (settings) {
