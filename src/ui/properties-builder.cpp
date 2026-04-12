@@ -1137,9 +1137,11 @@ namespace ods::ui {
 				obs_data_release(s);
 			}
 		}
-		obs_property_t *td_p =
-			obs_properties_add_text(grp, "tunnel_domain_info", T_("TunnelAssignedDomainLabel"), OBS_TEXT_DEFAULT);
-		obs_property_set_enabled(td_p, false);
+		ods::widgets::obs_properties_add_text_readonly(
+			grp,
+			"tunnel_domain_info_row",
+			T_("TunnelAssignedDomainLabel"),
+			"tunnel_domain_info");
 
 		if (ts == TunnelState::Running && !turl.empty()) {
 			// URL 表示は「出演者別チャンネル」に集約

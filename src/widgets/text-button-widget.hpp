@@ -34,6 +34,12 @@ namespace ods::widgets {
 		bool                   button_enabled  = true,
 		int                    max_input_chars = 0);
 
+	obs_property_t *obs_properties_add_text_readonly(
+		obs_properties_t *props,
+		const char       *prop_name,
+		const char       *label,
+		const char       *setting_key);
+
 	void schedule_text_button_inject(obs_source_t *source);
 
 } // namespace ods::widgets

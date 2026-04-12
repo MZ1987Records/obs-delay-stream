@@ -154,6 +154,7 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		schedule_stepper_inject(ctx);
 		break;
 	case 2:
+		schedule_text_button_inject(ctx);
 		schedule_path_mode_row_inject(ctx);
 		schedule_url_table_inject(ctx);
 		break;

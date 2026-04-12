@@ -230,7 +230,7 @@ namespace ods::widgets {
 			if (fields.size() >= 7) {
 				bool      ok_button_count = false;
 				const int button_count    = fields[6].toInt(&ok_button_count);
-				if (ok_button_count && button_count > 0) {
+				if (ok_button_count && button_count >= 0) {
 					const int expected_fields = 7 + button_count * 2;
 					if (fields.size() >= expected_fields) {
 						parsed.key             = fields[1];
@@ -365,8 +365,10 @@ namespace ods::widgets {
 													size_t                         button_count,
 													bool                           input_enabled,
 													int                            max_input_chars) {
-		if (!props || !prop_name || !*prop_name || !setting_key || !*setting_key ||
-			!buttons || button_count == 0) {
+		if (!props || !prop_name || !*prop_name || !setting_key || !*setting_key) {
+			return nullptr;
+		}
+		if (button_count > 0 && !buttons) {
 			return nullptr;
 		}
 
@@ -463,6 +465,21 @@ namespace ods::widgets {
 			1,
 			input_enabled,
 			max_input_chars);
+	}
+
+	obs_property_t *obs_properties_add_text_readonly(obs_properties_t *props,
+													 const char       *prop_name,
+													 const char       *label,
+													 const char       *setting_key) {
+		return obs_properties_add_text_buttons(
+			props,
+			prop_name,
+			label,
+			setting_key,
+			nullptr,
+			0,
+			false,
+			0);
 	}
 
 	void schedule_text_button_inject(obs_source_t *source) {
