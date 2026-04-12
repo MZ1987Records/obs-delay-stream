@@ -15,7 +15,7 @@ namespace ods::model {
 	 */
 	struct DelaySnapshot {
 		struct ChDelay {
-			int  raw_ms          = 0;     ///< R - A - C[i] - B + offset[i]（負値許容）
+			int  raw_ms          = 0;     ///< R - A - C[i] - B - offset[i]（負値許容）
 			int  total_ms        = 0;     ///< raw_ms + neg_max（バッファ適用値）
 			bool has_measurement = false; ///< WS 計測済みか
 			bool warn            = false; ///< floor 補正の原因チャンネルか
@@ -54,7 +54,7 @@ namespace ods::model {
 										int ch_measured_ms,
 										int playback_buffer_ms,
 										int offset_ms) {
-			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms - playback_buffer_ms + offset_ms;
+			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms - playback_buffer_ms - offset_ms;
 		}
 
 		/// 全チャンネルの遅延を一括計算してスナップショットを返す。

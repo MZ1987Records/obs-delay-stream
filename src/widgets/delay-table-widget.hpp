@@ -11,7 +11,7 @@ namespace ods::widgets {
 		const char *name;         ///< メモ名（空文字列可）
 		float       measured_ms;  ///< 計測値（片道）。未計測は -1.0f
 		int         offset_ms;    ///< チャンネル別補正オフセット
-		int         raw_delay_ms; ///< R - A - C[i] - B + offset[i]（負値許容）
+		int         raw_delay_ms; ///< R - A - C[i] - B - offset[i]（負値許容）
 		int         neg_max_ms;   ///< 負値フロア補正量（全チャンネル共通）
 		int         total_ms;     ///< raw_delay_ms + neg_max_ms（最終適用値）
 		bool        warn;         ///< raw_delay_ms < 0 なら true

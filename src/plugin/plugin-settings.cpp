@@ -348,6 +348,9 @@ namespace ods::plugin {
 					int          offset_ms     = static_cast<int>(std::lround(raw_offset_ms));
 					if (offset_ms < kSubOffsetMinMs) offset_ms = kSubOffsetMinMs;
 					if (offset_ms > kSubOffsetMaxMs) offset_ms = kSubOffsetMaxMs;
+					// 負のオフセットがブラウザ配信レイテンシを超えないよう制限
+					if (ch.ws_measured && offset_ms < -ch.measured_ms)
+						offset_ms = -ch.measured_ms;
 					ch.offset_ms = offset_ms;
 					if (std::fabs(raw_offset_ms - static_cast<double>(offset_ms)) > 0.001) {
 						obs_data_set_int(settings_, offset_key.data(), offset_ms);
@@ -369,6 +372,9 @@ namespace ods::plugin {
 
 				// 全チャンネル + master_buf の遅延を一括再計算する。
 				recalc_all_delays(data_);
+
+				// タイミング図・サマリテーブルを最新の計算結果で再描画する。
+				data_->request_props_refresh_for_tabs({5}, "delay_recalc");
 			}
 
 			// Ping 回数設定を正規化して flow へ適用する。
