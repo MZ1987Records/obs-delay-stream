@@ -35,7 +35,7 @@ namespace ods::network {
 	 */
 	struct OpusEncoder {
 		bool    disabled           = false; ///< 初期化失敗などで無効化されているか
-		bool    flush_pending      = false; ///< 遅延変更に伴うフラッシュ保留フラグ
+		bool    flush_pending      = false; ///< ディレイ変更に伴うフラッシュ保留フラグ
 		int     input_sample_rate  = 0;     ///< 入力サンプルレート
 		int     output_sample_rate = 0;     ///< 出力サンプルレート
 		int     channels           = 0;     ///< チャンネル数

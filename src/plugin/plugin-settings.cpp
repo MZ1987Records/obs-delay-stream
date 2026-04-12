@@ -311,7 +311,7 @@ namespace ods::plugin {
 				data_->set_host_ip(hip);
 			}
 
-			// アバターレイテンシ・計測結果・オフセットを反映し、全チャンネル遅延を再計算する。
+			// アバター遅延・計測結果・オフセットを反映し、全チャンネルディレイを再計算する。
 			void apply_delay_settings() {
 				auto &delay = data_->delay;
 
@@ -370,7 +370,7 @@ namespace ods::plugin {
 					data_->router.set_sub_code(i, code);
 				}
 
-				// 全チャンネル + master_buf の遅延を一括再計算する。
+				// 全チャンネル + master_buf のディレイを一括再計算する。
 				recalc_all_delays(data_);
 
 				// タイミング図・サマリテーブルを最新の計算結果で再描画する。

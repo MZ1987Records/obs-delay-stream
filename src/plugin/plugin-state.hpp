@@ -322,9 +322,9 @@ namespace ods::plugin {
 		std::atomic<int>    ws_port{WS_PORT};                                ///< WebSocket ポート番号
 		std::atomic<int>    ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
 		int                 playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		DelayState          delay;                                           ///< 遅延計算の入力値（MVVM Model 層）
+		DelayState          delay;                                           ///< ディレイ計算の入力値（MVVM Model 層）
 		std::atomic<int>    active_tab{0};                                   ///< 設定UIの現在タブ（0-indexed）
-		DelayBuffer         master_buf;                                      ///< マスターチャンネルの遅延バッファ
+		DelayBuffer         master_buf;                                      ///< マスターチャンネルのディレイバッファ
 		RtmpMeasureState    rtmp_measure;                                    ///< RTMP 計測状態
 		RtspE2eMeasureState rtsp_e2e_measure;                                ///< RTSP E2E 計測状態
 		StreamRouter        router;                                          ///< WebSocket ルーター
@@ -336,9 +336,9 @@ namespace ods::plugin {
 		std::array<TabCtx, 6> tab_btn_ctx;
 
 		/// サブチャンネルの音声バッファと計測状態。
-		/// 遅延計算の入力値（measured_ms, ws_measured, offset_ms）は delay.channels[] に移動済み。
+		/// ディレイ計算の入力値（measured_ms, ws_measured, offset_ms）は delay.channels[] に移動済み。
 		struct SubChannel {
-			DelayBuffer  buf;     ///< 音声遅延バッファ
+			DelayBuffer  buf;     ///< 音声ディレイバッファ
 			MeasureState measure; ///< 計測状態
 		};
 

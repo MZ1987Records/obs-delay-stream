@@ -9,7 +9,7 @@ namespace ods::model {
 	using ods::core::MAX_SUB_CH;
 
 	/**
-	 * 全チャンネルの遅延計算結果スナップショット。
+	 * 全チャンネルのディレイ計算結果スナップショット。
 	 *
 	 * UI 表示と DelayBuffer 適用の両方で使い、計算ロジックの重複を排除する。
 	 */
@@ -22,18 +22,18 @@ namespace ods::model {
 		};
 		std::array<ChDelay, MAX_SUB_CH> channels{};
 		int                             neg_max_ms      = 0; ///< 負値 raw の最大絶対値
-		int                             master_delay_ms = 0; ///< OBS 出力への遅延 = neg_max
+		int                             master_delay_ms = 0; ///< OBS 出力へのディレイ = neg_max
 		int                             active_count    = 0; ///< 計算対象チャンネル数
 	};
 
 	/**
-	 * 遅延計算に必要な入力値をまとめた状態構造体。
+	 * ディレイ計算に必要な入力値をまとめた状態構造体。
 	 *
-	 * DelayStreamData から遅延計算の関心事だけを分離し、
+	 * DelayStreamData からディレイ計算の関心事だけを分離し、
 	 * calc_all_delays() で一元的にスナップショットを生成する。
 	 */
 	struct DelayState {
-		/// チャンネルごとの遅延計算入力値。
+		/// チャンネルごとのディレイ計算入力値。
 		struct ChDelay {
 			int  measured_ms = 0;     ///< WS 計測結果の片道レイテンシ (ms)
 			bool ws_measured = false; ///< WS 計測済みフラグ
@@ -46,9 +46,9 @@ namespace ods::model {
 		int  playback_buffer_ms   = 0;     ///< 再生バッファ量 (ms)
 		int  sub_ch_count         = 1;     ///< アクティブなサブチャンネル数
 
-		std::array<ChDelay, MAX_SUB_CH> channels{}; ///< チャンネルごとの遅延入力
+		std::array<ChDelay, MAX_SUB_CH> channels{}; ///< チャンネルごとのディレイ計算入力
 
-		/// 1 チャンネルの補正前遅延値を計算する。
+		/// 1 チャンネルの補正前ディレイ値を計算する。
 		static int calc_ch_raw_delay_ms(int rtsp_e2e_ms,
 										int avatar_latency_ms,
 										int ch_measured_ms,
@@ -57,7 +57,7 @@ namespace ods::model {
 			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms - playback_buffer_ms - offset_ms;
 		}
 
-		/// 全チャンネルの遅延を一括計算してスナップショットを返す。
+		/// 全チャンネルのディレイを一括計算してスナップショットを返す。
 		DelaySnapshot calc_all_delays() const {
 			DelaySnapshot snap;
 			snap.active_count = sub_ch_count;

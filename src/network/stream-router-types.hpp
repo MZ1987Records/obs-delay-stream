@@ -87,8 +87,8 @@ namespace ods::network {
 		std::atomic<bool>                measuring{false}; ///< RTT 計測中フラグ
 		LatencyResult                    last_result;      ///< 直近計測結果
 
-		double      last_applied_delay{-1.0}; ///< 最後に通知した遅延値
-		std::string last_applied_reason;      ///< 遅延通知の理由
+		double      last_applied_delay{-1.0}; ///< 最後に通知したディレイ値
+		std::string last_applied_reason;      ///< ディレイ通知の理由
 
 		LatencyCallback on_result; ///< チャンネル別結果通知
 	};

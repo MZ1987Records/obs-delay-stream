@@ -13,7 +13,7 @@ namespace ods::viewmodel {
 	using ods::model::DelayState;
 
 	/**
-	 * 遅延タブ (tab 5) の表示に必要なデータを事前計算した読み取り専用スナップショット。
+	 * ディレイタブ (tab 5) の表示に必要なデータを事前計算した読み取り専用スナップショット。
 	 *
 	 * get_properties() の冒頭で build() し、UI 構築関数に const 参照で渡す。
 	 * 生の DelayStreamData や obs_data_t への直接アクセスを排除し、
@@ -31,7 +31,7 @@ namespace ods::viewmodel {
 			bool        warn;         ///< floor 補正の原因チャンネルか
 		};
 
-		DelaySnapshot          snapshot;               ///< 全チャンネル遅延計算結果
+		DelaySnapshot          snapshot;               ///< 全チャンネルディレイ計算結果
 		std::vector<ChDisplay> channels;               ///< チャンネルごとの表示データ
 		int                    selected_ch;            ///< テーブルで選択中のチャンネル
 		int                    rtsp_e2e_ms        = 0; ///< R: OBS 配信レイテンシ (ms)

@@ -6,7 +6,7 @@
  * WebSocket 計測: 接続中チャンネルを並列計測
  * RTSP E2E 計測: プローブ信号注入で終端到達遅延を計測
  *
- * マスター遅延は `max_latency + rtsp_e2e_latency` で算出する。
+ * マスターディレイは `max_latency + rtsp_e2e_latency` で算出する。
  */
 
 #include "core/constants.hpp"

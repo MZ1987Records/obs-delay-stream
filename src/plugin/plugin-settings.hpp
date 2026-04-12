@@ -37,7 +37,7 @@ namespace ods::plugin {
 	SubSettingKey make_sub_ws_measured_key(int ch);         ///< `sub{ch}_ws_measured` キーを生成する
 	SubSettingKey make_sub_remove_row_key(int ch);          ///< `sub{ch}_remove_row` キーを生成する
 
-	/// 全チャンネルの遅延を一括再計算して DelayBuffer へ適用する
+	/// 全チャンネルのディレイを一括再計算して DelayBuffer へ適用する
 	void recalc_all_delays(DelayStreamData *d);
 
 	/// OBS 設定値を `DelayStreamData` に反映する

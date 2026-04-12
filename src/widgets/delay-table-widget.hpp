@@ -5,7 +5,7 @@
 namespace ods::widgets {
 
 	/**
-	 * 遅延テーブルウィジェットに渡す 1 チャンネル分の情報。
+	 * ディレイテーブルウィジェットに渡す 1 チャンネル分の情報。
 	 */
 	struct DelayTableChannelInfo {
 		const char *name;         ///< メモ名（空文字列可）

@@ -81,7 +81,7 @@ namespace ods::network {
 		}
 		if (thread_.joinable()) thread_.join();
 
-		// 4. 計測結果・適用遅延をキャッシュに退避してから状態をクリア
+		// 4. 計測結果・適用ディレイをキャッシュに退避してから状態をクリア
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			for (auto &[key, cs] : ch_map_) {
@@ -368,7 +368,7 @@ namespace ods::network {
 			cs.last_applied_delay          = ms;
 			cs.last_applied_reason         = use_reason;
 		}
-		// 遅延変更 → Opus FIFO をフレーム境界でドレインしてからエンコーダ状態リセット
+		// ディレイ変更 → Opus FIFO をフレーム境界でドレインしてからエンコーダ状態リセット
 		if (audio_codec_.load(std::memory_order_relaxed) == 0)
 			opus_flush_pending_.store(true, std::memory_order_release);
 
@@ -575,7 +575,7 @@ namespace ods::network {
 		OpusEncoder &enc = opus_[ch];
 		if (!enc.ctx || enc.disabled || !enc.fifo) return false;
 
-		// 遅延変更に伴うフラッシュ: 完全フレームを吐き切ってからエンコーダ状態リセット
+		// ディレイ変更に伴うフラッシュ: 完全フレームを吐き切ってからエンコーダ状態リセット
 		if (enc.flush_pending) {
 			enc.flush_pending = false;
 			if (!enc.drain(MAGIC_OPUS, out)) {

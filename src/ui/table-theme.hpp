@@ -6,7 +6,7 @@
 namespace ods::ui {
 
 	/**
-	 * URL配布・遅延テーブルで共有するテーブル配色。
+	 * URL配布・ディレイテーブルで共有するテーブル配色。
 	 */
 	struct TableThemeColors {
 		QColor table_bg;    ///< テーブル全体背景

@@ -5,7 +5,7 @@
 namespace ods::widgets {
 
 	/**
-	 * 遅延タイミング図ウィジェットに渡す描画データ。
+	 * ディレイタイミング図ウィジェットに渡す描画データ。
 	 *
 	 * DelayViewModel から必要なフィールドだけを抽出し、
 	 * QPainter によるタイミング図描画に必要な値をまとめる。
@@ -34,6 +34,7 @@ namespace ods::widgets {
 	struct DelayDiagramLabels {
 		const char *legend_delay     = nullptr; ///< "ディレイ"
 		const char *legend_ws        = nullptr; ///< "ブラウザ配信レイテンシ"
+		const char *legend_env       = nullptr; ///< "想定環境レイテンシ"
 		const char *legend_buf       = nullptr; ///< "再生バッファ"
 		const char *legend_avatar    = nullptr; ///< "アバターレイテンシ"
 		const char *legend_broadcast = nullptr; ///< "OBS配信レイテンシ"

@@ -96,7 +96,7 @@ private:
 	static void schedule_update_check(DelayStreamData *, std::weak_ptr<std::atomic<bool>>, bool);
 };
 
-// 計測結果と計測済みフラグを OBS 設定に書き戻し、全チャンネル遅延を再計算する。
+// 計測結果と計測済みフラグを OBS 設定に書き戻し、全チャンネルディレイを再計算する。
 void DelayStreamFilter::save_measurement_and_recalc(DelayStreamData *d) {
 	obs_data_t              *settings = obs_source_get_settings(d->context);
 	ods::model::SettingsRepo repo(settings);
@@ -556,8 +556,8 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			obs_data_t *s5 = obs_source_get_settings(d->context);
 			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
 			if (s5) obs_data_release(s5);
+			ods::ui::delay::add_delay_diagram_group(props, d, vm);
 			ods::ui::delay::add_fine_tune_group(props, d, vm);
-			ods::ui::delay::add_delay_diagram_group(props, vm);
 			break;
 		}
 		default:

@@ -116,7 +116,7 @@ namespace ods::network {
 		/// 全コールバックをクリアする（破棄前に呼ぶ）
 		void clear_callbacks();
 
-		/// 遅延反映通知を送る
+		/// ディレイ反映通知を送る
 		void notify_apply_delay(int ch, double ms, const char *reason = "auto_measure");
 
 		/// 接続数を返す（ch は 0-indexed）
@@ -140,7 +140,7 @@ namespace ods::network {
 
 		struct ChannelCache {
 			LatencyResult last_result;              ///< 最終計測結果キャッシュ
-			double        last_applied_delay{-1.0}; ///< 最終反映遅延キャッシュ
+			double        last_applied_delay{-1.0}; ///< 最終反映ディレイキャッシュ
 			std::string   last_applied_reason;      ///< 最終反映理由キャッシュ
 		};
 
@@ -170,7 +170,7 @@ namespace ods::network {
 		int                                 active_ch_max_ = ods::core::MAX_SUB_CH; ///< 有効 CH 上限
 		ConnectionMap                       conn_map_;                              ///< 接続ハンドルごとの情報
 		std::map<std::string, ChannelState> ch_map_;                                ///< "stream_id/ch_0idx" ごとの状態
-		std::map<std::string, ChannelCache> ch_cache_;                              ///< stop() 時に退避する計測結果・適用遅延キャッシュ
+		std::map<std::string, ChannelCache> ch_cache_;                              ///< stop() 時に退避する計測結果・適用ディレイキャッシュ
 		std::mutex                          measure_threads_mtx_;                   ///< 計測スレッド配列の排他制御
 
 		std::vector<std::unique_ptr<MeasureThread>>    measure_threads_; ///< 実行中/完了待ち計測スレッド
