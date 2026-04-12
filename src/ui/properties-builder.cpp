@@ -343,13 +343,20 @@ namespace ods::ui {
 		}
 
 		// 「高度な設定」チェックボックスのトグルでグループ表示を切り替える。
-		// grp_stream 内にカスタムウィジェットのプレースホルダーは無いため、
-		// return true による OBS の visible 更新だけで安全に動作する。
-		bool cb_show_advanced_changed(obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
-			if (!props || !settings) return false;
+		// return true は OBS の RefreshProperties を起動し、同ページ内の
+		// カスタムウィジェットを破壊するため、直後に inject を再スケジュールする。
+		bool cb_show_advanced_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+			auto *d = static_cast<DelayStreamData *>(priv);
+			if (!props || !settings || !d) return false;
 			bool show = obs_data_get_bool(settings, "show_advanced");
 			if (auto *p = obs_properties_get(props, "grp_stream"))
 				obs_property_set_visible(p, show);
+			props_ui_with_preserved_scroll([d]() {
+				if (!d || !d->context) return;
+				schedule_color_button_row_inject(d->context);
+				schedule_pulldown_row_inject(d->context);
+				schedule_stepper_inject(d->context);
+			});
 			return true;
 		}
 
@@ -757,7 +764,7 @@ namespace ods::ui {
 		// チェックボックス（グループの外に配置）
 		obs_property_t *adv_p =
 			obs_properties_add_bool(props, "show_advanced", T_("ShowAdvancedSettings"));
-		obs_property_set_modified_callback(adv_p, cb_show_advanced_changed);
+		obs_property_set_modified_callback2(adv_p, cb_show_advanced_changed, d);
 
 		obs_data_t *settings = obs_source_get_settings(d->context);
 
