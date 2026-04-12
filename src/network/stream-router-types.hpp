@@ -45,7 +45,7 @@ namespace ods::network {
 		double      max_rtt_ms     = 0.0;   ///< 最大 RTT (ms)
 		int         samples        = 0;     ///< 受信できたサンプル数（外れ値除外前）
 		int         used_samples   = 0;     ///< 統計計算に使ったサンプル数
-		const char *method         = "";    ///< "median" | "trimmed" | "iqr"
+		const char *method         = "";    ///< "median" | "iqr"
 	};
 
 	/// チャンネル別レイテンシ結果通知コールバック（sid, ch, result）

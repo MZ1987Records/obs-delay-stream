@@ -16,8 +16,8 @@ export const MIN_CH = 1;
 /** デフォルト最大CH番号 */
 export const DEFAULT_MAX_CH = 20;
 
-/** レイテンシ計測のデフォルトping回数 */
-export const DEFAULT_PING_COUNT = 30;
+/** レイテンシ計測のデフォルトping回数（デフォルト精度） */
+export const DEFAULT_PING_COUNT = 10;
 
 /** WebSocket接続タイムアウト (ms) */
 export const CONNECT_TIMEOUT_MS = 7000;

@@ -1085,7 +1085,7 @@ namespace ods::network {
 				std::sort(sorted.begin(), sorted.end());
 				const int n = (int)sorted.size();
 
-				if (n <= 15) {
+				if (n < 30) {
 					// 中央値
 					r.method       = "median";
 					double median  = (n % 2 == 0)
@@ -1093,14 +1093,6 @@ namespace ods::network {
 										 : sorted[n / 2];
 					r.avg_rtt_ms   = median;
 					r.used_samples = 1;
-				} else if (n < 30) {
-					// トリム平均: 上下1サンプル除外
-					r.method   = "trimmed";
-					double sum = 0;
-					for (int i = 1; i < n - 1; ++i)
-						sum += sorted[i];
-					r.used_samples = n - 2;
-					r.avg_rtt_ms   = sum / r.used_samples;
 				} else {
 					// IQR除外後の平均
 					r.method   = "iqr";

@@ -17,7 +17,7 @@ namespace ods::core {
 	static constexpr int   PLAYBACK_BUFFER_DEFAULT_MS = 120;      ///< 再生バッファのデフォルト値 (ms)
 
 	// WebSocket レイテンシ計測パラメータ
-	static constexpr int DEFAULT_PING_COUNT = 30;  ///< 1 回の計測で送信する ping 数
+	static constexpr int DEFAULT_PING_COUNT = 10;  ///< 1 回の計測で送信する ping 数（デフォルト精度）
 	static constexpr int PING_INTV_MS       = 150; ///< ping 送信間隔 (ms)
 
 	// RTMP プローブパラメータ
