@@ -150,13 +150,13 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		schedule_text_button_inject(ctx);
 		break;
 	case 1:
-		schedule_pulldown_row_inject(ctx);
-		schedule_stepper_inject(ctx);
-		break;
-	case 2:
 		schedule_text_button_inject(ctx);
 		schedule_path_mode_row_inject(ctx);
 		schedule_url_table_inject(ctx);
+		break;
+	case 2:
+		schedule_pulldown_row_inject(ctx);
+		schedule_stepper_inject(ctx);
 		break;
 	case 3:
 		schedule_flow_progress_inject(ctx);
@@ -350,25 +350,25 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	};
 	d->tunnel.on_url_ready = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_url_ready");
+		d->request_props_refresh_for_tabs({1}, "tunnel.on_url_ready");
 	};
 	d->tunnel.on_error = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_error");
+		d->request_props_refresh_for_tabs({1}, "tunnel.on_error");
 	};
 	d->tunnel.on_stopped = [d]() {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_stopped");
+		d->request_props_refresh_for_tabs({1}, "tunnel.on_stopped");
 	};
 	d->tunnel.on_download_state = [d](bool downloading) {
 		if (!downloading) {
 			queue_ui_safe(d, [](DelayStreamData *d) {
 				ods::plugin::maybe_persist_cloudflared_path_after_auto_ready(d->context);
-				d->request_props_refresh_for_tabs({2}, "tunnel.on_download_state.done");
+				d->request_props_refresh_for_tabs({1}, "tunnel.on_download_state.done");
 			});
 			return;
 		}
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_download_state");
+		d->request_props_refresh_for_tabs({1}, "tunnel.on_download_state");
 	};
 	d->router.on_conn_change = [d](const std::string &sid, int, size_t) {
 		if (sid == d->get_stream_id()) {
@@ -560,12 +560,12 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			ods::ui::channels::add_sub_channels_group(props, d);
 			break;
 		case 1:
-			ods::ui::add_ws_group(props, d, has_sid);
-			ods::ui::add_stream_group(props, d);
-			break;
-		case 2:
 			ods::ui::add_tunnel_group(props, d);
 			ods::ui::url_share::add_url_share_group(props, d);
+			break;
+		case 2:
+			ods::ui::add_ws_group(props, d, has_sid);
+			ods::ui::add_stream_group(props, d);
 			break;
 		case 3:
 			ods::ui::add_flow_group(props, d);
