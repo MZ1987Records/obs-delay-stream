@@ -105,6 +105,7 @@ namespace ods::widgets {
 							 const std::vector<ParsedChannel> &channels,
 							 const QStringList                &labels, // hdr_ch,name,measured,offset,raw,floor,total,lbl_editor
 							 const QString                    &editor_color = {},
+							 const QString                    &help_text    = {},
 							 QWidget                          *parent       = nullptr)
 				: QWidget(parent), source_(source ? obs_source_get_ref(source) : nullptr), ch_count_(static_cast<int>(channels.size())), selected_ch_(selected_ch >= 0 && selected_ch < static_cast<int>(channels.size()) ? selected_ch : 0) {
 				auto *vlay = new QVBoxLayout(this);
@@ -313,6 +314,43 @@ namespace ods::widgets {
 
 				vlay->addWidget(editor_row, 0, Qt::AlignLeft | Qt::AlignTop);
 
+				// ヘルプボックス（左ボーダーアクセント付きコールアウト）
+				if (!help_text.isEmpty()) {
+					auto *help = new QLabel(help_text, this);
+					help->setTextFormat(Qt::RichText);
+					help->setWordWrap(true);
+					QFont hf = font();
+					hf.setPixelSize(11);
+					help->setFont(hf);
+
+					const QPalette pal    = palette();
+					const QColor   accent = pal.color(QPalette::Highlight);
+					const QColor   base   = pal.color(QPalette::Window);
+					// アクセントを 10% ブレンドした背景色
+					const QColor bg(
+						base.red() + (accent.red() - base.red()) * 10 / 100,
+						base.green() + (accent.green() - base.green()) * 10 / 100,
+						base.blue() + (accent.blue() - base.blue()) * 10 / 100);
+					QColor border = accent;
+					border.setAlpha(160);
+					QColor fg = pal.color(QPalette::Text);
+					fg.setAlpha(190);
+
+					help->setStyleSheet(
+						QStringLiteral(
+							"QLabel {"
+							" background-color: %1;"
+							" border: none;"
+							" border-left: 3px solid %2;"
+							" padding: 6px 10px;"
+							" color: %3;"
+							"}")
+							.arg(bg.name(QColor::HexArgb),
+								 border.name(QColor::HexArgb),
+								 fg.name(QColor::HexArgb)));
+					vlay->addWidget(help);
+				}
+
 				connect(spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &DelayTableWidget::onValueChanged);
 
 				// 初期行を選択してスピンを同期する。
@@ -433,7 +471,8 @@ namespace ods::widgets {
 									   int                        &selected_ch,
 									   QStringList                &labels,
 									   std::vector<ParsedChannel> &channels,
-									   QString                    &editor_color) {
+									   QString                    &editor_color,
+									   QString                    &help_text) {
 			QStringList fields;
 			if (!split_escaped_pipe_fields(text, fields))
 				return false;
@@ -473,6 +512,9 @@ namespace ods::widgets {
 			}
 			// editor_color（オプション、チャンネルデータの後ろ）
 			editor_color = (idx < static_cast<int>(fields.size())) ? fields[idx] : QString{};
+			++idx;
+			// help_text（オプション）
+			help_text = (idx < static_cast<int>(fields.size())) ? fields[idx] : QString{};
 			return true;
 		}
 
@@ -505,7 +547,8 @@ namespace ods::widgets {
 				QStringList                labels;
 				std::vector<ParsedChannel> channels;
 				QString                    editor_color;
-				if (!parse_delay_table_payload(ph.text, selected_ch, labels, channels, editor_color))
+				QString                    help_text;
+				if (!parse_delay_table_payload(ph.text, selected_ch, labels, channels, editor_color, help_text))
 					continue;
 
 				QWidget *parent = ph.label->parentWidget();
@@ -524,6 +567,7 @@ namespace ods::widgets {
 					channels,
 					labels,
 					editor_color,
+					help_text,
 					parent);
 
 				form->removeRow(row);
@@ -603,6 +647,9 @@ namespace ods::widgets {
 		// editor_color（オプション）
 		payload += '|';
 		payload += escape_field(labels.editor_color ? labels.editor_color : "");
+		// help_text（オプション）
+		payload += '|';
+		payload += escape_field(labels.help_text ? labels.help_text : "");
 
 		return obs_properties_add_text(props, prop_name, payload.c_str(), OBS_TEXT_INFO);
 	}

@@ -32,14 +32,15 @@ namespace ods::widgets {
 	 * plugin-main.cpp 側で obs_module_text() を使って渡す。
 	 */
 	struct DelayDiagramLabels {
-		const char *legend_delay     = nullptr; ///< "ディレイ"
-		const char *legend_ws        = nullptr; ///< "ブラウザ配信レイテンシ"
-		const char *legend_env       = nullptr; ///< "想定環境レイテンシ"
-		const char *legend_buf       = nullptr; ///< "再生バッファ"
-		const char *legend_avatar    = nullptr; ///< "アバターレイテンシ"
-		const char *legend_broadcast = nullptr; ///< "OBS配信レイテンシ"
-		const char *lane_broadcast   = nullptr; ///< "配信" (レーンラベル)
-		const char *no_data          = nullptr; ///< "計測データなし"
+		const char *legend_delay      = nullptr; ///< "自動調整ディレイ"
+		const char *legend_delay_desc = nullptr; ///< "は上記の値に基づいて…"
+		const char *legend_ws         = nullptr; ///< "ブラウザ配信レイテンシ"
+		const char *legend_env        = nullptr; ///< "想定環境レイテンシ"
+		const char *legend_buf        = nullptr; ///< "再生バッファ"
+		const char *legend_avatar     = nullptr; ///< "アバターレイテンシ"
+		const char *legend_broadcast  = nullptr; ///< "OBS配信レイテンシ"
+		const char *lane_broadcast    = nullptr; ///< "配信" (レーンラベル)
+		const char *no_data           = nullptr; ///< "計測データなし"
 	};
 
 	/// QFormLayout 用プレースホルダーとして OBS_TEXT_INFO プロパティを追加する

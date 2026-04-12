@@ -55,14 +55,15 @@ namespace ods::ui::delay {
 		}
 
 		DelayDiagramLabels labels;
-		labels.legend_delay     = T_("DiagramDelay");
-		labels.legend_ws        = T_("DiagramWsLatency");
-		labels.legend_env       = T_("DiagramEnvLatency");
-		labels.legend_buf       = T_("DiagramPlaybackBuf");
-		labels.legend_avatar    = T_("DiagramAvatarLatency");
-		labels.legend_broadcast = T_("DiagramBroadcastLatency");
-		labels.lane_broadcast   = T_("DiagramLaneBroadcast");
-		labels.no_data          = T_("DiagramNoData");
+		labels.legend_delay      = T_("DiagramDelay");
+		labels.legend_delay_desc = T_("DiagramDelayAutoCalcDesc");
+		labels.legend_ws         = T_("DiagramWsLatency");
+		labels.legend_env        = T_("DiagramEnvLatency");
+		labels.legend_buf        = T_("DiagramPlaybackBuf");
+		labels.legend_avatar     = T_("DiagramAvatarLatency");
+		labels.legend_broadcast  = T_("DiagramBroadcastLatency");
+		labels.lane_broadcast    = T_("DiagramLaneBroadcast");
+		labels.no_data           = T_("DiagramNoData");
 		obs_properties_add_delay_diagram(grp, "delay_diagram", info, labels);
 
 		obs_properties_add_group(
@@ -101,6 +102,7 @@ namespace ods::ui::delay {
 		labels.hdr_total    = T_("DelayTableColTotal");
 		labels.lbl_editor   = T_("DelayTableAdjustLabel");
 		labels.editor_color = "#8b5cf6";
+		labels.help_text    = T_("EnvLatencyHelpText");
 		obs_properties_add_delay_table(
 			grp,
 			"delay_table",
