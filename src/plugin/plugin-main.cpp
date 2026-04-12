@@ -556,8 +556,8 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			obs_data_t *s5 = obs_source_get_settings(d->context);
 			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
 			if (s5) obs_data_release(s5);
-			ods::ui::delay::add_delay_diagram_group(props, d, vm);
 			ods::ui::delay::add_fine_tune_group(props, d, vm);
+			ods::ui::delay::add_delay_diagram_group(props, d, vm);
 			break;
 		}
 		default:

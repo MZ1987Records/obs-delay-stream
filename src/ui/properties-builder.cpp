@@ -430,7 +430,8 @@ namespace ods::ui {
 				flow_rtsp_e2e_buttons,
 				sizeof(flow_rtsp_e2e_buttons) / sizeof(flow_rtsp_e2e_buttons[0]),
 				nullptr,
-				nullptr);
+				nullptr,
+				"#14b8a6");
 
 			{
 				int         pct = 0;
@@ -548,7 +549,8 @@ namespace ods::ui {
 				flow_measure_buttons,
 				sizeof(flow_measure_buttons) / sizeof(flow_measure_buttons[0]),
 				nullptr,
-				nullptr);
+				nullptr,
+				"#2563eb");
 
 			// 保存済み計測結果の有無を判定する。
 			bool has_saved_ws = false;
@@ -688,7 +690,7 @@ namespace ods::ui {
 
 		obs_property_t *about_p = obs_properties_add_text(grp, "about_info", "", OBS_TEXT_INFO);
 		obs_property_set_long_description(about_p,
-										  "v" PLUGIN_VERSION " | (C) 2026 Mazzn1987, Chigiri Tsutsumi | GPL 2.0+<br>"
+										  "v" PLUGIN_VERSION " | (C) 2026 Mazzn1987, Chigiri Tsutsumi | GPL 2.0+ | "
 										  "<a href=\"https://github.com/MZ1987Records/obs-delay-stream\">GitHub</a> | "
 										  "<a href=\"https://mz1987records.booth.pm/items/8134637\">Booth</a>");
 		obs_property_text_set_info_word_wrap(about_p, false);
@@ -893,7 +895,9 @@ namespace ods::ui {
 			PLAYBACK_BUFFER_DEFAULT_MS,
 			0,
 			" ms",
-			true);
+			true,
+			7,
+			"#4b5563");
 
 		if (ws_running) {
 			obs_property_set_enabled(codec_p, false);
@@ -958,7 +962,6 @@ namespace ods::ui {
 		std::string terr = d->tunnel.error();
 
 		obs_properties_t *grp                     = obs_properties_create();
-		bool              show_tunnel_start_note  = false;
 		bool              cloudflared_downloading = d->tunnel.cloudflared_downloading();
 		bool              cloudflared_dl_running =
 			d->manual_cloudflared_download_running.load(std::memory_order_acquire);
@@ -996,7 +999,7 @@ namespace ods::ui {
 				T_("TunnelStartShort"),
 				cb_tunnel_start,
 				d,
-				(!tunnel_running && !tunnel_busy && ws_running),
+				(!tunnel_running && !tunnel_busy),
 			},
 			{
 				"tunnel_stop_btn",
@@ -1021,8 +1024,6 @@ namespace ods::ui {
 			tunnel_status_dot,
 			tunnel_status_text);
 
-		show_tunnel_start_note = (!ws_running && !tunnel_running && !tunnel_busy);
-
 		std::string tunnel_domain      = extract_host_from_url(turl);
 		const char *tunnel_domain_text = nullptr;
 		if (cloudflared_downloading || cloudflared_dl_running) {
@@ -1037,10 +1038,6 @@ namespace ods::ui {
 		const std::string db =
 			string_printf(T_("TunnelAssignedDomainFmt"), tunnel_domain_text);
 		obs_properties_add_text(grp, "tunnel_domain_info", db.c_str(), OBS_TEXT_INFO);
-
-		if (show_tunnel_start_note) {
-			obs_properties_add_text(grp, "tunnel_start_note", T_("TunnelStartNote"), OBS_TEXT_INFO);
-		}
 
 		if (ts == TunnelState::Running && !turl.empty()) {
 			// URL 表示は「出演者別チャンネル」に集約
@@ -1061,11 +1058,8 @@ namespace ods::ui {
 				T_("PingCount"),
 				OBS_COMBO_TYPE_LIST,
 				OBS_COMBO_FORMAT_INT);
-			obs_property_list_add_int(ping_count_p, "10", 10);
-			obs_property_list_add_int(ping_count_p, "20", 20);
-			obs_property_list_add_int(ping_count_p, "30", 30);
-			obs_property_list_add_int(ping_count_p, "40", 40);
-			obs_property_list_add_int(ping_count_p, "50", 50);
+			obs_property_list_add_int(ping_count_p, T_("PingCountDefault"), 10);
+			obs_property_list_add_int(ping_count_p, T_("PingCountHigh"), 30);
 			const FlowPhase phase = d->flow.phase();
 			if (phase == FlowPhase::WsMeasuring || phase == FlowPhase::RtspE2eMeasuring) {
 				obs_property_set_enabled(ping_count_p, false);
