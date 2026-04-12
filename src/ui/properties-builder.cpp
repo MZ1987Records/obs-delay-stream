@@ -635,6 +635,8 @@ namespace ods::ui {
 				ws_hint ? kWarningTextColorLight : nullptr,
 				ws_hint ? kWarningTextColorDark : nullptr);
 
+			obs_properties_add_bool(grp, "auto_measure", T_("AutoMeasure"));
+
 			// 保存済み計測結果の有無を判定する。
 			bool has_saved_ws = false;
 			if (!is_ws_measuring && !is_ws_done_or_later) {

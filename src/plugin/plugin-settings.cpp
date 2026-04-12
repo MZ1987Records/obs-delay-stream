@@ -183,6 +183,8 @@ namespace ods::plugin {
 				data_->enabled.store(!delay_disable);
 				bool paused = obs_data_get_bool(settings_, "ws_send_paused");
 				data_->ws_send_enabled.store(!paused);
+				data_->auto_measure_enabled.store(
+					obs_data_get_bool(settings_, "auto_measure"));
 			}
 
 			// サブチャンネル数を正規化して関連状態へ適用する。

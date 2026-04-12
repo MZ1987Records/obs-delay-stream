@@ -93,6 +93,7 @@ private:
 	static void setup_event_callbacks(DelayStreamData *);
 	static void clear_event_callbacks(DelayStreamData *);
 	static void schedule_widget_injects_for_tab(DelayStreamData *, int);
+	static void schedule_auto_measure(DelayStreamData *, int);
 	static void schedule_audio_sync_check(DelayStreamData *, std::weak_ptr<std::atomic<bool>>);
 	static void start_update_check_async(DelayStreamData *, std::weak_ptr<std::atomic<bool>>);
 	static void schedule_update_check(DelayStreamData *, std::weak_ptr<std::atomic<bool>>, bool);
@@ -135,6 +136,42 @@ void DelayStreamFilter::queue_ui_safe(DelayStreamData                       *d,
 		auto life = c->life_token.lock();
 		if (life && life->load(std::memory_order_acquire))
 					c->fn(c->d); }, c.release(), false);
+}
+
+// 接続後の安定化待機を経てチャンネル単位の自動計測を開始する。
+// life_token でフィルタ破棄後の実行を防ぐ。
+void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
+	bool expected = false;
+	if (!d->auto_measure_pending[ch].compare_exchange_strong(expected, true))
+		return;
+	auto life = std::weak_ptr<std::atomic<bool>>(d->life_token);
+	try {
+		std::thread([d, ch, life]() {
+			std::this_thread::sleep_for(
+				std::chrono::milliseconds(AUTO_MEASURE_DELAY_MS));
+			auto token = life.lock();
+			if (!token || !token->load(std::memory_order_acquire)) {
+				d->auto_measure_pending[ch].store(false);
+				return;
+			}
+			if (!d->auto_measure_enabled.load() ||
+				d->delay.channels[ch].ws_measured ||
+				d->router.client_count(ch) == 0 ||
+				!d->router_running.load()) {
+				d->auto_measure_pending[ch].store(false);
+				return;
+			}
+			int pings = d->ping_count_setting.load(std::memory_order_relaxed);
+			if (d->router.start_measurement(ch, pings, PING_INTV_MS)) {
+				blog(LOG_INFO,
+					 "[obs-delay-stream] auto-measure started for ch=%d",
+					 ch + 1);
+			}
+			d->auto_measure_pending[ch].store(false);
+		}).detach();
+	} catch (...) {
+		d->auto_measure_pending[ch].store(false);
+	}
 }
 
 // 表示中タブに必要なカスタムウィジェット注入だけを優先的にスケジュールする。
@@ -370,15 +407,21 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 		}
 		d->request_props_refresh_for_tabs({2}, "tunnel.on_download_state");
 	};
-	d->router.on_conn_change = [d](const std::string &sid, int, size_t) {
-		if (sid == d->get_stream_id()) {
-			d->request_props_refresh_for_tabs({3}, "router.on_conn_change");
+	d->router.on_conn_change = [d](const std::string &sid, int ch, size_t count) {
+		if (sid != d->get_stream_id()) return;
+		d->request_props_refresh_for_tabs({3}, "router.on_conn_change");
+		// 自動計測: 接続かつ未計測かつ有効のときスケジュール
+		if (count > 0 && d->auto_measure_enabled.load() &&
+			ch >= 0 && ch < d->delay.sub_ch_count &&
+			!d->delay.channels[ch].ws_measured) {
+			schedule_auto_measure(d, ch);
 		}
 	};
 	d->router.on_any_latency_result = [d](const std::string &sid, int ch, LatencyResult r) {
 		if (sid != d->get_stream_id()) return;
 		if (ch < 0 || ch >= MAX_SUB_CH) return;
-		if (d->flow.phase() != FlowPhase::Idle) return;
+		// SyncFlow 計測中は SyncFlow 側のコールバックに任せる
+		if (d->flow.phase() == FlowPhase::WsMeasuring) return;
 		d->sub_channels[ch].measure.set_result(r, r.valid ? "" : T_("MeasureFailed"));
 		if (r.valid) {
 			queue_ui_safe(d, [ch, ms_val = static_cast<int>(std::lround(r.avg_latency_ms))](DelayStreamData *d) {
