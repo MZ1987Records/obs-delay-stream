@@ -2,8 +2,11 @@
 #include "plugin/plugin-state.hpp"
 #include "plugin/plugin-utils.hpp"
 #include "ui/properties-url-share.hpp"
+#include "ui/props-refresh.hpp"
 #include "ui/table-theme.hpp"
 #include "ui/url-share-renderer.hpp"
+#include "widgets/color-buttons-widget.hpp"
+#include "widgets/path-mode-row-widget.hpp"
 
 #include <QApplication>
 #include <QColor>
@@ -63,6 +66,22 @@ namespace ods::ui::url_share {
 			return rows;
 		}
 
+		// 「一覧を表示」チェックボックスで HTML テーブルの表示を切り替える。
+		// return true → RefreshProperties でカスタムウィジェットが破壊されるため再 inject する。
+		bool cb_show_list_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+			auto *d = static_cast<DelayStreamData *>(priv);
+			if (!props || !settings || !d) return false;
+			bool show = obs_data_get_bool(settings, "url_share_show_list");
+			if (auto *p = obs_properties_get(props, "url_confirm_list_html"))
+				obs_property_set_visible(p, show);
+			props_ui_with_preserved_scroll([d]() {
+				if (!d || !d->context) return;
+				ods::widgets::schedule_color_button_row_inject(d->context);
+				ods::widgets::schedule_path_mode_row_inject(d->context);
+			});
+			return true;
+		}
+
 		/// 全チャンネル分の共有文面をクリップボードへコピーする。
 		bool cb_sub_copy_all(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
@@ -97,6 +116,11 @@ namespace ods::ui::url_share {
 		{
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (s) {
+				bool            show_list = obs_data_get_bool(s, "url_share_show_list");
+				obs_property_t *show_list_p =
+					obs_properties_add_bool(grp, "url_share_show_list", T_("UrlShareShowList"));
+				obs_property_set_modified_callback2(show_list_p, cb_show_list_changed, d);
+
 				auto                  rows  = collect_sub_url_rows(d, s);
 				auto                  theme = make_table_theme_colors(QApplication::palette());
 				UrlConfirmThemeColors theme_colors;
@@ -121,6 +145,7 @@ namespace ods::ui::url_share {
 					list_html.c_str(),
 					OBS_TEXT_INFO);
 				obs_property_text_set_info_word_wrap(list_info_p, false);
+				obs_property_set_visible(list_info_p, show_list);
 			}
 		}
 		obs_properties_add_group(props, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);

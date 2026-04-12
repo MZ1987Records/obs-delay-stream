@@ -63,6 +63,7 @@ namespace ods::plugin {
 		obs_data_set_default_int(settings, "ws_port", WS_PORT);
 		obs_data_set_default_int(settings, "ping_count", DEFAULT_PING_COUNT);
 		obs_data_set_default_bool(settings, "show_advanced", false);
+		obs_data_set_default_bool(settings, "url_share_show_list", false);
 		obs_data_set_default_string(settings, "stream_id", "");
 		obs_data_set_default_string(settings, "host_ip_manual", "");
 		obs_data_set_default_int(settings, kAvatarLatencyKey, 200);
