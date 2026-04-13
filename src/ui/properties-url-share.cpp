@@ -5,6 +5,7 @@
 #include "ui/props-refresh.hpp"
 #include "ui/url-share-renderer.hpp"
 #include "widgets/color-buttons-widget.hpp"
+#include "widgets/help-callout-widget.hpp"
 #include "widgets/path-mode-row-widget.hpp"
 #include "widgets/text-button-widget.hpp"
 #include "widgets/url-table-widget.hpp"
@@ -81,6 +82,7 @@ namespace ods::ui::url_share {
 				ods::widgets::schedule_text_button_inject(d->context);
 				ods::widgets::schedule_path_mode_row_inject(d->context);
 				ods::widgets::schedule_url_table_inject(d->context);
+				ods::widgets::schedule_help_callout_inject(d->context);
 			});
 			return true;
 		}

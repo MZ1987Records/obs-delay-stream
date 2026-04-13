@@ -494,12 +494,14 @@ namespace ods::ui {
 				schedule_color_button_row_inject(d->context);
 				schedule_pulldown_row_inject(d->context);
 				schedule_stepper_inject(d->context);
+				schedule_help_callout_inject(d->context);
 			});
 			return true;
 		}
 
 		// stream_id の有無に応じて関連ボタンの有効状態を切り替える。
-		bool cb_stream_id_changed(void *, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+		bool cb_stream_id_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!props || !settings) return false;
 			const char *sid     = obs_data_get_string(settings, "stream_id");
 			bool        has_sid = (sid && *sid);
@@ -509,6 +511,13 @@ namespace ods::ui {
 			if (auto *p = obs_properties_get(props, "ws_server_start_note_sid")) {
 				obs_property_set_visible(p, !has_sid);
 			}
+			props_ui_with_preserved_scroll([d]() {
+				if (!d || !d->context) return;
+				schedule_color_button_row_inject(d->context);
+				schedule_pulldown_row_inject(d->context);
+				schedule_stepper_inject(d->context);
+				schedule_help_callout_inject(d->context);
+			});
 			return true;
 		}
 
@@ -521,6 +530,7 @@ namespace ods::ui {
 				schedule_color_button_row_inject(d->context);
 				schedule_pulldown_row_inject(d->context);
 				schedule_stepper_inject(d->context);
+				schedule_help_callout_inject(d->context);
 			});
 			return true;
 		}
