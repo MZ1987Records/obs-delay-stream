@@ -764,7 +764,7 @@ namespace ods::plugin {
 				recalc_all_delays(data_);
 
 				// タイミング図・サマリテーブルを最新の計算結果で再描画する。
-				data_->request_props_refresh_for_tabs({5}, "delay_recalc");
+				data_->request_props_refresh_for_tabs({TAB_FINE_ADJUST}, "delay_recalc");
 			}
 
 			// Ping 回数設定を正規化して flow へ適用する。

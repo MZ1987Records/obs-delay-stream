@@ -69,6 +69,7 @@ add_library(obs-delay-stream MODULE
   src/ui/properties-channels.cpp
   src/ui/properties-delay.cpp
   src/ui/properties-builder.cpp
+  src/widgets/button-bar-widget.cpp
   src/widgets/stepper-widget.cpp
   src/widgets/text-button-widget.cpp
   src/widgets/path-mode-row-widget.cpp

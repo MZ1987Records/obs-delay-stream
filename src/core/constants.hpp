@@ -38,6 +38,16 @@ namespace ods::core {
 	static constexpr int CLOUDFLARED_POLL_INTV_MS  = 500;  ///< URL 確認のポーリング間隔 (ms)
 	static constexpr int TUNNEL_KILL_TIMEOUT_MS    = 2000; ///< トンネルプロセス終了待機のタイムアウト (ms)
 
+	// タブインデックス
+	static constexpr int TAB_PERFORMER_NAMES = 0; ///< 出演者名タブ
+	static constexpr int TAB_TUNNEL          = 1; ///< トンネルタブ
+	static constexpr int TAB_AUDIO_STREAMING = 2; ///< WS配信タブ
+	static constexpr int TAB_URL_SHARING     = 3; ///< URL共有タブ
+	static constexpr int TAB_SYNC_LATENCY    = 4; ///< WS計測タブ
+	static constexpr int TAB_RTSP_LATENCY    = 5; ///< RTSP計測タブ
+	static constexpr int TAB_FINE_ADJUST     = 6; ///< 微調整タブ
+	static constexpr int TAB_COUNT           = 7; ///< タブ総数
+
 	// UI 色（ステータスインジケーター）
 	static constexpr const char *UI_COLOR_STATUS_DOT_OK   = "#22CC44"; ///< 起動中・正常ステータスの丸アイコン色
 	static constexpr const char *UI_COLOR_STATUS_DOT_BUSY = "#FFAA00"; ///< 開始中・処理中ステータスの丸アイコン色

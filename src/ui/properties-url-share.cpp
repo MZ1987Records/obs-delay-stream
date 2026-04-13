@@ -1,13 +1,11 @@
+#include "core/constants.hpp"
 #include "plugin/plugin-settings.hpp"
 #include "plugin/plugin-state.hpp"
 #include "plugin/plugin-utils.hpp"
+#include "ui/properties-builder.hpp"
 #include "ui/properties-url-share.hpp"
-#include "ui/props-refresh.hpp"
 #include "ui/url-share-renderer.hpp"
-#include "widgets/color-buttons-widget.hpp"
-#include "widgets/help-callout-widget.hpp"
-#include "widgets/path-mode-row-widget.hpp"
-#include "widgets/text-button-widget.hpp"
+#include "widgets/button-bar-widget.hpp"
 #include "widgets/url-table-widget.hpp"
 
 #include <algorithm>
@@ -20,7 +18,10 @@
 namespace ods::ui::url_share {
 
 	using ods::plugin::DelayStreamData;
+	using ods::plugin::TabCtx;
 	using ods::tunnel::TunnelState;
+	using namespace ods::core;
+	using namespace ods::widgets;
 
 	namespace {
 
@@ -68,38 +69,37 @@ namespace ods::ui::url_share {
 			return rows;
 		}
 
-		// 「一覧を表示」チェックボックスで HTML テーブルの表示を切り替える。
-		// return true → RefreshProperties でカスタムウィジェットが破壊されるため再 inject する。
-		bool cb_show_list_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
-			auto *d = static_cast<DelayStreamData *>(priv);
-			if (!props || !settings || !d) return false;
-			bool show = obs_data_get_bool(settings, "url_share_show_list");
-			if (auto *p = obs_properties_get(props, "url_confirm_list_html"))
-				obs_property_set_visible(p, show);
-			props_ui_with_preserved_scroll([d]() {
-				if (!d || !d->context) return;
-				ods::widgets::schedule_color_button_row_inject(d->context);
-				ods::widgets::schedule_text_button_inject(d->context);
-				ods::widgets::schedule_path_mode_row_inject(d->context);
-				ods::widgets::schedule_url_table_inject(d->context);
-				ods::widgets::schedule_help_callout_inject(d->context);
-			});
-			return true;
+		// URL 一覧をコピーする共通処理。
+		void copy_all_urls(DelayStreamData *d) {
+			if (!d) return;
+			obs_data_t *s = obs_source_get_settings(d->context);
+			if (!s) return;
+			auto        rows = collect_sub_url_rows(d, s);
+			std::string out  = build_url_share_copy_text(
+				rows,
+				obs_module_text("NotConfigured"));
+			obs_data_release(s);
+			if (!out.empty()) ods::plugin::copy_to_clipboard(out);
 		}
 
 		/// 全チャンネル分の共有文面をクリップボードへコピーする。
 		bool cb_sub_copy_all(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
-			if (!d) return false;
-			obs_data_t *s = obs_source_get_settings(d->context);
-			if (!s) return false;
-			auto        rows = collect_sub_url_rows(d, s);
-			std::string out  = build_url_share_copy_text(
-				rows,
-				T_("NotConfigured"));
-			obs_data_release(s);
-			if (!out.empty()) ods::plugin::copy_to_clipboard(out);
+			copy_all_urls(d);
 			return false;
+		}
+
+		bool cb_copy_and_goto_tab(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *ctx = static_cast<TabCtx *>(priv);
+			if (!ctx || !ctx->d || !ctx->d->context) return false;
+			copy_all_urls(ctx->d);
+			ctx->d->set_active_tab(ctx->tab);
+			obs_data_t *s = obs_source_get_settings(ctx->d->context);
+			if (s) {
+				obs_data_set_int(s, "active_tab", ctx->tab);
+				obs_data_release(s);
+			}
+			return true;
 		}
 
 	} // namespace
@@ -121,11 +121,6 @@ namespace ods::ui::url_share {
 		{
 			obs_data_t *s = obs_source_get_settings(d->context);
 			if (s) {
-				bool            show_list = obs_data_get_bool(s, "url_share_show_list");
-				obs_property_t *show_list_p =
-					obs_properties_add_bool(grp, "url_share_show_list", T_("UrlShareShowList"));
-				obs_property_set_modified_callback2(show_list_p, cb_show_list_changed, d);
-
 				auto rows = collect_sub_url_rows(d, s);
 				obs_data_release(s);
 
@@ -147,10 +142,31 @@ namespace ods::ui::url_share {
 					"url_confirm_list_html",
 					tbl_info);
 				obs_property_text_set_info_word_wrap(list_info_p, false);
-				obs_property_set_visible(list_info_p, show_list);
 			}
 		}
 		obs_properties_add_group(props, "grp_url_share", T_("GroupUrlShare"), OBS_GROUP_NORMAL, grp);
+	}
+
+	void add_url_share_next_button_bar(obs_properties_t *props, DelayStreamData *d) {
+		if (!props || !d) return;
+		TunnelState ts      = d->tunnel.state();
+		const bool  enabled = (ts != TunnelState::Starting);
+
+		const ObsButtonBarSpec copy_next_btn = {
+			"url_share_copy_next_act",
+			T_("BtnCopyAndNext"),
+			cb_copy_and_goto_tab,
+			&d->tab_btn_ctx[TAB_SYNC_LATENCY],
+			enabled,
+		};
+		obs_properties_add_button_bar(
+			props,
+			"url_share_copy_next_bar",
+			"",
+			nullptr,
+			0,
+			&copy_next_btn,
+			1);
 	}
 
 } // namespace ods::ui::url_share

@@ -19,6 +19,7 @@
 #include "widgets/path-mode-row-widget.hpp"
 #include "widgets/pulldown-row-widget.hpp"
 #include "widgets/stepper-widget.hpp"
+#include "widgets/button-bar-widget.hpp"
 #include "widgets/text-button-widget.hpp"
 
 #include <cstdint>
@@ -152,8 +153,61 @@ namespace ods::ui {
 			} else {
 				blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", ws_port);
 			}
-			d->request_props_refresh_for_tabs({1, 2}, "cb_ws_server_start");
+			d->request_props_refresh_for_tabs({TAB_AUDIO_STREAMING, TAB_URL_SHARING}, "cb_ws_server_start");
 			return false;
+		}
+
+		// WebSocket サーバーを起動してから次のタブへ移動する。
+		bool cb_ws_start_and_goto_tab(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *ctx = static_cast<TabCtx *>(priv);
+			if (!ctx || !ctx->d || !ctx->d->context) return false;
+			auto *d = ctx->d;
+			// 未起動なら起動する。
+			if (!d->router_running.load()) {
+				int ws_port = d->ws_port.load(std::memory_order_relaxed);
+				if (d->router.start(static_cast<uint16_t>(ws_port))) {
+					d->router_running.store(true);
+					blog(LOG_INFO, "[obs-delay-stream] WebSocket server started on port %d (start+next)", ws_port);
+				} else {
+					blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", ws_port);
+				}
+			}
+			// タブ移動
+			d->set_active_tab(ctx->tab);
+			obs_data_t *s = obs_source_get_settings(d->context);
+			if (s) {
+				obs_data_set_int(s, "active_tab", ctx->tab);
+				obs_data_release(s);
+			}
+			return true;
+		}
+
+		// トンネルを起動してから次のタブへ移動する。
+		bool cb_tunnel_start_and_goto_tab(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *ctx = static_cast<TabCtx *>(priv);
+			if (!ctx || !ctx->d || !ctx->d->context) return false;
+			auto       *d  = ctx->d;
+			TunnelState ts = d->tunnel.state();
+			if (ts != TunnelState::Running && ts != TunnelState::Starting) {
+				obs_data_t *s = obs_source_get_settings(d->context);
+				if (s) {
+					const std::string exe = build_exe_path_hint(
+						s,
+						ods::plugin::kCloudflaredExePathModeKey,
+						ods::plugin::kCloudflaredExePathKey);
+					obs_data_release(s);
+					int ws_port = d->ws_port.load(std::memory_order_relaxed);
+					d->tunnel.start(exe, ws_port);
+					blog(LOG_INFO, "[obs-delay-stream] tunnel started (start+next)");
+				}
+			}
+			d->set_active_tab(ctx->tab);
+			obs_data_t *s = obs_source_get_settings(d->context);
+			if (s) {
+				obs_data_set_int(s, "active_tab", ctx->tab);
+				obs_data_release(s);
+			}
+			return true;
 		}
 
 		// WebSocket サーバーを停止し、状態表示を更新する。
@@ -163,7 +217,7 @@ namespace ods::ui {
 			d->router.stop();
 			d->router_running.store(false);
 			blog(LOG_INFO, "[obs-delay-stream] WebSocket server stopped");
-			d->request_props_refresh_for_tabs({1, 2}, "cb_ws_server_stop");
+			d->request_props_refresh_for_tabs({TAB_AUDIO_STREAMING, TAB_URL_SHARING}, "cb_ws_server_stop");
 			return false;
 		}
 
@@ -180,7 +234,7 @@ namespace ods::ui {
 			obs_data_release(s);
 			int ws_port = d->ws_port.load(std::memory_order_relaxed);
 			d->tunnel.start(exe, ws_port);
-			d->request_props_refresh_for_tabs({2}, "cb_tunnel_start");
+			d->request_props_refresh_for_tabs({TAB_TUNNEL, TAB_URL_SHARING}, "cb_tunnel_start");
 			return false;
 		}
 
@@ -196,7 +250,7 @@ namespace ods::ui {
 					std::memory_order_acq_rel)) {
 				return false;
 			}
-			d->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.begin");
+			d->request_props_refresh_for_tabs({TAB_TUNNEL}, "cb_cloudflared_download.begin");
 
 			auto life = std::weak_ptr<std::atomic<bool>>(d->life_token);
 			try {
@@ -223,11 +277,11 @@ namespace ods::ui {
 
 						ctx->data->manual_cloudflared_download_running.store(false, std::memory_order_release);
 						ods::plugin::maybe_persist_cloudflared_path_after_auto_ready(ctx->data->context);
-						ctx->data->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.done"); }, ui_ctx.release(), false);
+						ctx->data->request_props_refresh_for_tabs({TAB_TUNNEL}, "cb_cloudflared_download.done"); }, ui_ctx.release(), false);
 				}).detach();
 			} catch (...) {
 				d->manual_cloudflared_download_running.store(false, std::memory_order_release);
-				d->request_props_refresh_for_tabs({2}, "cb_cloudflared_download.spawn_error");
+				d->request_props_refresh_for_tabs({TAB_TUNNEL}, "cb_cloudflared_download.spawn_error");
 			}
 			return false;
 		}
@@ -237,7 +291,7 @@ namespace ods::ui {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
 			d->tunnel.stop();
-			d->request_props_refresh_for_tabs({2}, "cb_tunnel_stop");
+			d->request_props_refresh_for_tabs({TAB_TUNNEL, TAB_URL_SHARING}, "cb_tunnel_stop");
 			return false;
 		}
 
@@ -288,7 +342,7 @@ namespace ods::ui {
 				d->router.start_measurement(i, pings, PING_INTV_MS, ch_index * PING_INTV_MS);
 				++ch_index;
 			}
-			d->request_props_refresh_for_tabs({3, 5}, "cb_flow_start");
+			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "cb_flow_start");
 			return false;
 		}
 
@@ -308,7 +362,7 @@ namespace ods::ui {
 			for (int i = 0; i < MAX_SUB_CH; ++i)
 				d->sub_channels[i].measure.reset();
 			d->ws_batch_progress.reset();
-			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_clear_results");
+			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "cb_flow_clear_results");
 			return false;
 		}
 
@@ -352,7 +406,7 @@ namespace ods::ui {
 			}
 			if (!error_msg.empty()) {
 				d->rtsp_e2e_measure.set_last_error(error_msg);
-				d->request_props_refresh_for_tabs({4}, "cb_flow_start_rtsp_e2e.error");
+				d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "cb_flow_start_rtsp_e2e.error");
 				return false;
 			}
 
@@ -410,19 +464,19 @@ namespace ods::ui {
 							obs_data_release(s);
 						}
 						ods::plugin::recalc_all_delays(dd);
-						dd->request_props_refresh_for_tabs({4, 5}, "rtsp_e2e.on_result.apply"); }, c.release(), false);
+						dd->request_props_refresh_for_tabs({TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "rtsp_e2e.on_result.apply"); }, c.release(), false);
 				} else {
 					d->rtsp_e2e_measure.set_last_error(r.error_msg);
-					d->request_props_refresh_for_tabs({4}, "rtsp_e2e.on_result.error");
+					d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "rtsp_e2e.on_result.error");
 				}
 			};
 
 			if (!prober.start(rtsp_url, ffmpeg_path)) {
 				d->rtsp_e2e_measure.set_last_error("RTSP E2E 計測の開始に失敗しました。");
-				d->request_props_refresh_for_tabs({4}, "cb_flow_start_rtsp_e2e.start_failed");
+				d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "cb_flow_start_rtsp_e2e.start_failed");
 				return false;
 			}
-			d->request_props_refresh_for_tabs({4}, "cb_flow_start_rtsp_e2e.started");
+			d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "cb_flow_start_rtsp_e2e.started");
 			return false;
 		}
 
@@ -438,7 +492,7 @@ namespace ods::ui {
 					std::memory_order_acq_rel)) {
 				return false;
 			}
-			d->request_props_refresh_for_tabs({4}, "cb_ffmpeg_download.begin");
+			d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "cb_ffmpeg_download.begin");
 
 			auto life = std::weak_ptr<std::atomic<bool>>(d->life_token);
 			try {
@@ -464,11 +518,11 @@ namespace ods::ui {
 						if (!token || !token->load(std::memory_order_acquire)) return;
 
 						ctx->data->manual_ffmpeg_download_running.store(false, std::memory_order_release);
-						ctx->data->request_props_refresh_for_tabs({4}, "cb_ffmpeg_download.done"); }, ui_ctx.release(), false);
+						ctx->data->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "cb_ffmpeg_download.done"); }, ui_ctx.release(), false);
 				}).detach();
 			} catch (...) {
 				d->manual_ffmpeg_download_running.store(false, std::memory_order_release);
-				d->request_props_refresh_for_tabs({4}, "cb_ffmpeg_download.spawn_error");
+				d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "cb_ffmpeg_download.spawn_error");
 			}
 			return false;
 		}
@@ -483,7 +537,7 @@ namespace ods::ui {
 			d->rtsp_e2e_measure.cancel();
 			d->inject_impulse.store(false, std::memory_order_release);
 			d->probe_mute_active.store(false, std::memory_order_release);
-			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_reset");
+			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "cb_flow_reset");
 			return false;
 		}
 
@@ -502,6 +556,7 @@ namespace ods::ui {
 				schedule_pulldown_row_inject(d->context);
 				schedule_stepper_inject(d->context);
 				schedule_help_callout_inject(d->context);
+				schedule_button_bar_inject(d->context);
 			});
 			return true;
 		}
@@ -524,6 +579,7 @@ namespace ods::ui {
 				schedule_pulldown_row_inject(d->context);
 				schedule_stepper_inject(d->context);
 				schedule_help_callout_inject(d->context);
+				schedule_button_bar_inject(d->context);
 			});
 			return true;
 		}
@@ -538,21 +594,8 @@ namespace ods::ui {
 				schedule_pulldown_row_inject(d->context);
 				schedule_stepper_inject(d->context);
 				schedule_help_callout_inject(d->context);
+				schedule_button_bar_inject(d->context);
 			});
-			return true;
-		}
-
-		// タブ選択を設定へ反映し、プロパティを再描画する。
-		bool cb_select_tab(obs_properties_t *, obs_property_t *, void *priv) {
-			auto *ctx = static_cast<TabCtx *>(priv);
-			if (!ctx || !ctx->d || !ctx->d->context) return false;
-			ctx->d->set_active_tab(ctx->tab);
-			obs_data_t *s = obs_source_get_settings(ctx->d->context);
-			if (s) {
-				obs_data_set_int(s, "active_tab", ctx->tab);
-				obs_data_release(s);
-			}
-			// ColorButtonRow 側の即時再描画（return true）を使ってタブ切替遅延を減らす。
 			return true;
 		}
 
@@ -826,6 +869,19 @@ namespace ods::ui {
 
 	} // namespace
 
+	// タブ選択を設定へ反映し、プロパティを再描画する。
+	bool cb_select_tab(obs_properties_t *, obs_property_t *, void *priv) {
+		auto *ctx = static_cast<ods::plugin::TabCtx *>(priv);
+		if (!ctx || !ctx->d || !ctx->d->context) return false;
+		ctx->d->set_active_tab(ctx->tab);
+		obs_data_t *s = obs_source_get_settings(ctx->d->context);
+		if (s) {
+			obs_data_set_int(s, "active_tab", ctx->tab);
+			obs_data_release(s);
+		}
+		return true;
+	}
+
 	// ============================================================
 	// public add_* 関数
 	// ============================================================
@@ -839,21 +895,22 @@ namespace ods::ui {
 			"tab_act_3",
 			"tab_act_4",
 			"tab_act_5",
+			"tab_act_6",
 		};
 		static const char *const kLocaleKeys[] = {
 			"TabPerformerNames",
+			"TabTunnel",
 			"TabAudioStreaming",
 			"TabUrlSharing",
 			"TabSyncLatency",
 			"TabRtmpLatency",
 			"TabFineAdjust",
 		};
-		constexpr int kTabCount   = 6;
-		const char   *kInactiveBg = "auto";
-		if (active_tab < 0 || active_tab >= kTabCount) active_tab = 0;
+		const char *kInactiveBg = "auto";
+		if (active_tab < 0 || active_tab >= TAB_COUNT) active_tab = 0;
 
-		ObsColorButtonSpec buttons[kTabCount];
-		for (int i = 0; i < kTabCount; ++i) {
+		ObsColorButtonSpec buttons[TAB_COUNT];
+		for (int i = 0; i < TAB_COUNT; ++i) {
 			buttons[i] = {
 				kActionNames[i],
 				T_(kLocaleKeys[i]),
@@ -869,7 +926,96 @@ namespace ods::ui {
 			"tab_selector_row",
 			"",
 			buttons,
-			kTabCount);
+			TAB_COUNT);
+	}
+
+	void add_next_tab_button_bar(obs_properties_t *props, DelayStreamData *d, int next_tab, bool enabled) {
+		if (!props || !d) return;
+		if (next_tab < 0 || next_tab >= TAB_COUNT) return;
+
+		// プロパティ名と action 名をタブ番号で一意にする。
+		const std::string prop_name   = "next_tab_bar_" + std::to_string(next_tab);
+		const std::string action_name = "next_tab_act_" + std::to_string(next_tab);
+
+		const ObsButtonBarSpec next_btn = {
+			action_name.c_str(),
+			T_("BtnNextWsTab"),
+			cb_select_tab,
+			&d->tab_btn_ctx[next_tab],
+			enabled,
+		};
+		obs_properties_add_button_bar(
+			props,
+			prop_name.c_str(),
+			"",
+			nullptr,
+			0,
+			&next_btn,
+			1);
+	}
+
+	void add_ws_next_button_bar(obs_properties_t *props, DelayStreamData *d, bool has_sid) {
+		if (!props || !d) return;
+		const bool ws_running = d->router_running.load();
+
+		if (ws_running) {
+			// 起動済み: 通常の「次へ」ボタン
+			add_next_tab_button_bar(props, d, TAB_URL_SHARING);
+		} else {
+			// 未起動: 「起動して次へ」ボタン
+			const ObsButtonBarSpec start_next_btn = {
+				"ws_start_next_act",
+				T_("BtnStartWsAndNext"),
+				cb_ws_start_and_goto_tab,
+				&d->tab_btn_ctx[TAB_URL_SHARING],
+				has_sid,
+			};
+			obs_properties_add_button_bar(
+				props,
+				"ws_start_next_bar",
+				"",
+				nullptr,
+				0,
+				&start_next_btn,
+				1);
+		}
+	}
+
+	void add_tunnel_next_button_bar(obs_properties_t *props, DelayStreamData *d) {
+		if (!props || !d) return;
+		TunnelState ts             = d->tunnel.state();
+		const bool  tunnel_running = (ts == TunnelState::Running);
+		const bool  tunnel_busy    = (ts == TunnelState::Starting);
+
+		if (tunnel_running) {
+			add_next_tab_button_bar(props, d, TAB_AUDIO_STREAMING);
+		} else {
+			// 右寄せ: 「スキップ」「起動して次へ」
+			const ObsButtonBarSpec right_btns[] = {
+				{
+					"tunnel_skip_act",
+					T_("BtnSkipTab"),
+					cb_select_tab,
+					&d->tab_btn_ctx[TAB_AUDIO_STREAMING],
+					true,
+				},
+				{
+					"tunnel_start_next_act",
+					T_("BtnStartTunnelAndNext"),
+					cb_tunnel_start_and_goto_tab,
+					&d->tab_btn_ctx[TAB_AUDIO_STREAMING],
+					!tunnel_busy,
+				},
+			};
+			obs_properties_add_button_bar(
+				props,
+				"tunnel_start_next_bar",
+				"",
+				nullptr,
+				0,
+				right_btns,
+				2);
+		}
 	}
 
 	void add_plugin_group(obs_properties_t *props, DelayStreamData *d) {
@@ -972,12 +1118,12 @@ namespace ods::ui {
 				"<span style='color:%s'>●</span> %s %s"
 				"&nbsp;&nbsp;|&nbsp;&nbsp;"
 				"<span style='color:%s'>●</span> %s %s",
-				ws_color,
-				T_("PluginWsStatusLabel"),
-				ws_status.c_str(),
 				tun_color,
 				T_("PluginTunnelStatusLabel"),
-				tun_label);
+				tun_label,
+				ws_color,
+				T_("PluginWsStatusLabel"),
+				ws_status.c_str());
 			obs_property_t *status_p =
 				obs_properties_add_text(grp, "plugin_status_info", "", OBS_TEXT_INFO);
 			obs_property_set_long_description(status_p, status_html.c_str());

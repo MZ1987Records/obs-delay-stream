@@ -5,7 +5,9 @@
 #include "plugin/plugin-settings.hpp"
 #include "plugin/plugin-state.hpp"
 #include "plugin/plugin-utils.hpp"
+#include "ui/properties-builder.hpp"
 #include "ui/properties-channels.hpp"
+#include "widgets/button-bar-widget.hpp"
 #include "widgets/text-button-widget.hpp"
 
 #include <obs-module.h>
@@ -17,6 +19,7 @@
 namespace ods::ui::channels {
 
 	using ods::plugin::SubChannelCtx;
+	using ods::plugin::TabCtx;
 	using ods::plugin::DelayStreamData;
 	using namespace ods::core;
 	using namespace ods::widgets;
@@ -169,21 +172,39 @@ namespace ods::ui::channels {
 				input_enabled,
 				SUB_MEMO_MAX_CHARS);
 		}
-		obs_property_t *spc_bottom = obs_properties_add_text(grp, "sub_add_spacer", "", OBS_TEXT_INFO);
-		obs_property_set_long_description(spc_bottom, " ");
-		obs_property_text_set_info_word_wrap(spc_bottom, false);
+		obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);
+
+		// グループ外にチャンネル追加ボタン（左）と「次へ」ボタン（右）を配置する。
 		std::string add_label;
 		if (d->delay.sub_ch_count >= MAX_SUB_CH) {
 			add_label = T_("SubAddLimitReached");
 		} else {
 			add_label = string_printf(T_("SubAddFmt"), d->delay.sub_ch_count + 1);
 		}
-		obs_property_t *add_p =
-			obs_properties_add_button2(grp, "sub_add_btn", add_label.c_str(), cb_sub_add, d);
-		if (d->delay.sub_ch_count >= MAX_SUB_CH) {
-			obs_property_set_enabled(add_p, false);
-		}
-		obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);
+		const bool add_enabled = (d->delay.sub_ch_count < MAX_SUB_CH);
+
+		const ObsButtonBarSpec add_btn = {
+			"sub_add_act",
+			add_label.c_str(),
+			cb_sub_add,
+			d,
+			add_enabled,
+		};
+		const ObsButtonBarSpec next_btn = {
+			"sub_next_tab_act",
+			T_("BtnNextWsTab"),
+			cb_select_tab,
+			&d->tab_btn_ctx[TAB_TUNNEL],
+			true,
+		};
+		obs_properties_add_button_bar(
+			props,
+			"sub_button_bar",
+			"",
+			&add_btn,
+			1,
+			&next_btn,
+			1);
 	}
 
 } // namespace ods::ui::channels

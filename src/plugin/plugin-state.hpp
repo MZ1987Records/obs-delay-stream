@@ -30,6 +30,7 @@ namespace ods::plugin {
 	using ods::core::WS_PORT;
 	using ods::core::DEFAULT_PING_COUNT;
 	using ods::core::PLAYBACK_BUFFER_DEFAULT_MS;
+	using ods::core::TAB_COUNT;
 	using ods::model::DelayState;
 	using ods::model::DelaySnapshot;
 
@@ -379,7 +380,7 @@ namespace ods::plugin {
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
 		/// タブ選択ボタンのコールバック引数
-		std::array<TabCtx, 6> tab_btn_ctx;
+		std::array<TabCtx, TAB_COUNT> tab_btn_ctx;
 
 		/// サブチャンネルの音声バッファと計測状態。
 		/// ディレイ計算の入力値（measured_ms, ws_measured, offset_ms）は delay.channels[] に移動済み。
@@ -447,16 +448,16 @@ namespace ods::plugin {
 				reason);
 		}
 
-		/// active_tab を 0..5 に正規化して保持する。
+		/// active_tab を正規化して保持する。
 		void set_active_tab(int tab) {
-			if (tab < 0 || tab >= 6) tab = 0;
+			if (tab < 0 || tab >= TAB_COUNT) tab = 0;
 			active_tab.store(tab, std::memory_order_release);
 		}
 
-		/// 現在の active_tab（0..5）を返す。
+		/// 現在の active_tab を返す。
 		int get_active_tab() const {
 			int tab = active_tab.load(std::memory_order_acquire);
-			if (tab < 0 || tab >= 6) tab = 0;
+			if (tab < 0 || tab >= TAB_COUNT) tab = 0;
 			return tab;
 		}
 

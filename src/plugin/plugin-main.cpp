@@ -20,6 +20,7 @@
 #include "ui/properties-url-share.hpp"
 #include "model/settings-repo.hpp"
 #include "viewmodel/delay-viewmodel.hpp"
+#include "widgets/button-bar-widget.hpp"
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-diagram-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
@@ -182,7 +183,7 @@ void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
 			};
 			if (d->router.start_measurement(ch, pings, PING_INTV_MS)) {
 				d->sub_channels[ch].measure.start();
-				d->request_props_refresh_for_tabs({3, 5}, "auto_measure_start");
+				d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "auto_measure_start");
 				blog(LOG_INFO,
 					 "[obs-delay-stream] auto-measure started for ch=%d",
 					 ch + 1);
@@ -203,30 +204,38 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 	schedule_color_button_row_inject(ctx);
 
 	switch (active_tab) {
-	case 0:
+	case TAB_PERFORMER_NAMES:
 		schedule_text_button_inject(ctx);
+		schedule_button_bar_inject(ctx);
 		break;
-	case 1:
+	case TAB_TUNNEL:
+		schedule_text_button_inject(ctx);
+		schedule_path_mode_row_inject(ctx);
+		schedule_help_callout_inject(ctx);
+		schedule_button_bar_inject(ctx);
+		break;
+	case TAB_AUDIO_STREAMING:
 		schedule_pulldown_row_inject(ctx);
 		schedule_stepper_inject(ctx);
 		schedule_help_callout_inject(ctx);
+		schedule_button_bar_inject(ctx);
 		break;
-	case 2:
-		schedule_text_button_inject(ctx);
-		schedule_path_mode_row_inject(ctx);
+	case TAB_URL_SHARING:
 		schedule_url_table_inject(ctx);
-		schedule_help_callout_inject(ctx);
+		schedule_button_bar_inject(ctx);
 		break;
-	case 3:
+	case TAB_SYNC_LATENCY:
 		schedule_flow_progress_inject(ctx);
 		schedule_flow_table_inject(ctx);
+		schedule_button_bar_inject(ctx);
 		break;
-	case 4:
+	case TAB_RTSP_LATENCY:
 		schedule_flow_progress_inject(ctx);
 		schedule_path_mode_row_inject(ctx);
 		schedule_mode_text_row_inject(ctx);
+		schedule_button_bar_inject(ctx);
 		break;
-	case 5:
+	case TAB_FINE_ADJUST:
 		schedule_stepper_inject(ctx);
 		schedule_delay_diagram_inject(ctx);
 		schedule_delay_table_inject(ctx);
@@ -362,36 +371,36 @@ void on_frontend_event(int event, void *private_data) {
 		return;
 	auto *d = static_cast<DelayStreamData *>(private_data);
 	if (!d || d->destroying.load(std::memory_order_acquire)) return;
-	d->request_props_refresh_for_tabs({3, 4}, "frontend_streaming_state");
+	d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_RTSP_LATENCY}, "frontend_streaming_state");
 }
 
 // 各コンポーネントのイベントコールバックを登録する。
 void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->tunnel.on_url_ready = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_url_ready");
+		d->request_props_refresh_for_tabs({TAB_TUNNEL, TAB_URL_SHARING}, "tunnel.on_url_ready");
 	};
 	d->tunnel.on_error = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_error");
+		d->request_props_refresh_for_tabs({TAB_TUNNEL}, "tunnel.on_error");
 	};
 	d->tunnel.on_stopped = [d]() {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_stopped");
+		d->request_props_refresh_for_tabs({TAB_TUNNEL, TAB_URL_SHARING}, "tunnel.on_stopped");
 	};
 	d->tunnel.on_download_state = [d](bool downloading) {
 		if (!downloading) {
 			queue_ui_safe(d, [](DelayStreamData *d) {
 				ods::plugin::maybe_persist_cloudflared_path_after_auto_ready(d->context);
-				d->request_props_refresh_for_tabs({2}, "tunnel.on_download_state.done");
+				d->request_props_refresh_for_tabs({TAB_TUNNEL}, "tunnel.on_download_state.done");
 			});
 			return;
 		}
-		d->request_props_refresh_for_tabs({2}, "tunnel.on_download_state");
+		d->request_props_refresh_for_tabs({TAB_TUNNEL}, "tunnel.on_download_state");
 	};
 	d->router.on_conn_change = [d](const std::string &sid, int ch, size_t count) {
 		if (sid != d->get_stream_id()) return;
-		d->request_props_refresh_for_tabs({3}, "router.on_conn_change");
+		d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY}, "router.on_conn_change");
 		// 自動計測: 接続かつ未計測かつ有効のときスケジュール
 		if (count > 0 && d->auto_measure_enabled.load() &&
 			ch >= 0 && ch < d->delay.sub_ch_count &&
@@ -408,10 +417,10 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 				d->delay.channels[ch].measured_ms = ms_val;
 				d->delay.channels[ch].ws_measured = true;
 				save_measurement_and_recalc(d);
-				d->request_props_refresh_for_tabs({3, 5}, "router.on_any_latency_result.apply");
+				d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "router.on_any_latency_result.apply");
 			});
 		} else {
-			d->request_props_refresh_for_tabs({3, 5}, "router.on_any_latency_result.invalid");
+			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "router.on_any_latency_result.invalid");
 		}
 	};
 	ods::plugin::add_obs_frontend_event_callback(on_frontend_event, d);
@@ -485,7 +494,7 @@ void *DelayStreamFilter::create(obs_data_t *settings, obs_source_t *source) {
 	for (int i = 0; i < MAX_SUB_CH; ++i) {
 		d->sub_btn_ctx[i] = {d, i};
 	}
-	for (int i = 0; i < 6; ++i) {
+	for (int i = 0; i < TAB_COUNT; ++i) {
 		d->tab_btn_ctx[i] = {d, i};
 	}
 	setup_event_callbacks(d);
@@ -550,7 +559,7 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 	if (d->router.client_count(i) == 0) return false;
 	bool ok = d->router.start_measurement(i, d->ping_count_setting.load(std::memory_order_relaxed), PING_INTV_MS);
 	if (ok) d->sub_channels[i].measure.start();
-	d->request_props_refresh_for_tabs({3, 5}, "cb_measure_subchannel");
+	d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "cb_measure_subchannel");
 	return false;
 }
 
@@ -585,24 +594,31 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 		ods::ui::add_tab_selector_row(props, d, active_tab);
 
 		switch (active_tab) {
-		case 0:
+		case TAB_PERFORMER_NAMES:
 			ods::ui::channels::add_sub_channels_group(props, d);
 			break;
-		case 1:
+		case TAB_TUNNEL:
+			ods::ui::add_tunnel_group(props, d);
+			ods::ui::add_tunnel_next_button_bar(props, d);
+			break;
+		case TAB_AUDIO_STREAMING:
 			ods::ui::add_ws_group(props, d, has_sid);
 			ods::ui::add_stream_group(props, d);
+			ods::ui::add_ws_next_button_bar(props, d, has_sid);
 			break;
-		case 2:
-			ods::ui::add_tunnel_group(props, d);
+		case TAB_URL_SHARING:
 			ods::ui::url_share::add_url_share_group(props, d);
+			ods::ui::url_share::add_url_share_next_button_bar(props, d);
 			break;
-		case 3:
+		case TAB_SYNC_LATENCY:
 			ods::ui::add_flow_group(props, d);
+			ods::ui::add_next_tab_button_bar(props, d, TAB_RTSP_LATENCY);
 			break;
-		case 4:
+		case TAB_RTSP_LATENCY:
 			ods::ui::add_master_group(props, d);
+			ods::ui::add_next_tab_button_bar(props, d, TAB_FINE_ADJUST);
 			break;
-		case 5: {
+		case TAB_FINE_ADJUST: {
 			obs_data_t *s5 = obs_source_get_settings(d->context);
 			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
 			if (s5) obs_data_release(s5);
