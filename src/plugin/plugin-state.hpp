@@ -340,6 +340,7 @@ namespace ods::plugin {
 		std::atomic<bool>       enabled{true};                   ///< フィルタ有効フラグ
 		std::atomic<bool>       ws_send_enabled{true};           ///< WebSocket 音声送信有効フラグ
 		std::atomic<bool>       inject_impulse{false};           ///< RTSP E2E 計測用プローブ注入フラグ
+		std::atomic<bool>       probe_mute_active{false};        ///< ミュートモード計測中フラグ（入力音声をミュート）
 		ods::audio::ProbeSignal probe_signal;                    ///< RTSP E2E 計測用チャープ信号
 
 		/// 非同期タスクがフィルタ生存中かチェックするトークン

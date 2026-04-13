@@ -356,6 +356,11 @@ namespace ods::ui {
 				return false;
 			}
 
+			// 測定モードを読み取り、ミュートモードならフラグを立てる
+			const int probe_mode = static_cast<int>(
+				obs_data_get_int(settings, ods::plugin::kRtspE2eProbeModeKey));
+			d->probe_mute_active.store(probe_mode == 1, std::memory_order_release);
+
 			// 進捗を初期化
 			d->rtsp_e2e_measure.set_last_error("");
 			d->rtsp_e2e_measure.set_progress(0, RTSP_E2E_MEASURE_SETS_DEFAULT);
@@ -375,6 +380,7 @@ namespace ods::ui {
 				update_flow_progress(d->context, pct);
 			};
 			prober.on_result = [d](ods::network::RtspE2eResult r) {
+				d->probe_mute_active.store(false, std::memory_order_release);
 				d->rtsp_e2e_measure.apply_result(r);
 				if (r.valid) {
 					// 計測結果を Model に反映し、UI スレッドで永続化する
@@ -476,6 +482,7 @@ namespace ods::ui {
 			d->ws_batch_progress.reset();
 			d->rtsp_e2e_measure.cancel();
 			d->inject_impulse.store(false, std::memory_order_release);
+			d->probe_mute_active.store(false, std::memory_order_release);
 			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_reset");
 			return false;
 		}
@@ -557,8 +564,19 @@ namespace ods::ui {
 		void add_flow_rtsp_e2e_measure_section(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
 
-			const bool is_ws_measuring    = d->ws_any_measuring();
-			const bool is_rtsp_measuring  = d->rtsp_e2e_measure.is_measuring();
+			const bool is_ws_measuring   = d->ws_any_measuring();
+			const bool is_rtsp_measuring = d->rtsp_e2e_measure.is_measuring();
+
+			// 測定モード選択
+			obs_property_t *mode_list = obs_properties_add_list(
+				grp,
+				ods::plugin::kRtspE2eProbeModeKey,
+				T_("RtspE2eProbeMode"),
+				OBS_COMBO_TYPE_LIST,
+				OBS_COMBO_FORMAT_INT);
+			obs_property_list_add_int(mode_list, T_("RtspE2eProbeMute"), 1);
+			obs_property_list_add_int(mode_list, T_("RtspE2eProbeMix"), 0);
+			obs_property_set_enabled(mode_list, !is_rtsp_measuring);
 			const bool obs_streaming      = ods::plugin::is_obs_streaming_active();
 			const bool can_start          = obs_streaming && !is_ws_measuring && !is_rtsp_measuring;
 			const bool rtsp_start_enabled = can_start;

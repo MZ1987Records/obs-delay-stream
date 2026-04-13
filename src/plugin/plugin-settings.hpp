@@ -17,6 +17,7 @@ namespace ods::plugin {
 	inline constexpr char kFfmpegExePathModeKey[]      = "ffmpeg_exe_path_mode";
 	inline constexpr char kCloudflaredExePathKey[]     = "cloudflared_exe_path";
 	inline constexpr char kCloudflaredExePathModeKey[] = "cloudflared_exe_path_mode";
+	inline constexpr char kRtspE2eProbeModeKey[]       = "rtsp_e2e_probe_mode";
 	inline constexpr char kSettingsSchemaVersionKey[]  = "settings_schema_version";
 	inline constexpr char kSettingsSavedVersionKey[]   = "settings_saved_version";
 	inline constexpr char kPathModeFromEnvPath[]       = "%PATH%";

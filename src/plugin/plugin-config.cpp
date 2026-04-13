@@ -76,6 +76,7 @@ namespace ods::plugin {
 		obs_data_set_default_string(settings, "rtmp_url", "");
 		obs_data_set_default_bool(settings, kRtspUseRtmpUrlKey, true);
 		obs_data_set_default_string(settings, kRtspUrlKey, "");
+		obs_data_set_default_int(settings, kRtspE2eProbeModeKey, 1);
 		obs_data_set_default_string(settings, kFfmpegExePathKey, "auto");
 		obs_data_set_default_int(settings, kFfmpegExePathModeKey, static_cast<int>(ExePathMode::Auto));
 		obs_data_set_default_string(settings, kCloudflaredExePathKey, "auto");
