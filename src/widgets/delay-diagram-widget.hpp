@@ -36,7 +36,7 @@ namespace ods::widgets {
 		const char *legend_delay      = nullptr; ///< "自動調整ディレイ"
 		const char *legend_delay_desc = nullptr; ///< "は上記の値に基づいて…"
 		const char *legend_ws         = nullptr; ///< "ブラウザ配信レイテンシ"
-		const char *legend_env        = nullptr; ///< "想定環境レイテンシ"
+		const char *legend_env        = nullptr; ///< "環境遅延"
 		const char *legend_buf        = nullptr; ///< "再生バッファ"
 		const char *legend_avatar     = nullptr; ///< "アバターレイテンシ"
 		const char *legend_broadcast  = nullptr; ///< "OBS配信レイテンシ"

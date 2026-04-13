@@ -162,7 +162,15 @@ void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
 				return;
 			}
 			int pings = d->ping_count_setting.load(std::memory_order_relaxed);
+			// SyncFlow 非経由の自動計測では on_any_ping_sent でプログレスバーを直接更新する
+			d->router.on_any_ping_sent = [d, pings](const std::string &sid, int, int seq) {
+				if (sid != d->get_stream_id()) return;
+				int pct = (pings > 0) ? ((seq + 1) * 100 / pings) : 0;
+				update_flow_progress(d->context, pct);
+			};
 			if (d->router.start_measurement(ch, pings, PING_INTV_MS)) {
+				d->sub_channels[ch].measure.start();
+				d->request_props_refresh_for_tabs({3, 5}, "auto_measure_start");
 				blog(LOG_INFO,
 					 "[obs-delay-stream] auto-measure started for ch=%d",
 					 ch + 1);
@@ -428,10 +436,10 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 				d->delay.channels[ch].measured_ms = ms_val;
 				d->delay.channels[ch].ws_measured = true;
 				save_measurement_and_recalc(d);
-				d->request_props_refresh_for_tabs({5}, "router.on_any_latency_result.apply");
+				d->request_props_refresh_for_tabs({3, 5}, "router.on_any_latency_result.apply");
 			});
 		} else {
-			d->request_props_refresh_for_tabs({5}, "router.on_any_latency_result.invalid");
+			d->request_props_refresh_for_tabs({3, 5}, "router.on_any_latency_result.invalid");
 		}
 	};
 	ods::plugin::add_obs_frontend_event_callback(on_frontend_event, d);

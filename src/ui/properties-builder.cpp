@@ -540,6 +540,17 @@ namespace ods::ui {
 			const bool is_ws_done_or_later =
 				is_ws_done || is_rtsp_measuring || is_rtsp_done || is_complete;
 
+			// SyncFlow 外の自動計測が進行中かチェック
+			bool any_auto_measuring = false;
+			if (!is_ws_measuring) {
+				for (int i = 0; i < sub_count; ++i) {
+					if (d->sub_channels[i].measure.is_measuring()) {
+						any_auto_measuring = true;
+						break;
+					}
+				}
+			}
+
 			obs_data_t *s               = obs_source_get_settings(d->context);
 			auto        format_sub_name = [s](int ch) -> std::string {
 				if (!s) return "Ch." + std::to_string(ch + 1);
@@ -582,15 +593,16 @@ namespace ods::ui {
 			const bool stop_enabled  = is_ws_measuring;
 
 			// 開始・停止が両方無効のとき、ユーザに次のアクションを促すヒントを表示する。
-			// 計測完了状態（全チャンネル計測済み）ではヒントを出さない。
+			// 計測完了状態（全チャンネル計測済み）ではヒントを出さない。ただし
+			// サーバー未起動や RTSP 計測中のヒントは計測完了状態でも表示する。
 			const bool  ws_all_done = (has_any_ws_measured && measurable_count == 0);
 			const char *ws_hint     = nullptr;
-			if (!start_enabled && !stop_enabled && !ws_all_done) {
+			if (!start_enabled && !stop_enabled) {
 				if (phase == FlowPhase::RtspE2eMeasuring)
 					ws_hint = T_("FlowHintRtspMeasuring");
 				else if (!d->router_running.load())
 					ws_hint = T_("FlowHintStartWsServer");
-				else if (connected_count == 0)
+				else if (!ws_all_done && connected_count == 0)
 					ws_hint = T_("FlowHintWaitConnection");
 			}
 
@@ -655,6 +667,8 @@ namespace ods::ui {
 					pct      = (res.ping_total_count > 0)
 								   ? res.ping_sent_count * 100 / res.ping_total_count
 								   : 0;
+					bar_text = T_("StatusMeasuring");
+				} else if (any_auto_measuring) {
 					bar_text = T_("StatusMeasuring");
 				} else if (is_ws_done_or_later || has_saved_ws) {
 					pct      = 100;
@@ -823,31 +837,35 @@ namespace ods::ui {
 		}
 
 		if (!d->is_duplicate_instance) {
-			const bool  ws_on      = d->router_running.load();
-			const bool  ws_paused  = !d->ws_send_enabled.load();
-			const bool  ws_no_dly  = !d->enabled.load();
-			const bool  ws_warn    = ws_on && (ws_paused || ws_no_dly);
-			TunnelState ts_plugin  = d->tunnel.state();
+			const bool  ws_on     = d->router_running.load();
+			const bool  ws_paused = !d->ws_send_enabled.load();
+			const bool  ws_no_dly = !d->enabled.load();
+			const bool  ws_warn   = ws_on && (ws_paused || ws_no_dly);
+			TunnelState ts_plugin = d->tunnel.state();
 			bool        tun_on    = (ts_plugin == TunnelState::Running);
 			bool        tun_busy  = (ts_plugin == TunnelState::Starting);
-			const char *ws_color   = ws_on ? (ws_warn ? UI_COLOR_STATUS_DOT_BUSY
-													  : UI_COLOR_STATUS_DOT_OK)
-										   : UI_COLOR_STATUS_DOT_OFF;
-			const char *tun_color  = tun_on    ? UI_COLOR_STATUS_DOT_OK
+			const char *ws_color  = ws_on ? (ws_warn ? UI_COLOR_STATUS_DOT_BUSY
+													 : UI_COLOR_STATUS_DOT_OK)
+										  : UI_COLOR_STATUS_DOT_OFF;
+			const char *tun_color = tun_on     ? UI_COLOR_STATUS_DOT_OK
 									: tun_busy ? UI_COLOR_STATUS_DOT_BUSY
 											   : UI_COLOR_STATUS_DOT_OFF;
 
 			std::string ws_status = ws_on ? T_("StatusRunning") : T_("StatusStopped");
 			if (ws_paused) ws_status += T_("WsPausedSuffix");
-			const char *tun_label = tun_on    ? T_("StatusRunning")
-									: tun_busy ? T_("TunnelStarting")
-											   : T_("StatusStopped");
+			const char       *tun_label   = tun_on     ? T_("StatusRunning")
+											: tun_busy ? T_("TunnelStarting")
+													   : T_("StatusStopped");
 			const std::string status_html = string_printf(
 				"<span style='color:%s'>●</span> %s %s"
 				"&nbsp;&nbsp;|&nbsp;&nbsp;"
 				"<span style='color:%s'>●</span> %s %s",
-				ws_color, T_("PluginWsStatusLabel"), ws_status.c_str(),
-				tun_color, T_("PluginTunnelStatusLabel"), tun_label);
+				ws_color,
+				T_("PluginWsStatusLabel"),
+				ws_status.c_str(),
+				tun_color,
+				T_("PluginTunnelStatusLabel"),
+				tun_label);
 			obs_property_t *status_p =
 				obs_properties_add_text(grp, "plugin_status_info", "", OBS_TEXT_INFO);
 			obs_property_set_long_description(status_p, status_html.c_str());

@@ -315,22 +315,22 @@ namespace ods::plugin {
 		std::shared_ptr<std::atomic<bool>> life_token =
 			std::make_shared<std::atomic<bool>>(true);
 
-		mutable std::mutex  stream_id_mtx;                                   ///< stream_id / host_ip / auto_ip を保護する mutex
-		std::string         stream_id;                                       ///< 配信 ID（例: "myshow2024"）
-		std::string         host_ip;                                         ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
-		std::string         auto_ip;                                         ///< 自動取得したローカル IP
-		std::atomic<int>    ws_port{WS_PORT};                                ///< WebSocket ポート番号
-		std::atomic<int>    ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
-		int                 playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
-		DelayState          delay;                                           ///< ディレイ計算の入力値（MVVM Model 層）
-		std::atomic<int>    active_tab{0};                                   ///< 設定UIの現在タブ（0-indexed）
-		DelayBuffer         master_buf;                                      ///< マスターチャンネルのディレイバッファ
-		RtmpMeasureState    rtmp_measure;                                    ///< RTMP 計測状態
-		RtspE2eMeasureState rtsp_e2e_measure;                                ///< RTSP E2E 計測状態
-		StreamRouter        router;                                          ///< WebSocket ルーター
-		std::atomic<bool>   router_running{false};                           ///< WebSocket ルーター起動中フラグ
-		std::atomic<bool>   auto_measure_enabled{false};                     ///< 接続時の自動計測フラグ
-		std::array<std::atomic<bool>, MAX_SUB_CH> auto_measure_pending{};    ///< チャンネル別自動計測予約中フラグ
+		mutable std::mutex                        stream_id_mtx;                                   ///< stream_id / host_ip / auto_ip を保護する mutex
+		std::string                               stream_id;                                       ///< 配信 ID（例: "myshow2024"）
+		std::string                               host_ip;                                         ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
+		std::string                               auto_ip;                                         ///< 自動取得したローカル IP
+		std::atomic<int>                          ws_port{WS_PORT};                                ///< WebSocket ポート番号
+		std::atomic<int>                          ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
+		int                                       playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
+		DelayState                                delay;                                           ///< ディレイ計算の入力値（MVVM Model 層）
+		std::atomic<int>                          active_tab{0};                                   ///< 設定UIの現在タブ（0-indexed）
+		DelayBuffer                               master_buf;                                      ///< マスターチャンネルのディレイバッファ
+		RtmpMeasureState                          rtmp_measure;                                    ///< RTMP 計測状態
+		RtspE2eMeasureState                       rtsp_e2e_measure;                                ///< RTSP E2E 計測状態
+		StreamRouter                              router;                                          ///< WebSocket ルーター
+		std::atomic<bool>                         router_running{false};                           ///< WebSocket ルーター起動中フラグ
+		std::atomic<bool>                         auto_measure_enabled{false};                     ///< 接続時の自動計測フラグ
+		std::array<std::atomic<bool>, MAX_SUB_CH> auto_measure_pending{};                          ///< チャンネル別自動計測予約中フラグ
 
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
