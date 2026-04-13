@@ -307,9 +307,11 @@ namespace ods::ui {
 			const int pings = d->ping_count_setting.load(std::memory_order_relaxed);
 
 			// 計測対象チャンネルを列挙
+			const int n_ch = d->layout.count.load(std::memory_order_relaxed);
 			int measure_count = 0;
-			for (int i = 0; i < d->delay.sub_ch_count; ++i) {
-				if (d->router.client_count(i) > 0 && !d->delay.channels[i].ws_measured)
+			for (int di = 0; di < n_ch; ++di) {
+				const int slot = d->layout.display_order[di];
+				if (d->router.client_count(slot) > 0 && !d->delay.channels[slot].ws_measured)
 					++measure_count;
 			}
 			if (measure_count == 0) return false;
@@ -335,11 +337,12 @@ namespace ods::ui {
 
 			// 各チャンネルの計測を開始（スタガー配置）
 			int ch_index = 0;
-			for (int i = 0; i < d->delay.sub_ch_count; ++i) {
-				if (d->router.client_count(i) == 0 || d->delay.channels[i].ws_measured)
+			for (int di = 0; di < n_ch; ++di) {
+				const int slot = d->layout.display_order[di];
+				if (d->router.client_count(slot) == 0 || d->delay.channels[slot].ws_measured)
 					continue;
-				d->sub_channels[i].measure.start();
-				d->router.start_measurement(i, pings, PING_INTV_MS, ch_index * PING_INTV_MS);
+				d->sub_channels[slot].measure.start();
+				d->router.start_measurement(slot, pings, PING_INTV_MS, ch_index * PING_INTV_MS);
 				++ch_index;
 			}
 			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "cb_flow_start");
@@ -710,38 +713,42 @@ namespace ods::ui {
 		// WS 計測パネル全体（接続状況/操作/進捗）を構築する。
 		void build_flow_panel(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
-			int sub_count = d->delay.sub_ch_count;
+			const int sub_count = d->layout.count.load(std::memory_order_relaxed);
 
 			const bool is_ws_measuring   = d->ws_any_measuring();
 			const bool is_rtsp_measuring = d->rtsp_e2e_measure.is_measuring();
 
 			obs_data_t *s               = obs_source_get_settings(d->context);
-			auto        format_sub_name = [s](int ch) -> std::string {
-				if (!s) return "Ch." + std::to_string(ch + 1);
-				const auto  memo_key = make_sub_memo_key(ch);
-				const char *memo     = obs_data_get_string(s, memo_key.data());
+			// format_sub_name は slot を受け取り、表示位置の番号を付加する
+			auto        format_sub_name = [s, d](int slot) -> std::string {
+				const auto  memo_key = make_sub_memo_key(slot);
+				const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : nullptr;
 				if (memo && *memo) return std::string(memo);
-				return "Ch." + std::to_string(ch + 1);
+				const int di = d->layout.display_index(slot);
+				return "Ch." + std::to_string(di >= 0 ? di + 1 : slot + 1);
 			};
 
 			int connected_count = 0;
-			for (int i = 0; i < sub_count; ++i) {
-				if (d->router.client_count(i) > 0)
+			for (int di = 0; di < sub_count; ++di) {
+				const int slot = d->layout.display_order[di];
+				if (d->router.client_count(slot) > 0)
 					++connected_count;
 			}
 
 			// 接続中で未計測のチャンネルが1つもなければ計測不要
 			int measurable_count = 0;
-			for (int i = 0; i < sub_count; ++i) {
-				if (d->router.client_count(i) <= 0) continue;
-				if (d->delay.channels[i].ws_measured) continue;
+			for (int di = 0; di < sub_count; ++di) {
+				const int slot = d->layout.display_order[di];
+				if (d->router.client_count(slot) <= 0) continue;
+				if (d->delay.channels[slot].ws_measured) continue;
 				++measurable_count;
 			}
 
 			// 保存済み計測結果の有無（リセットボタンの有効条件に使用）
 			bool has_any_ws_measured = false;
-			for (int i = 0; i < sub_count; ++i) {
-				if (d->delay.channels[i].ws_measured) {
+			for (int di = 0; di < sub_count; ++di) {
+				const int slot = d->layout.display_order[di];
+				if (d->delay.channels[slot].ws_measured) {
 					has_any_ws_measured = true;
 					break;
 				}
@@ -835,14 +842,14 @@ namespace ods::ui {
 			{
 				std::vector<std::string>          name_buf(sub_count);
 				std::vector<FlowTableChannelInfo> table_channels(sub_count);
-				for (int i = 0; i < sub_count; ++i) {
-					name_buf[i]  = format_sub_name(i);
-					auto &tc     = table_channels[i];
-					tc.name      = name_buf[i].c_str();
-					tc.connected = (d->router.client_count(i) > 0);
-					// 計測済みなら保存値を表示、未計測なら -1
-					if (d->delay.channels[i].ws_measured)
-						tc.measured_ms = d->delay.channels[i].measured_ms;
+				for (int di = 0; di < sub_count; ++di) {
+					const int slot = d->layout.display_order[di];
+					name_buf[di]  = format_sub_name(slot);
+					auto &tc      = table_channels[di];
+					tc.name       = name_buf[di].c_str();
+					tc.connected  = (d->router.client_count(slot) > 0);
+					if (d->delay.channels[slot].ws_measured)
+						tc.measured_ms = d->delay.channels[slot].measured_ms;
 					else
 						tc.measured_ms = -1;
 				}

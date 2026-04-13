@@ -60,16 +60,24 @@ namespace ods::plugin {
 	// DelaySnapshot を計算し、結果を各 DelayBuffer へ適用する。
 	void recalc_all_delays(DelayStreamData *d) {
 		if (!d) return;
-		const DelaySnapshot snap = d->delay.calc_all_delays();
+		const auto &lo    = d->layout;
+		const int   count = lo.count.load(std::memory_order_acquire);
 
-		for (int i = 0; i < snap.active_count; ++i) {
-			uint32_t ms = (snap.channels[i].total_ms > 0)
-							  ? static_cast<uint32_t>(snap.channels[i].total_ms)
-							  : 0;
-			d->sub_channels[i].buf.set_delay_ms(ms);
+		std::array<core::Slot, MAX_SUB_CH> order{};
+		for (int i = 0; i < count; ++i) order[i] = lo.display_order[i];
+
+		const DelaySnapshot snap = d->delay.calc_all_delays(order, count);
+
+		for (int di = 0; di < count; ++di) {
+			const core::Slot slot = order[di];
+			uint32_t         ms   = (snap.channels[slot].total_ms > 0)
+										? static_cast<uint32_t>(snap.channels[slot].total_ms)
+										: 0;
+			d->sub_channels[slot].buf.set_delay_ms(ms);
 		}
-		for (int i = snap.active_count; i < MAX_SUB_CH; ++i) {
-			d->sub_channels[i].buf.set_delay_ms(0);
+		for (core::Slot s = 0; s < MAX_SUB_CH; ++s) {
+			if (!lo.is_active(s))
+				d->sub_channels[s].buf.set_delay_ms(0);
 		}
 
 		d->master_buf.set_delay_ms(static_cast<uint32_t>(snap.master_delay_ms));
@@ -577,9 +585,9 @@ namespace ods::plugin {
 					obs_data_get_bool(settings_, "auto_measure"));
 			}
 
-			// サブチャンネル数を正規化して関連状態へ適用する。
+			// 表示順テーブルを復元してルーターのアクティブスロットへ反映する。
 			void apply_sub_channel_count() {
-				int  current          = data_->delay.sub_ch_count;
+				int  current          = data_->layout.count.load(std::memory_order_relaxed);
 				bool has_sub_ch_count = obs_data_has_user_value(settings_, "sub_ch_count");
 				int  raw_v            = has_sub_ch_count ? (int)obs_data_get_int(settings_, "sub_ch_count") : current;
 				int  v                = raw_v;
@@ -598,8 +606,22 @@ namespace ods::plugin {
 						 v,
 						 clamped);
 				}
-				data_->delay.sub_ch_count = clamped;
-				data_->router.set_active_channels(clamped);
+
+				// 表示順テーブルを復元する。キー未設定の場合は 0..sub_ch_count-1
+				const char *order_raw = obs_data_get_string(settings_, kChDisplayOrderKey);
+				std::string order_str = order_raw ? order_raw : "";
+				if (order_str.empty()) {
+					data_->layout.display_order.fill(-1);
+					for (int i = 0; i < clamped; ++i)
+						data_->layout.display_order[i] = i;
+					data_->layout.count.store(clamped, std::memory_order_relaxed);
+				} else {
+					data_->layout.deserialize(order_str);
+				}
+				// ルーターのアクティブスロットを layout と同期
+				const int n = data_->layout.count.load(std::memory_order_relaxed);
+				for (int i = 0; i < n; ++i)
+					data_->router.activate_slot(data_->layout.display_order[i]);
 			}
 
 			// 音声コーデック関連設定を正規化して router へ適用する。
@@ -784,7 +806,8 @@ namespace ods::plugin {
 
 				obs_data_set_bool(settings_, "delay_disable", !data_->enabled.load(std::memory_order_relaxed));
 				obs_data_set_bool(settings_, "ws_send_paused", !data_->ws_send_enabled.load(std::memory_order_relaxed));
-				obs_data_set_int(settings_, "sub_ch_count", data_->delay.sub_ch_count);
+				obs_data_set_int(settings_, "sub_ch_count", data_->layout.count.load(std::memory_order_relaxed));
+				obs_data_set_string(settings_, kChDisplayOrderKey, data_->layout.serialize().c_str());
 				obs_data_set_int(settings_, "sub_memo_auto_counter", static_cast<int>(obs_data_get_int(settings_, "sub_memo_auto_counter")));
 
 				obs_data_set_int(settings_, "audio_codec", static_cast<int>(obs_data_get_int(settings_, "audio_codec")));

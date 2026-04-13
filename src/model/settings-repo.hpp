@@ -79,48 +79,6 @@ namespace ods::model {
 		// チャンネル一括操作
 		// ============================================================
 
-		/// ch_from のチャンネル設定を ch_to へコピーする（obs_data のみ）。
-		void copy_channel(int ch_from, int ch_to) {
-			set_ch_measured_ms(ch_to, ch_measured_ms(ch_from));
-			set_ch_ws_measured(ch_to, ch_ws_measured(ch_from));
-			set_ch_offset_ms(ch_to, ch_offset_ms(ch_from));
-			set_ch_memo(ch_to, ch_memo(ch_from));
-			set_ch_code(ch_to, ch_code(ch_from));
-		}
-
-		/// from_ch 以降のチャンネル設定を1つ前に詰める（削除操作用）。
-		void shift_channels_down(int from_ch) {
-			for (int i = from_ch; i < core::MAX_SUB_CH - 1; ++i) {
-				copy_channel(i + 1, i);
-			}
-			clear_channel(core::MAX_SUB_CH - 1);
-		}
-
-		/// ch_a と ch_b のチャンネル設定を入れ替える。
-		void swap_channels(int ch_a, int ch_b) {
-			const int         a_measured    = ch_measured_ms(ch_a);
-			const int         b_measured    = ch_measured_ms(ch_b);
-			const bool        a_ws_measured = ch_ws_measured(ch_a);
-			const bool        b_ws_measured = ch_ws_measured(ch_b);
-			const int         a_offset      = ch_offset_ms(ch_a);
-			const int         b_offset      = ch_offset_ms(ch_b);
-			const std::string a_memo        = ch_memo(ch_a);
-			const std::string b_memo        = ch_memo(ch_b);
-			const std::string a_code        = ch_code(ch_a);
-			const std::string b_code        = ch_code(ch_b);
-
-			set_ch_measured_ms(ch_a, b_measured);
-			set_ch_measured_ms(ch_b, a_measured);
-			set_ch_ws_measured(ch_a, b_ws_measured);
-			set_ch_ws_measured(ch_b, a_ws_measured);
-			set_ch_offset_ms(ch_a, b_offset);
-			set_ch_offset_ms(ch_b, a_offset);
-			set_ch_memo(ch_a, b_memo);
-			set_ch_memo(ch_b, a_memo);
-			set_ch_code(ch_a, b_code);
-			set_ch_code(ch_b, a_code);
-		}
-
 		/// 指定チャンネルの全設定をゼロ/空にする。
 		void clear_channel(int ch) {
 			set_ch_measured_ms(ch, 0);
@@ -128,6 +86,18 @@ namespace ods::model {
 			set_ch_offset_ms(ch, 0);
 			set_ch_memo(ch, "");
 			set_ch_code(ch, "");
+		}
+
+		// ============================================================
+		// チャンネル表示順
+		// ============================================================
+
+		std::string ch_display_order() const {
+			const char *v = obs_data_get_string(s_, plugin::kChDisplayOrderKey);
+			return v ? v : "";
+		}
+		void set_ch_display_order(const std::string &v) {
+			obs_data_set_string(s_, plugin::kChDisplayOrderKey, v.c_str());
 		}
 
 		// ============================================================

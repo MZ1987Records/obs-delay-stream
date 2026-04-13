@@ -115,32 +115,38 @@ namespace ods::network {
 		return stream_id_;
 	}
 
-	void StreamRouter::set_active_channels(int n) {
-		if (n < 1) n = 1;
-		if (n > MAX_SUB_CH) n = MAX_SUB_CH;
+	void StreamRouter::activate_slot(int slot) {
+		if (slot < 0 || slot >= MAX_SUB_CH) return;
+		std::lock_guard<std::mutex> lk(mtx_);
+		active_slots_.set(slot);
+	}
+
+	void StreamRouter::deactivate_slot(int slot) {
+		if (slot < 0 || slot >= MAX_SUB_CH) return;
 		std::shared_ptr<WsServer>     srv;
 		std::vector<ConnectionHandle> to_close;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
-			active_ch_max_ = n;
-			srv            = server_ptr_;
+			active_slots_.reset(slot);
+			srv = server_ptr_;
 			for (auto &kv : conn_map_) {
-				if (kv.second.ch >= n) to_close.push_back(kv.first);
+				if (kv.second.ch == slot) to_close.push_back(kv.first);
 			}
 		}
 		if (srv) {
 			for (auto &h : to_close) {
 				try {
-					srv->close(h, websocketpp::close::status::policy_violation, "ch_out_of_range");
+					srv->close(h, websocketpp::close::status::policy_violation, "slot_deactivated");
 				} catch (...) {
 				}
 			}
 		}
 	}
 
-	int StreamRouter::active_channels() const {
+	bool StreamRouter::is_slot_active(int slot) const {
+		if (slot < 0 || slot >= MAX_SUB_CH) return false;
 		std::lock_guard<std::mutex> lk(mtx_);
-		return active_ch_max_;
+		return active_slots_.test(slot);
 	}
 
 	void StreamRouter::set_sub_code(int ch, const std::string &code) {
@@ -158,7 +164,8 @@ namespace ods::network {
 	int StreamRouter::resolve_code(const std::string &code) const {
 		if (code.empty()) return -1;
 		std::lock_guard<std::mutex> lk(mtx_);
-		for (int i = 0; i < active_ch_max_; ++i) {
+		for (int i = 0; i < MAX_SUB_CH; ++i) {
+			if (!active_slots_.test(i)) continue;
 			if (sub_code_[i] == code) return i;
 		}
 		return -1;
@@ -451,19 +458,19 @@ namespace ods::network {
 			pb_debounce_running_.store(false, std::memory_order_relaxed);
 			if (!running_.load(std::memory_order_relaxed)) return;
 
-			int         cur = playback_buffer_ms_.load(std::memory_order_relaxed);
-			std::string sid;
-			int         active = 0;
+			int                            cur = playback_buffer_ms_.load(std::memory_order_relaxed);
+			std::string                    sid;
+			std::bitset<MAX_SUB_CH>        slots;
 			{
 				std::lock_guard<std::mutex> lk(mtx_);
-				sid    = stream_id_;
-				active = active_ch_max_;
+				sid   = stream_id_;
+				slots = active_slots_;
 			}
-			if (sid.empty() || active <= 0) return;
+			if (sid.empty() || slots.none()) return;
 			const std::string msg =
 				"{\"type\":\"playback_buffer\",\"ms\":" + std::to_string(cur) + "}";
-			for (int ch = 0; ch < active; ++ch)
-				broadcast_text(sid, ch, msg);
+			for (int ch = 0; ch < MAX_SUB_CH; ++ch)
+				if (slots.test(ch)) broadcast_text(sid, ch, msg);
 		}).detach();
 	}
 
@@ -908,7 +915,7 @@ namespace ods::network {
 				int active = MAX_SUB_CH;
 				{
 					std::lock_guard<std::mutex> lk(mtx_);
-					active = active_ch_max_;
+					active = static_cast<int>(active_slots_.count());
 				}
 				std::string resp = "{\"ok\":true,\"max_ch\":" + std::to_string(MAX_SUB_CH) + ",\"active_ch\":" + std::to_string(active) + "}";
 				con->set_status(websocketpp::http::status_code::ok);

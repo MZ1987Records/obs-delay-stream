@@ -55,7 +55,7 @@ namespace ods::audio {
 		bool ws_send_enabled = d->ws_send_enabled.load(std::memory_order_relaxed);
 		bool router_running  = d->router_running.load(std::memory_order_relaxed);
 		bool has_sid         = !d->get_stream_id().empty();
-		int  sub_count       = d->delay.sub_ch_count;
+		const int sub_count = d->layout.count.load(std::memory_order_relaxed);
 
 		if (is_enabled) {
 			d->master_buf.process(in, out, frames);
@@ -93,15 +93,17 @@ namespace ods::audio {
 			}
 
 			if (ws_send_enabled && router_running && has_sid) {
-				for (int i = 0; i < sub_count; ++i) {
-					d->sub_channels[i].buf.process(in, sub_buf, frames);
-					d->router.send_audio(i, sub_buf, frames, sample_rate, num_channels);
+				for (int di = 0; di < sub_count; ++di) {
+					const int slot = d->layout.display_order[di];
+					d->sub_channels[slot].buf.process(in, sub_buf, frames);
+					d->router.send_audio(slot, sub_buf, frames, sample_rate, num_channels);
 				}
 			}
 		} else {
 			if (ws_send_enabled && router_running && has_sid) {
-				for (int i = 0; i < sub_count; ++i) {
-					d->router.send_audio(i, in, frames, sample_rate, num_channels);
+				for (int di = 0; di < sub_count; ++di) {
+					const int slot = d->layout.display_order[di];
+					d->router.send_audio(slot, in, frames, sample_rate, num_channels);
 				}
 			}
 		}

@@ -51,6 +51,7 @@ namespace ods::plugin {
 		obs_data_set_default_bool(settings, "delay_disable", false);
 		obs_data_set_default_bool(settings, "ws_send_paused", false);
 		obs_data_set_default_int(settings, "sub_ch_count", 1);
+		obs_data_set_default_string(settings, kChDisplayOrderKey, "0");
 		// Ch.1 既定名を A にするため、次の自動払い出しは B から開始する。
 		obs_data_set_default_int(settings, "sub_memo_auto_counter", 1);
 		obs_data_set_default_int(settings, "audio_codec", 0);

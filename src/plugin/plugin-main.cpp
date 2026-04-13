@@ -403,7 +403,7 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 		d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY}, "router.on_conn_change");
 		// 自動計測: 接続かつ未計測かつ有効のときスケジュール
 		if (count > 0 && d->auto_measure_enabled.load() &&
-			ch >= 0 && ch < d->delay.sub_ch_count &&
+			ch >= 0 && ch < MAX_SUB_CH && d->layout.is_active(ch) &&
 			!d->delay.channels[ch].ws_measured) {
 			schedule_auto_measure(d, ch);
 		}
@@ -620,7 +620,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			break;
 		case TAB_FINE_ADJUST: {
 			obs_data_t *s5 = obs_source_get_settings(d->context);
-			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5);
+			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5, d->layout);
 			if (s5) obs_data_release(s5);
 			ods::ui::delay::add_fine_tune_group(props, d, vm);
 			ods::ui::delay::add_delay_diagram_group(props, d, vm);

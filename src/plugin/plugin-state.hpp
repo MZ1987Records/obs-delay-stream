@@ -3,6 +3,7 @@
 #include "audio/probe-signal.hpp"
 #include "core/constants.hpp"
 #include "core/delay-buffer.hpp"
+#include "model/channel-layout.hpp"
 #include "model/delay-state.hpp"
 #include "network/rtmp-prober.hpp"
 #include "network/rtsp-e2e-prober.hpp"
@@ -356,6 +357,7 @@ namespace ods::plugin {
 		std::atomic<int>                          ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
 		int                                       playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
 		DelayState                                delay;                                           ///< ディレイ計算の入力値（MVVM Model 層）
+		ods::model::ChannelLayout                 layout;                                          ///< チャンネル表示順とアクティブスロット管理
 		std::atomic<int>                          active_tab{0};                                   ///< 設定UIの現在タブ（0-indexed）
 		DelayBuffer                               master_buf;                                      ///< マスターチャンネルのディレイバッファ
 		RtmpMeasureState                          rtmp_measure;                                    ///< RTMP 計測状態
@@ -475,9 +477,10 @@ namespace ods::plugin {
 
 		/// いずれかのサブチャンネルで WS 計測が実行中かを返す。
 		bool ws_any_measuring() const {
-			const int n = delay.sub_ch_count;
-			for (int i = 0; i < n; ++i) {
-				if (sub_channels[i].measure.is_measuring())
+			const int n = layout.count.load(std::memory_order_relaxed);
+			for (int di = 0; di < n; ++di) {
+				const int slot = layout.display_order[di];
+				if (sub_channels[slot].measure.is_measuring())
 					return true;
 			}
 			return false;

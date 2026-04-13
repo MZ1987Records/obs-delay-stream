@@ -46,8 +46,6 @@ namespace ods::model {
 		bool rtsp_e2e_measured    = false; ///< RTSP E2E 計測済みフラグ
 		int  avatar_latency_ms    = 0;     ///< アバター同期レイテンシ (ms, 0-5000)
 		int  playback_buffer_ms   = 0;     ///< 再生バッファ量 (ms)
-		int  sub_ch_count         = 1;     ///< アクティブなサブチャンネル数
-
 		std::array<ChDelay, MAX_SUB_CH> channels{}; ///< チャンネルごとのディレイ計算入力
 
 		/// 1 チャンネルの補正前ディレイ値を計算する。
@@ -59,10 +57,14 @@ namespace ods::model {
 			return rtsp_e2e_ms - avatar_latency_ms - ch_measured_ms - playback_buffer_ms - offset_ms;
 		}
 
-		/// 全チャンネルのディレイを一括計算してスナップショットを返す。
-		DelaySnapshot calc_all_delays() const {
+		/// 表示順テーブルを指定してディレイを一括計算する（スロットインデックス版）。
+		/// 結果は snap.channels[slot] にスロットインデックスで格納される。
+		DelaySnapshot calc_all_delays(
+			const std::array<core::Slot, MAX_SUB_CH> &display_order,
+			int active_count) const
+		{
 			DelaySnapshot snap;
-			snap.active_count = sub_ch_count;
+			snap.active_count = active_count;
 
 			const int R = measured_rtsp_e2e_ms;
 			const int A = avatar_latency_ms;
@@ -70,32 +72,34 @@ namespace ods::model {
 
 			// 計測済みチャンネルの最小 WS 遅延を求める（仮値の基準）
 			int min_measured = INT_MAX;
-			for (int i = 0; i < sub_ch_count; ++i) {
-				if (channels[i].ws_measured && channels[i].measured_ms < min_measured)
-					min_measured = channels[i].measured_ms;
+			for (int di = 0; di < active_count; ++di) {
+				const int slot = display_order[di];
+				if (channels[slot].ws_measured && channels[slot].measured_ms < min_measured)
+					min_measured = channels[slot].measured_ms;
 			}
 			const bool has_any = (min_measured != INT_MAX);
 
-			for (int i = 0; i < sub_ch_count; ++i) {
-				auto &out           = snap.channels[i];
-				out.has_measurement = channels[i].ws_measured;
+			for (int di = 0; di < active_count; ++di) {
+				const int slot      = display_order[di];
+				auto     &out       = snap.channels[slot];
+				out.has_measurement = channels[slot].ws_measured;
 				if (!out.has_measurement) {
 					if (!has_any) {
 						out.raw_ms = 0;
 						continue;
 					}
-					// 仮値として最小計測値を使用
 					out.provisional = true;
-					out.raw_ms      = calc_ch_raw_delay_ms(R, A, min_measured, B, channels[i].offset_ms);
+					out.raw_ms      = calc_ch_raw_delay_ms(R, A, min_measured, B, channels[slot].offset_ms);
 				} else {
-					out.raw_ms = calc_ch_raw_delay_ms(R, A, channels[i].measured_ms, B, channels[i].offset_ms);
+					out.raw_ms = calc_ch_raw_delay_ms(R, A, channels[slot].measured_ms, B, channels[slot].offset_ms);
 				}
 				if (out.raw_ms < 0 && -out.raw_ms > snap.neg_max_ms)
 					snap.neg_max_ms = -out.raw_ms;
 			}
 
-			for (int i = 0; i < sub_ch_count; ++i) {
-				auto &out = snap.channels[i];
+			for (int di = 0; di < active_count; ++di) {
+				const int slot = display_order[di];
+				auto     &out  = snap.channels[slot];
 				if (out.has_measurement || out.provisional) {
 					int val      = out.raw_ms + snap.neg_max_ms;
 					out.total_ms = (val > 0) ? val : 0;
@@ -106,6 +110,7 @@ namespace ods::model {
 			snap.master_delay_ms = snap.neg_max_ms;
 			return snap;
 		}
+
 	};
 
 } // namespace ods::model

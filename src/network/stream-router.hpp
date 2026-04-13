@@ -30,6 +30,7 @@
 
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <functional>
 #include <map>
 #include <memory>
@@ -78,8 +79,9 @@ namespace ods::network {
 		void stop();                                        ///< サーバーを停止する
 		void set_stream_id(const std::string &id);          ///< 配信 ID を設定する
 		std::string stream_id() const;                      ///< 現在の配信 ID を返す
-		void set_active_channels(int n);                    ///< 有効チャンネル数を設定する
-		int active_channels() const;                        ///< 有効チャンネル数を返す
+		void activate_slot(int slot);                       ///< スロットを有効化する
+		void deactivate_slot(int slot);                     ///< スロットを無効化し対応する全接続を閉じる
+		bool is_slot_active(int slot) const;                ///< スロットが有効か返す
 		void set_sub_memo(int ch, const std::string &memo); ///< チャンネルメモを設定する
 		void set_sub_code(int ch, const std::string &code); ///< チャンネル識別コードを設定する
 		std::string sub_code(int ch) const;                 ///< チャンネル識別コードを取得する
@@ -167,7 +169,7 @@ namespace ods::network {
 		std::atomic<uint64_t>               pb_debounce_seq_{0};                    ///< バッファ設定通知の世代番号
 		std::atomic<bool>                   pb_debounce_running_{false};            ///< 通知ディボウンス実行中フラグ
 		std::vector<OpusEncoder>            opus_;                                  ///< チャンネル別 Opus エンコーダ
-		int                                 active_ch_max_ = ods::core::MAX_SUB_CH; ///< 有効 CH 上限
+		std::bitset<ods::core::MAX_SUB_CH>  active_slots_;                          ///< スロットごとの有効フラグ
 		ConnectionMap                       conn_map_;                              ///< 接続ハンドルごとの情報
 		std::map<std::string, ChannelState> ch_map_;                                ///< "stream_id/ch_0idx" ごとの状態
 		std::map<std::string, ChannelCache> ch_cache_;                              ///< stop() 時に退避する計測結果・適用ディレイキャッシュ

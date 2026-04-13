@@ -55,15 +55,16 @@ namespace ods::ui::url_share {
 		std::vector<UrlShareRow> collect_sub_url_rows(DelayStreamData *d, obs_data_t *s) {
 			std::vector<UrlShareRow> rows;
 			if (!d || !s) return rows;
-			int sub_count = d->delay.sub_ch_count;
+			const int sub_count = d->layout.count.load(std::memory_order_relaxed);
 			rows.reserve(sub_count);
-			for (int i = 0; i < sub_count; ++i) {
-				const auto  memo_key = ods::plugin::make_sub_memo_key(i);
+			for (int di = 0; di < sub_count; ++di) {
+				const int   slot     = d->layout.display_order[di];
+				const auto  memo_key = ods::plugin::make_sub_memo_key(slot);
 				const char *memo     = obs_data_get_string(s, memo_key.data());
 				UrlShareRow row;
-				row.ch_1indexed = i + 1;
+				row.ch_1indexed = di + 1;
 				row.name        = (memo && *memo) ? memo : "";
-				row.url         = make_sub_url(d, i);
+				row.url         = make_sub_url(d, slot);
 				rows.emplace_back(std::move(row));
 			}
 			return rows;

@@ -57,4 +57,8 @@ namespace ods::core {
 	static constexpr const char *UI_COLOR_WARNING_LIGHT = "#DC2626"; ///< ライトテーマ用警告テキスト色
 	static constexpr const char *UI_COLOR_WARNING_DARK  = "#F87171"; ///< ダークテーマ用警告テキスト色
 
+	// チャンネルインデックスの型エイリアス
+	using Slot       = int; ///< 固定スロットインデックス (0..MAX_SUB_CH-1)
+	using DisplayIdx = int; ///< 表示順インデックス (0..count-1)
+
 } // namespace ods::core
