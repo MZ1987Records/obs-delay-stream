@@ -351,7 +351,7 @@ jobs:
           Add-Content $env:GITHUB_OUTPUT "path=$dst"
 
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           body_path: ${{ steps.changelog.outputs.path }}
