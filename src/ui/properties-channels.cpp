@@ -27,7 +27,6 @@ namespace ods::ui::channels {
 		bool cb_sub_add(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
-			if (d->router_running.load()) return false;
 			int cur = d->delay.sub_ch_count;
 			if (cur >= MAX_SUB_CH) return false;
 			int                      next     = ods::plugin::clamp_sub_ch_count(cur + 1);
@@ -186,7 +185,7 @@ namespace ods::ui::channels {
 		}
 		obs_property_t *add_p =
 			obs_properties_add_button2(grp, "sub_add_btn", add_label.c_str(), cb_sub_add, d);
-		if (d->router_running.load() || d->delay.sub_ch_count >= MAX_SUB_CH) {
+		if (d->delay.sub_ch_count >= MAX_SUB_CH) {
 			obs_property_set_enabled(add_p, false);
 		}
 		obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);

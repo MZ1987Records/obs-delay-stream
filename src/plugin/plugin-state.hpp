@@ -329,6 +329,8 @@ namespace ods::plugin {
 		RtspE2eMeasureState rtsp_e2e_measure;                                ///< RTSP E2E 計測状態
 		StreamRouter        router;                                          ///< WebSocket ルーター
 		std::atomic<bool>   router_running{false};                           ///< WebSocket ルーター起動中フラグ
+		std::atomic<bool>   auto_measure_enabled{false};                     ///< 接続時の自動計測フラグ
+		std::array<std::atomic<bool>, MAX_SUB_CH> auto_measure_pending{};    ///< チャンネル別自動計測予約中フラグ
 
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
