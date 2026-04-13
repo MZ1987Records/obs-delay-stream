@@ -2,6 +2,7 @@
 
 #include <array>
 #include <obs-module.h>
+#include <string>
 
 namespace ods::plugin {
 
@@ -16,7 +17,10 @@ namespace ods::plugin {
 	inline constexpr char kFfmpegExePathModeKey[]      = "ffmpeg_exe_path_mode";
 	inline constexpr char kCloudflaredExePathKey[]     = "cloudflared_exe_path";
 	inline constexpr char kCloudflaredExePathModeKey[] = "cloudflared_exe_path_mode";
+	inline constexpr char kSettingsSchemaVersionKey[]  = "settings_schema_version";
+	inline constexpr char kSettingsSavedVersionKey[]   = "settings_saved_version";
 	inline constexpr char kPathModeFromEnvPath[]       = "%PATH%";
+	inline constexpr int  kSettingsSchemaVersion       = 1;
 
 	enum class ExePathMode {
 		Auto     = 0, ///< 既定配置先から自動取得（未配置ならダウンロード）
@@ -42,5 +46,8 @@ namespace ods::plugin {
 
 	/// OBS 設定値を `DelayStreamData` に反映する
 	void apply_settings(DelayStreamData *d, obs_data_t *settings);
+
+	/// 保存済み設定の必須キー・型・バージョン整合性を検証する。
+	bool validate_settings_compatibility(obs_data_t *settings, std::string &reason);
 
 } // namespace ods::plugin

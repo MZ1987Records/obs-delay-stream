@@ -333,6 +333,7 @@ namespace ods::plugin {
 	struct DelayStreamData {
 		obs_source_t           *context               = nullptr; ///< OBS フィルタコンテキスト
 		bool                    is_duplicate_instance = false;   ///< 二重起動されたインスタンスか
+		bool                    has_settings_mismatch = false;   ///< 保存設定の整合性エラーで警告専用モードか
 		bool                    owns_singleton_slot   = false;   ///< シングルトンスロットを確保しているか
 		uint64_t                singleton_generation  = 0;       ///< シングルトン世代番号（重複判定用）
 		std::atomic<bool>       destroying{false};               ///< デストラクタ実行中フラグ
@@ -405,6 +406,11 @@ namespace ods::plugin {
 		std::atomic<bool>  rtmp_url_auto{true};                   ///< RTMP URL 自動補完を有効にするフラグ
 		bool               prev_stream_id_has_user_value = false; ///< 直前の stream_id にユーザー設定値があったか（デフォルトリセット検出用）
 		std::vector<float> work_buf;                              ///< 音声処理用ワークバッファ
+
+		/// 警告専用モード（通常機能を無効化し、プラグイングループのみ表示）か。
+		bool is_warning_only_instance() const {
+			return is_duplicate_instance || has_settings_mismatch;
+		}
 
 		/// stream_id をスレッドセーフに取得する。
 		std::string get_stream_id() const {

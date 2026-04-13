@@ -80,6 +80,8 @@ namespace ods::plugin {
 		obs_data_set_default_int(settings, kFfmpegExePathModeKey, static_cast<int>(ExePathMode::Auto));
 		obs_data_set_default_string(settings, kCloudflaredExePathKey, "auto");
 		obs_data_set_default_int(settings, kCloudflaredExePathModeKey, static_cast<int>(ExePathMode::Auto));
+		obs_data_set_default_int(settings, kSettingsSchemaVersionKey, kSettingsSchemaVersion);
+		obs_data_set_default_string(settings, kSettingsSavedVersionKey, PLUGIN_VERSION);
 		for (int i = 0; i < MAX_SUB_CH; ++i) {
 			const auto measured_key = make_sub_measured_key(i);
 			obs_data_set_default_int(settings, measured_key.data(), 0);

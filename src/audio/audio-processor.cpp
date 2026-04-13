@@ -30,7 +30,7 @@ namespace ods::audio {
 
 	obs_audio_data *filter_audio_delay_stream(ods::plugin::DelayStreamData *d, obs_audio_data *audio) {
 		if (!d || !audio) return audio;
-		if (d->is_duplicate_instance) return audio;
+		if (d->is_warning_only_instance()) return audio;
 		if (audio->frames == 0) return audio;
 
 		const audio_output_info *info         = audio_output_get_info(obs_get_audio());

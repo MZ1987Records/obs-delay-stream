@@ -854,6 +854,22 @@ namespace ods::ui {
 										  "<a href=\"https://github.com/MZ1987Records/obs-delay-stream\">GitHub</a> | "
 										  "<a href=\"https://mz1987records.booth.pm/items/8134637\">Booth</a>");
 		obs_property_text_set_info_word_wrap(about_p, false);
+		obs_property_t *schema_p = obs_properties_add_int(
+			grp,
+			ods::plugin::kSettingsSchemaVersionKey,
+			"",
+			0,
+			999,
+			1);
+		obs_property_set_visible(schema_p, false);
+		obs_property_set_enabled(schema_p, false);
+		obs_property_t *saved_ver_p = obs_properties_add_text(
+			grp,
+			ods::plugin::kSettingsSavedVersionKey,
+			"",
+			OBS_TEXT_DEFAULT);
+		obs_property_set_visible(saved_ver_p, false);
+		obs_property_set_enabled(saved_ver_p, false);
 
 		if (d->update_check.status.load(std::memory_order_acquire) ==
 			UpdateCheckStatus::UpdateAvailable) {
@@ -876,6 +892,13 @@ namespace ods::ui {
 				"duplicate_instance_warning",
 				"複数の obs-delay-stream フィルタを使用することはできません。",
 				OBS_TEXT_INFO);
+		} else if (d->has_settings_mismatch) {
+			obs_property_t *warn_p = obs_properties_add_text(
+				grp,
+				"settings_mismatch_warning",
+				T_("SettingsMismatchWarning"),
+				OBS_TEXT_INFO);
+			obs_property_text_set_info_word_wrap(warn_p, true);
 		} else {
 			if ((obs_get_version() >> 24) < 32) {
 				obs_property_t *ver_warn_p = obs_properties_add_text(
@@ -897,7 +920,7 @@ namespace ods::ui {
 			}
 		}
 
-		if (!d->is_duplicate_instance) {
+		if (!d->is_warning_only_instance()) {
 			const bool  ws_on     = d->router_running.load();
 			const bool  ws_paused = !d->ws_send_enabled.load();
 			const bool  ws_no_dly = !d->enabled.load();

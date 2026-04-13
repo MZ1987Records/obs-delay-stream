@@ -438,13 +438,24 @@ void *DelayStreamFilter::create(obs_data_t *settings, obs_source_t *source) {
 		}
 	}
 	ods::ui::props_refresh_unblock_source(source);
-	ods::plugin::maybe_autofill_rtmp_url(settings, false);
-	d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
 	if (d->is_duplicate_instance) {
 		blog(LOG_WARNING, "[obs-delay-stream] duplicate filter instance created as warning-only");
 		d->create_done.store(true);
 		return d;
 	}
+	std::string settings_reason;
+	if (!ods::plugin::validate_settings_compatibility(settings, settings_reason)) {
+		d->has_settings_mismatch = true;
+		d->enabled.store(false, std::memory_order_relaxed);
+		d->ws_send_enabled.store(false, std::memory_order_relaxed);
+		blog(LOG_WARNING,
+			 "[obs-delay-stream] settings compatibility check failed; warning-only mode: %s",
+			 settings_reason.c_str());
+		d->create_done.store(true);
+		return d;
+	}
+	ods::plugin::maybe_autofill_rtmp_url(settings, false);
+	d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
 	{
 		auto html = ods::plugin::load_receiver_index_html();
 		if (html.empty()) {
@@ -493,7 +504,7 @@ void DelayStreamFilter::destroy(void *data) {
 	bool          release_singleton_slot = d->owns_singleton_slot;
 	obs_source_t *my_source              = d->context;
 	uint64_t      my_gen                 = d->singleton_generation;
-	if (!d->is_duplicate_instance) {
+	if (!d->is_warning_only_instance()) {
 		d->rtsp_e2e_measure.cancel();
 		d->tunnel.stop();
 		d->router.stop();
@@ -557,7 +568,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 
 	int active_tab = d->get_active_tab();
 	ods::ui::add_plugin_group(props, d);
-	if (!d->is_duplicate_instance) {
+	if (!d->is_warning_only_instance()) {
 		ods::ui::add_tab_selector_row(props, d, active_tab);
 
 		switch (active_tab) {
@@ -591,7 +602,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 		}
 	}
 
-	if (!d->is_duplicate_instance) {
+	if (!d->is_warning_only_instance()) {
 		schedule_widget_injects_for_tab(d, active_tab);
 	}
 
