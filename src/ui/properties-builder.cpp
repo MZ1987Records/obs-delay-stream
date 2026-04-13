@@ -307,8 +307,8 @@ namespace ods::ui {
 			const int pings = d->ping_count_setting.load(std::memory_order_relaxed);
 
 			// 計測対象チャンネルを列挙
-			const int n_ch = d->layout.count.load(std::memory_order_relaxed);
-			int measure_count = 0;
+			const int n_ch          = d->layout.count.load(std::memory_order_relaxed);
+			int       measure_count = 0;
 			for (int di = 0; di < n_ch; ++di) {
 				const int slot = d->layout.display_order[di];
 				if (d->router.client_count(slot) > 0 && !d->delay.channels[slot].ws_measured)
@@ -718,9 +718,9 @@ namespace ods::ui {
 			const bool is_ws_measuring   = d->ws_any_measuring();
 			const bool is_rtsp_measuring = d->rtsp_e2e_measure.is_measuring();
 
-			obs_data_t *s               = obs_source_get_settings(d->context);
+			obs_data_t *s = obs_source_get_settings(d->context);
 			// format_sub_name は slot を受け取り、表示位置の番号を付加する
-			auto        format_sub_name = [s, d](int slot) -> std::string {
+			auto format_sub_name = [s, d](int slot) -> std::string {
 				const auto  memo_key = make_sub_memo_key(slot);
 				const char *memo     = s ? obs_data_get_string(s, memo_key.data()) : nullptr;
 				if (memo && *memo) return std::string(memo);
@@ -844,10 +844,10 @@ namespace ods::ui {
 				std::vector<FlowTableChannelInfo> table_channels(sub_count);
 				for (int di = 0; di < sub_count; ++di) {
 					const int slot = d->layout.display_order[di];
-					name_buf[di]  = format_sub_name(slot);
-					auto &tc      = table_channels[di];
-					tc.name       = name_buf[di].c_str();
-					tc.connected  = (d->router.client_count(slot) > 0);
+					name_buf[di]   = format_sub_name(slot);
+					auto &tc       = table_channels[di];
+					tc.name        = name_buf[di].c_str();
+					tc.connected   = (d->router.client_count(slot) > 0);
 					if (d->delay.channels[slot].ws_measured)
 						tc.measured_ms = d->delay.channels[slot].measured_ms;
 					else

@@ -97,7 +97,7 @@ namespace ods::ui::channels {
 		bool cb_sub_swap_up(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *ctx = static_cast<SubChannelCtx *>(priv);
 			if (!ctx || !ctx->d) return false;
-			auto            *d  = ctx->d;
+			auto            *d    = ctx->d;
 			const Slot       slot = ctx->ch;
 			const DisplayIdx di   = d->layout.display_index(slot);
 			if (di <= 0) return false;
@@ -143,7 +143,7 @@ namespace ods::ui::channels {
 		obs_properties_t *grp       = obs_properties_create();
 		const int         sub_count = d->layout.count.load(std::memory_order_relaxed);
 		for (int di = 0; di < sub_count; ++di) {
-			const Slot slot = d->layout.display_order[di];
+			const Slot slot      = d->layout.display_order[di];
 			d->sub_btn_ctx[slot] = {d, slot};
 
 			const auto        memo_key = ods::plugin::make_sub_memo_key(slot);

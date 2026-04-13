@@ -51,11 +51,11 @@ namespace ods::audio {
 			for (size_t f = 0; f < frames; ++f)
 				in[f * num_channels + c] = src[f];
 		}
-		bool is_enabled      = d->enabled.load(std::memory_order_relaxed);
-		bool ws_send_enabled = d->ws_send_enabled.load(std::memory_order_relaxed);
-		bool router_running  = d->router_running.load(std::memory_order_relaxed);
-		bool has_sid         = !d->get_stream_id().empty();
-		const int sub_count = d->layout.count.load(std::memory_order_relaxed);
+		bool      is_enabled      = d->enabled.load(std::memory_order_relaxed);
+		bool      ws_send_enabled = d->ws_send_enabled.load(std::memory_order_relaxed);
+		bool      router_running  = d->router_running.load(std::memory_order_relaxed);
+		bool      has_sid         = !d->get_stream_id().empty();
+		const int sub_count       = d->layout.count.load(std::memory_order_relaxed);
 
 		if (is_enabled) {
 			d->master_buf.process(in, out, frames);

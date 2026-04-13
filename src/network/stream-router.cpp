@@ -458,9 +458,9 @@ namespace ods::network {
 			pb_debounce_running_.store(false, std::memory_order_relaxed);
 			if (!running_.load(std::memory_order_relaxed)) return;
 
-			int                            cur = playback_buffer_ms_.load(std::memory_order_relaxed);
-			std::string                    sid;
-			std::bitset<MAX_SUB_CH>        slots;
+			int                     cur = playback_buffer_ms_.load(std::memory_order_relaxed);
+			std::string             sid;
+			std::bitset<MAX_SUB_CH> slots;
 			{
 				std::lock_guard<std::mutex> lk(mtx_);
 				sid   = stream_id_;

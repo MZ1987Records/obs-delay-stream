@@ -166,14 +166,14 @@ namespace ods::network {
 		/// クライアント再生バッファ目標
 		std::atomic<int> playback_buffer_ms_{ods::core::PLAYBACK_BUFFER_DEFAULT_MS};
 
-		std::atomic<uint64_t>               pb_debounce_seq_{0};                    ///< バッファ設定通知の世代番号
-		std::atomic<bool>                   pb_debounce_running_{false};            ///< 通知ディボウンス実行中フラグ
-		std::vector<OpusEncoder>            opus_;                                  ///< チャンネル別 Opus エンコーダ
-		std::bitset<ods::core::MAX_SUB_CH>  active_slots_;                          ///< スロットごとの有効フラグ
-		ConnectionMap                       conn_map_;                              ///< 接続ハンドルごとの情報
-		std::map<std::string, ChannelState> ch_map_;                                ///< "stream_id/ch_0idx" ごとの状態
-		std::map<std::string, ChannelCache> ch_cache_;                              ///< stop() 時に退避する計測結果・適用ディレイキャッシュ
-		std::mutex                          measure_threads_mtx_;                   ///< 計測スレッド配列の排他制御
+		std::atomic<uint64_t>               pb_debounce_seq_{0};         ///< バッファ設定通知の世代番号
+		std::atomic<bool>                   pb_debounce_running_{false}; ///< 通知ディボウンス実行中フラグ
+		std::vector<OpusEncoder>            opus_;                       ///< チャンネル別 Opus エンコーダ
+		std::bitset<ods::core::MAX_SUB_CH>  active_slots_;               ///< スロットごとの有効フラグ
+		ConnectionMap                       conn_map_;                   ///< 接続ハンドルごとの情報
+		std::map<std::string, ChannelState> ch_map_;                     ///< "stream_id/ch_0idx" ごとの状態
+		std::map<std::string, ChannelCache> ch_cache_;                   ///< stop() 時に退避する計測結果・適用ディレイキャッシュ
+		std::mutex                          measure_threads_mtx_;        ///< 計測スレッド配列の排他制御
 
 		std::vector<std::unique_ptr<MeasureThread>>    measure_threads_; ///< 実行中/完了待ち計測スレッド
 		std::array<std::string, ods::core::MAX_SUB_CH> sub_memo_{};      ///< CH ごとのメモ文字列

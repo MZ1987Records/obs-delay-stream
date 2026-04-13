@@ -24,12 +24,12 @@ namespace ods::viewmodel {
 	struct DelayViewModel {
 		/// チャンネルごとの表示用データ。
 		struct ChDisplay {
-			std::string    name;        ///< メモ名（空文字列可）
-			float          measured_ms; ///< WS 配信遅延（片道 ms）。未計測は -1.0f
-			int            offset_ms;   ///< 想定環境遅延（チャンネル別補正オフセット）
-			int            total_ms;    ///< 自動調整ディレイ（バッファ適用値）
-			bool           provisional; ///< 仮値（他チャンネルの最小計測値）を使用中か
-			core::Slot     slot = -1;   ///< 内部スロット番号
+			std::string name;        ///< メモ名（空文字列可）
+			float       measured_ms; ///< WS 配信遅延（片道 ms）。未計測は -1.0f
+			int         offset_ms;   ///< 想定環境遅延（チャンネル別補正オフセット）
+			int         total_ms;    ///< 自動調整ディレイ（バッファ適用値）
+			bool        provisional; ///< 仮値（他チャンネルの最小計測値）を使用中か
+			core::Slot  slot = -1;   ///< 内部スロット番号
 		};
 
 		DelaySnapshot          snapshot;               ///< 全チャンネルディレイ計算結果
@@ -40,15 +40,15 @@ namespace ods::viewmodel {
 		int                    playback_buffer_ms = 0; ///< B: 再生バッファ (ms)
 
 		/// DelayState と ChannelLayout から表示用 ViewModel を構築する。
-		static DelayViewModel build(const DelayState &delay,
-									obs_data_t *settings,
-									const model::ChannelLayout &layout)
-		{
+		static DelayViewModel build(const DelayState           &delay,
+									obs_data_t                 *settings,
+									const model::ChannelLayout &layout) {
 			DelayViewModel vm;
-			const int sub_count = layout.count.load(std::memory_order_relaxed);
+			const int      sub_count = layout.count.load(std::memory_order_relaxed);
 
 			std::array<core::Slot, core::MAX_SUB_CH> order{};
-			for (int i = 0; i < sub_count; ++i) order[i] = layout.display_order[i];
+			for (int i = 0; i < sub_count; ++i)
+				order[i] = layout.display_order[i];
 			vm.snapshot = delay.calc_all_delays(order, sub_count);
 
 			vm.rtsp_e2e_ms        = delay.measured_rtsp_e2e_ms;

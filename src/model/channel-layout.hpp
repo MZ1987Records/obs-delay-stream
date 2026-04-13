@@ -57,7 +57,10 @@ namespace ods::model {
 			for (Slot s = 0; s < MAX_SUB_CH; ++s) {
 				bool used = false;
 				for (int i = 0; i < n; ++i) {
-					if (display_order[i] == s) { used = true; break; }
+					if (display_order[i] == s) {
+						used = true;
+						break;
+					}
 				}
 				if (!used) return s;
 			}
@@ -90,10 +93,13 @@ namespace ods::model {
 
 		/// スロットを表示順から除去する（後続を前詰め）。
 		void remove(Slot s) {
-			const int n = count.load(std::memory_order_relaxed);
-			int pos = -1;
+			const int n   = count.load(std::memory_order_relaxed);
+			int       pos = -1;
 			for (int i = 0; i < n; ++i) {
-				if (display_order[i] == s) { pos = i; break; }
+				if (display_order[i] == s) {
+					pos = i;
+					break;
+				}
 			}
 			if (pos < 0) return;
 			for (int i = pos; i < n - 1; ++i)
@@ -139,7 +145,11 @@ namespace ods::model {
 			std::string                  token;
 			while (std::getline(ss, token, ',') && n < MAX_SUB_CH) {
 				int v = -1;
-				try { v = std::stoi(token); } catch (...) { continue; }
+				try {
+					v = std::stoi(token);
+				} catch (...) {
+					continue;
+				}
 				if (v < 0 || v >= MAX_SUB_CH || seen[v]) continue;
 				seen[v]          = true;
 				display_order[n] = v;

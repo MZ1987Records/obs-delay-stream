@@ -64,7 +64,8 @@ namespace ods::plugin {
 		const int   count = lo.count.load(std::memory_order_acquire);
 
 		std::array<core::Slot, MAX_SUB_CH> order{};
-		for (int i = 0; i < count; ++i) order[i] = lo.display_order[i];
+		for (int i = 0; i < count; ++i)
+			order[i] = lo.display_order[i];
 
 		const DelaySnapshot snap = d->delay.calc_all_delays(order, count);
 

@@ -42,11 +42,11 @@ namespace ods::model {
 			int  offset_ms   = 0;     ///< 手動補正オフセット (ms)
 		};
 
-		int  measured_rtsp_e2e_ms = 0;     ///< RTSP E2E 計測結果 (ms, OBS 設定に永続保存)
-		bool rtsp_e2e_measured    = false; ///< RTSP E2E 計測済みフラグ
-		int  avatar_latency_ms    = 0;     ///< アバター同期レイテンシ (ms, 0-5000)
-		int  playback_buffer_ms   = 0;     ///< 再生バッファ量 (ms)
-		std::array<ChDelay, MAX_SUB_CH> channels{}; ///< チャンネルごとのディレイ計算入力
+		int                             measured_rtsp_e2e_ms = 0;     ///< RTSP E2E 計測結果 (ms, OBS 設定に永続保存)
+		bool                            rtsp_e2e_measured    = false; ///< RTSP E2E 計測済みフラグ
+		int                             avatar_latency_ms    = 0;     ///< アバター同期レイテンシ (ms, 0-5000)
+		int                             playback_buffer_ms   = 0;     ///< 再生バッファ量 (ms)
+		std::array<ChDelay, MAX_SUB_CH> channels{};                   ///< チャンネルごとのディレイ計算入力
 
 		/// 1 チャンネルの補正前ディレイ値を計算する。
 		static int calc_ch_raw_delay_ms(int rtsp_e2e_ms,
@@ -61,8 +61,7 @@ namespace ods::model {
 		/// 結果は snap.channels[slot] にスロットインデックスで格納される。
 		DelaySnapshot calc_all_delays(
 			const std::array<core::Slot, MAX_SUB_CH> &display_order,
-			int active_count) const
-		{
+			int                                       active_count) const {
 			DelaySnapshot snap;
 			snap.active_count = active_count;
 
@@ -110,7 +109,6 @@ namespace ods::model {
 			snap.master_delay_ms = snap.neg_max_ms;
 			return snap;
 		}
-
 	};
 
 } // namespace ods::model
