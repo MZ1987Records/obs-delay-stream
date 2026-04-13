@@ -685,7 +685,10 @@ namespace ods::network {
 			if (on_progress) on_progress(i + 1, sets);
 		}
 
-		if (static_cast<int>(latencies_ms.size()) == sets) {
+		// 1 セットの失敗を許容する（RTSP 再公開の競合で散発的に 404 になるため）
+		const int min_required = std::max(1, sets - 1);
+
+		if (static_cast<int>(latencies_ms.size()) >= min_required) {
 			std::sort(latencies_ms.begin(), latencies_ms.end());
 			const size_t mid      = latencies_ms.size() / 2;
 			result.valid          = true;
