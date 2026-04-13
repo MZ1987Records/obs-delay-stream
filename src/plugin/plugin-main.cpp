@@ -161,10 +161,23 @@ void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
 				return;
 			}
 			int pings = d->ping_count_setting.load(std::memory_order_relaxed);
-			// 自動計測では on_any_ping_sent でプログレスバーを直接更新する
-			d->router.on_any_ping_sent = [d, pings](const std::string &sid, int, int seq) {
+			// 他チャンネルが計測中でなければカウンタをリセット
+			if (!d->ws_any_measuring())
+				d->ws_batch_progress.reset();
+			// 分母にこのチャンネルの ping 数を加算
+			d->ws_batch_progress.ping_total_count.fetch_add(
+				pings,
+				std::memory_order_relaxed);
+			// 全チャンネル共通のコールバックで進捗を更新する
+			d->router.on_any_ping_sent = [d](const std::string &sid, int, int) {
 				if (sid != d->get_stream_id()) return;
-				int pct = (pings > 0) ? ((seq + 1) * 100 / pings) : 0;
+				const int sent  = d->ws_batch_progress.ping_sent_count.fetch_add(
+									  1,
+									  std::memory_order_relaxed) +
+								  1;
+				const int total = d->ws_batch_progress.ping_total_count.load(
+					std::memory_order_relaxed);
+				const int pct = (total > 0) ? (sent * 100 / total) : 0;
 				update_flow_progress(d->context, pct);
 			};
 			if (d->router.start_measurement(ch, pings, PING_INTV_MS)) {
