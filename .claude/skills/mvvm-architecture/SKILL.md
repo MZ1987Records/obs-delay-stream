@@ -34,20 +34,49 @@ allowed-tools: Read, Edit, Write, Grep, Glob, Bash
 
 ## modified callback の `return true` ルール {#cb-rule}
 
-OBS の modified callback が `true` を返すと `RefreshProperties()` がダイアログ全体の Qt ウィジェットを再構築し、`OBS_TEXT_INFO` プレースホルダー経由で注入されたカスタムウィジェット（ColorButtonRow, PulldownRow, StepperRow 等）を破壊する。
+### OBS の RefreshProperties メカニズム
 
-**ルール**: カスタムウィジェットが存在するタブで `return true` する場合、直後にそのタブに必要な inject を再スケジュールすること。
+OBS の modified callback が `true` を返すと `RefreshProperties()` が走る。重要なのは **`RefreshProperties()` は既存の `obs_properties_t` を再トラバースするだけで `get_properties()` を再呼出ししない** こと。つまり `schedule_widget_injects_for_tab()` は呼ばれず、`OBS_TEXT_INFO` プレースホルダー経由で注入されたカスタムウィジェット（ColorButtonRow, PulldownRow, StepperRow, HelpCallout 等）は破壊されたまま復元されない。
+
+> **参照**: `third_party/obs-studio/shared/properties-view/properties-view.cpp` の `RefreshProperties()` — `obs_properties_first(properties.get())` で既存オブジェクトを走査。
+
+### inject の実行タイミング
+
+このプロジェクトの OBS の `ui_task_handler`（`OBSApp.cpp`）は `Qt::AutoConnection` を使用するため、UI スレッドから呼ばれた `obs_queue_task(OBS_TASK_UI, ..., false)` は **DirectConnection（同期実行）** になる。
+
+コールバック本体で `schedule_*_inject` を呼ぶと:
+
+1. inject 関数が **同期的に即座に** 実行される
+2. 旧プレースホルダーは既に前回の inject で置換済み → ラベルが見つからない → **リトライ開始**（`QTimer::singleShot`）
+3. コールバックが `true` を返す → OBS が `RefreshProperties()` をキューイング
+4. `RefreshProperties()` がウィジェットを再構築 → 新しいプレースホルダーが生まれる
+5. リトライが新しいプレースホルダーを検出して置換 → **復元完了**
+
+**ルール**: `return true` する modified callback は、そのタブに必要な **すべての** inject を `props_ui_with_preserved_scroll` 内でスケジュールすること。1 種類でも漏れると、その種別だけ未置換のプレースホルダーがユーザーに見える。
 
 ```cpp
-// OK: return true + inject 再スケジュール
+// OK: return true + 当該タブの全 inject を再スケジュール
+// タブ 1 (WS配信) の場合
 bool cb_xxx_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
     auto *d = static_cast<DelayStreamData *>(priv);
     // ... visibility/enabled 変更 ...
     props_ui_with_preserved_scroll([d]() {
         if (!d || !d->context) return;
+        schedule_color_button_row_inject(d->context);  // 常に必要
+        schedule_pulldown_row_inject(d->context);       // タブ 1 固有
+        schedule_stepper_inject(d->context);            // タブ 1 固有
+        schedule_help_callout_inject(d->context);       // タブ 1 固有
+    });
+    return true;
+}
+
+// NG: inject 漏れのある return true
+bool cb_xxx_changed(...) {
+    // ...
+    props_ui_with_preserved_scroll([d]() {
         schedule_color_button_row_inject(d->context);
-        schedule_pulldown_row_inject(d->context);   // タブに必要な inject を列挙
         schedule_stepper_inject(d->context);
+        // schedule_help_callout_inject が漏れている → ヘルプ表示が壊れる
     });
     return true;
 }
@@ -55,24 +84,28 @@ bool cb_xxx_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_d
 // NG: inject なしの return true
 bool cb_xxx_changed(...) {
     obs_property_set_visible(p, show);
-    return true;  // カスタムウィジェットが消える
+    return true;  // 全カスタムウィジェットが消える
 }
 ```
 
-**なぜ `return false` + `request_props_refresh_for_tabs` ではダメか**:
+### ボタンコールバックとの違い
+
+ColorButtonRow / TextButton 等のカスタムウィジェット経由のボタンクリックは、コールバックが `true` を返すと `obs_source_update_properties()` を呼ぶ。これは **`get_properties()` を再呼出し** するフルリロードのため、`schedule_widget_injects_for_tab()` が自動的に走る。ボタンコールバック本体で inject を手動スケジュールする必要はない。
+
+### なぜ `return false` + `request_props_refresh` ではダメか
 
 OBS はダイアログ構築時にも modified callback を呼ぶ。その時点で `get_props_depth` は 0 のため `request_props_refresh` がガードを通過し、`get_properties` → 構築 → callback → refresh → … の無限ループになる。
 
 ### タブ別の必要 inject 一覧
 
-`schedule_widget_injects_for_tab()` (plugin-main.cpp) を参照。新しいカスタムウィジェットを追加した場合、この関数と以下の表の両方を更新する。
+`schedule_widget_injects_for_tab()` (plugin-main.cpp) を正とする。新しいカスタムウィジェットを追加した場合、**この関数**と**以下の表**と**同タブの全 modified callback 本体**の 3 箇所を更新する。
 
 | タブ | 常に必要 | タブ固有 |
 |---|---|---|
 | 0 (出演者名) | color_button_row | text_button |
 | 1 (WS配信) | color_button_row | pulldown_row, stepper, help_callout |
 | 2 (URL共有) | color_button_row | text_button, path_mode_row, url_table, help_callout |
-| 3 (WS計測) | color_button_row | flow_progress |
+| 3 (WS計測) | color_button_row | flow_progress, flow_table |
 | 4 (RTSP計測) | color_button_row | flow_progress, path_mode_row, mode_text_row |
 | 5 (遅延) | color_button_row | stepper, delay_diagram, delay_table |
 
@@ -122,6 +155,7 @@ OBS はダイアログ構築時にも modified callback を呼ぶ。その時点
 - [ ] デストラクタで binding_id マップエントリを **削除しない**（禁止事項 8 参照）
 - [ ] 登録関数（`obs_properties_add_*_row`）で新しい binding_id 登録時に、同じ prop_name プレフィックスの旧エントリを掃除する
 - [ ] `schedule_widget_injects_for_tab()` にタブ別の inject 呼び出しを追加する
+- [ ] **同じタブにある `return true` する全 modified callback** の `props_ui_with_preserved_scroll` 本体にも inject 呼び出しを追加する
 - [ ] 上記のタブ別 inject 一覧表を更新する
 - 複雑度が上がったら `src/viewmodel/` に ViewModel を導入する
 
@@ -133,3 +167,7 @@ OBS はダイアログ構築時にも modified callback を呼ぶ。その時点
 2. パラメータ追加の場合、チェックリストの全項目が完了していること
 3. modified callback を追加・変更した場合、`return true` ルールに従っていること
 4. チャンネル別パラメータの場合、`SettingsRepo` の一括操作が更新されていること
+5. **inject クロスチェック**: カスタムウィジェットの追加・変更を行った場合、以下の 3 箇所が同期していること
+   - `schedule_widget_injects_for_tab()` (plugin-main.cpp)
+   - 同タブの全 modified callback の `props_ui_with_preserved_scroll` 本体
+   - §CB ルールのタブ別 inject 一覧表（このスキル内）

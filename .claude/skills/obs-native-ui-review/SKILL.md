@@ -39,6 +39,7 @@ Treat the following as the default rule set unless the repository defines a stri
 13. **Null-safe assumptions**: do not assume `data` passed to `get_properties()` is always non-null.
 14. **Version-safe migrations**: when settings schema changes, preserve backward compatibility or add explicit migration.
 15. **Injected widget binding maps must survive widget destruction**: when a custom Qt widget replaces an `OBS_TEXT_INFO` placeholder and uses a global map to look up `obs_property_t*` action handles (binding_id → action_props pattern), the widget's destructor must **not** erase its map entry. OBS's `RefreshProperties()` can destroy and recreate widgets while the underlying `obs_properties_t` (and its action handles) remain valid. If the destructor erases the entry, a re-injected widget with the same binding_id will silently fail on user interaction. Instead, clean up stale entries when the registration function creates a new binding_id for the same prop_name.
+16. **Modified callback `return true` must re-schedule all injects for the tab**: `RefreshProperties()` re-traverses the existing `obs_properties_t` without calling `get_properties()`, so `schedule_widget_injects_for_tab()` is never invoked. Every modified callback that returns `true` must explicitly schedule all inject types needed by its tab inside `props_ui_with_preserved_scroll`. Missing even one type silently leaves that widget's placeholder visible to the user. See the project's `mvvm-architecture` skill for the authoritative per-tab inject list.
 
 ## What to inspect
 
