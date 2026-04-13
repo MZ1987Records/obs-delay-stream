@@ -7,7 +7,6 @@
 #include "network/rtmp-prober.hpp"
 #include "network/rtsp-e2e-prober.hpp"
 #include "network/stream-router.hpp"
-#include "sync/sync-flow.hpp"
 #include "tunnel/tunnel-manager.hpp"
 #include "ui/props-refresh.hpp"
 
@@ -41,9 +40,6 @@ namespace ods::plugin {
 	using ods::network::RtspE2eResult;
 	using ods::network::StreamRouter;
 	using ods::network::AudioConfig;
-	using ods::sync::SyncFlow;
-	using ods::sync::FlowPhase;
-	using ods::sync::FlowResult;
 	using ods::tunnel::TunnelManager;
 	using ods::tunnel::TunnelState;
 
@@ -177,6 +173,9 @@ namespace ods::plugin {
 
 		RtspE2eProber prober; ///< on_ready/on_result は外部で設定
 
+		/// 計測中か返す。スレッドセーフ。
+		bool is_measuring() const { return prober.is_running(); }
+
 		/// 計測結果をスレッドセーフに記録する。
 		void apply_result(const RtspE2eResult &r) {
 			std::lock_guard<std::mutex> lk(mtx_);
@@ -214,12 +213,43 @@ namespace ods::plugin {
 			cached_url_ = url;
 		}
 
+		/// 計測進捗を更新する。スレッドセーフ。
+		void set_progress(int completed, int total) {
+			completed_sets_.store(completed, std::memory_order_relaxed);
+			total_sets_.store(total, std::memory_order_relaxed);
+		}
+
+		int completed_sets() const { return completed_sets_.load(std::memory_order_relaxed); }
+		int total_sets() const { return total_sets_.load(std::memory_order_relaxed); }
+
+		/// 直近のエラー文字列を返す。スレッドセーフ。
+		std::string last_error() const {
+			std::lock_guard<std::mutex> lk(mtx_);
+			return last_error_;
+		}
+
+		/// エラー文字列を設定する。スレッドセーフ。
+		void set_last_error(const std::string &err) {
+			std::lock_guard<std::mutex> lk(mtx_);
+			last_error_ = err;
+		}
+
+		/// 計測をキャンセルし進捗をリセットする。
+		void cancel() {
+			prober.cancel();
+			completed_sets_.store(0, std::memory_order_relaxed);
+			total_sets_.store(0, std::memory_order_relaxed);
+		}
+
 	private:
 
-		mutable std::mutex mtx_;             ///< メンバアクセスを保護する mutex
-		RtspE2eResult      result_;          ///< 直近の RTSP E2E 計測結果
-		bool               applied_ = false; ///< 結果適用済みフラグ
-		std::string        cached_url_;      ///< 直近の計測対象 URL
+		mutable std::mutex mtx_;               ///< メンバアクセスを保護する mutex
+		RtspE2eResult      result_;            ///< 直近の RTSP E2E 計測結果
+		bool               applied_ = false;   ///< 結果適用済みフラグ
+		std::string        cached_url_;        ///< 直近の計測対象 URL
+		std::string        last_error_;        ///< 直近のエラー文字列
+		std::atomic<int>   completed_sets_{0}; ///< 完了セット数
+		std::atomic<int>   total_sets_{0};     ///< 総セット数
 	};
 
 	struct DelayStreamData;
@@ -332,6 +362,18 @@ namespace ods::plugin {
 		std::atomic<bool>                         auto_measure_enabled{false};                     ///< 接続時の自動計測フラグ
 		std::array<std::atomic<bool>, MAX_SUB_CH> auto_measure_pending{};                          ///< チャンネル別自動計測予約中フラグ
 
+		// WS 一括計測の進捗トラッキング
+		struct WsBatchProgress {
+			std::atomic<int> ping_sent_count{0};  ///< 送信済み ping 数
+			std::atomic<int> ping_total_count{0}; ///< 送信予定の ping 総数
+			void reset() {
+				ping_sent_count.store(0, std::memory_order_relaxed);
+				ping_total_count.store(0, std::memory_order_relaxed);
+			}
+		};
+
+		WsBatchProgress ws_batch_progress; ///< WS 一括計測の進捗
+
 		/// サブチャンネルボタンのコールバック引数
 		std::array<SubChannelCtx, MAX_SUB_CH> sub_btn_ctx;
 		/// タブ選択ボタンのコールバック引数
@@ -346,7 +388,6 @@ namespace ods::plugin {
 
 		std::array<SubChannel, MAX_SUB_CH> sub_channels; ///< サブチャンネルの状態配列
 
-		SyncFlow          flow;                                       ///< 3ステップ同期フロー
 		TunnelManager     tunnel;                                     ///< cloudflared トンネルマネージャー
 		std::atomic<bool> manual_cloudflared_download_running{false}; ///< cloudflared 手動ダウンロード実行中フラグ
 		std::atomic<bool> manual_ffmpeg_download_running{false};      ///< ffmpeg 手動ダウンロード実行中フラグ
@@ -422,6 +463,16 @@ namespace ods::plugin {
 					return;
 				}
 			}
+		}
+
+		/// いずれかのサブチャンネルで WS 計測が実行中かを返す。
+		bool ws_any_measuring() const {
+			const int n = delay.sub_ch_count;
+			for (int i = 0; i < n; ++i) {
+				if (sub_channels[i].measure.is_measuring())
+					return true;
+			}
+			return false;
 		}
 	};
 

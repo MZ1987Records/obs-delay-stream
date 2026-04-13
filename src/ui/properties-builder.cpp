@@ -35,8 +35,6 @@ namespace ods::ui {
 	using ods::plugin::DelayStreamData;
 	using ods::plugin::TabCtx;
 	using ods::plugin::UpdateCheckStatus;
-	using ods::sync::FlowPhase;
-	using ods::sync::FlowResult;
 	using ods::tunnel::TunnelState;
 	using namespace ods::core;
 	using namespace ods::widgets;
@@ -243,17 +241,54 @@ namespace ods::ui {
 			return false;
 		}
 
-		// WebSocket 計測フローを開始する（計測済みチャンネルはスキップ）。
+		// WS 一括計測を開始する（計測済みチャンネルはスキップ）。
 		bool cb_flow_start(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
-			std::string sid = d->get_stream_id();
+			if (d->ws_any_measuring() || d->rtsp_e2e_measure.is_measuring())
+				return false;
+			const std::string sid = d->get_stream_id();
 			if (sid.empty()) return false;
 
-			int skip_ms[MAX_SUB_CH];
-			for (int i = 0; i < MAX_SUB_CH; ++i)
-				skip_ms[i] = d->delay.channels[i].ws_measured ? d->delay.channels[i].measured_ms : -1;
-			d->flow.start_ws_measurement(d->router, sid, skip_ms);
+			const int pings = d->ping_count_setting.load(std::memory_order_relaxed);
+
+			// 計測対象チャンネルを列挙
+			int measure_count = 0;
+			for (int i = 0; i < d->delay.sub_ch_count; ++i) {
+				if (d->router.client_count(i) > 0 && !d->delay.channels[i].ws_measured)
+					++measure_count;
+			}
+			if (measure_count == 0) return false;
+
+			// バッチ進捗を初期化
+			d->ws_batch_progress.reset();
+			d->ws_batch_progress.ping_total_count.store(
+				measure_count * pings,
+				std::memory_order_relaxed);
+
+			// ping 送信ごとにプログレスバーを直接更新
+			d->router.on_any_ping_sent = [d](const std::string &sid_cb, int, int) {
+				if (sid_cb != d->get_stream_id()) return;
+				const int sent  = d->ws_batch_progress.ping_sent_count.fetch_add(
+									  1,
+									  std::memory_order_relaxed) +
+								  1;
+				const int total = d->ws_batch_progress.ping_total_count.load(
+					std::memory_order_relaxed);
+				const int pct = (total > 0) ? (sent * 100 / total) : 0;
+				update_flow_progress(d->context, pct);
+			};
+
+			// 各チャンネルの計測を開始（スタガー配置）
+			int ch_index = 0;
+			for (int i = 0; i < d->delay.sub_ch_count; ++i) {
+				if (d->router.client_count(i) == 0 || d->delay.channels[i].ws_measured)
+					continue;
+				d->sub_channels[i].measure.start();
+				d->router.start_measurement(i, pings, PING_INTV_MS, ch_index * PING_INTV_MS);
+				++ch_index;
+			}
+			d->request_props_refresh_for_tabs({3, 5}, "cb_flow_start");
 			return false;
 		}
 
@@ -270,15 +305,20 @@ namespace ods::ui {
 			}
 			obs_source_update(d->context, s);
 			obs_data_release(s);
-			d->flow.reset();
+			for (int i = 0; i < MAX_SUB_CH; ++i)
+				d->sub_channels[i].measure.reset();
+			d->ws_batch_progress.reset();
 			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_clear_results");
 			return false;
 		}
 
-		// RTSP E2E 計測フローを開始する。
+		// RTSP E2E 計測を開始する。
 		bool cb_flow_start_rtsp_e2e(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d || !d->context) return false;
+			if (d->ws_any_measuring() || d->rtsp_e2e_measure.is_measuring())
+				return false;
+
 			obs_data_t *settings = obs_source_get_settings(d->context);
 			if (!settings) return false;
 			bool auto_mode = obs_data_get_bool(settings, "rtmp_url_auto");
@@ -302,7 +342,81 @@ namespace ods::ui {
 				ods::plugin::kFfmpegExePathModeKey,
 				ods::plugin::kFfmpegExePathKey);
 			obs_data_release(settings);
-			d->flow.start_rtsp_e2e_measurement(rtsp_url, ffmpeg_path, *d);
+
+			// バリデーション
+			std::string error_msg;
+			if (rtsp_url.empty()) {
+				error_msg = "RTSP URL が未設定です。";
+			} else if (!ods::plugin::is_obs_streaming_active()) {
+				error_msg = "OBS 配信が開始されていません。";
+			}
+			if (!error_msg.empty()) {
+				d->rtsp_e2e_measure.set_last_error(error_msg);
+				d->request_props_refresh_for_tabs({4}, "cb_flow_start_rtsp_e2e.error");
+				return false;
+			}
+
+			// 進捗を初期化
+			d->rtsp_e2e_measure.set_last_error("");
+			d->rtsp_e2e_measure.set_progress(0, RTSP_E2E_MEASURE_SETS_DEFAULT);
+			d->inject_impulse.store(false, std::memory_order_release);
+			d->rtsp_e2e_measure.set_cached_url(rtsp_url);
+
+			// prober コールバックを設定
+			auto &prober    = d->rtsp_e2e_measure.prober;
+			prober.on_ready = [d]() {
+				d->inject_impulse.store(true, std::memory_order_release);
+				d->rtsp_e2e_measure.prober.notify_impulse_sent(
+					std::chrono::steady_clock::now());
+			};
+			prober.on_progress = [d](int completed, int total) {
+				d->rtsp_e2e_measure.set_progress(completed, total);
+				const int pct = (total > 0) ? (completed * 100 / total) : 0;
+				update_flow_progress(d->context, pct);
+			};
+			prober.on_result = [d](ods::network::RtspE2eResult r) {
+				d->rtsp_e2e_measure.apply_result(r);
+				if (r.valid) {
+					// 計測結果を Model に反映し、UI スレッドで永続化する
+					d->delay.measured_rtsp_e2e_ms = static_cast<int>(std::lround(r.latency_ms));
+					d->delay.rtsp_e2e_measured    = true;
+					d->rtsp_e2e_measure.set_progress(
+						d->rtsp_e2e_measure.total_sets(),
+						d->rtsp_e2e_measure.total_sets());
+
+					// UI スレッドで OBS 設定を永続化してディレイ再計算
+					struct Ctx {
+						std::weak_ptr<std::atomic<bool>> life;
+						DelayStreamData                 *d;
+					};
+					auto c = std::make_unique<Ctx>(Ctx{d->life_token, d});
+					obs_queue_task(OBS_TASK_UI, [](void *p) {
+						auto ctx = std::unique_ptr<Ctx>(static_cast<Ctx *>(p));
+						auto life = ctx->life.lock();
+						if (!life || !life->load(std::memory_order_acquire)) return;
+						auto *dd = ctx->d;
+						obs_data_t *s = obs_source_get_settings(dd->context);
+						if (s) {
+							ods::model::SettingsRepo repo(s);
+							repo.set_measured_rtsp_e2e_ms(dd->delay.measured_rtsp_e2e_ms);
+							repo.set_rtsp_e2e_measured(dd->delay.rtsp_e2e_measured);
+							obs_source_update(dd->context, s);
+							obs_data_release(s);
+						}
+						ods::plugin::recalc_all_delays(dd);
+						dd->request_props_refresh_for_tabs({4, 5}, "rtsp_e2e.on_result.apply"); }, c.release(), false);
+				} else {
+					d->rtsp_e2e_measure.set_last_error(r.error_msg);
+					d->request_props_refresh_for_tabs({4}, "rtsp_e2e.on_result.error");
+				}
+			};
+
+			if (!prober.start(rtsp_url, ffmpeg_path)) {
+				d->rtsp_e2e_measure.set_last_error("RTSP E2E 計測の開始に失敗しました。");
+				d->request_props_refresh_for_tabs({4}, "cb_flow_start_rtsp_e2e.start_failed");
+				return false;
+			}
+			d->request_props_refresh_for_tabs({4}, "cb_flow_start_rtsp_e2e.started");
 			return false;
 		}
 
@@ -353,11 +467,14 @@ namespace ods::ui {
 			return false;
 		}
 
-		// SyncFlow を中断して状態を初期化する。
+		// 計測を中断して状態を初期化する。
 		bool cb_flow_reset(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *d = static_cast<DelayStreamData *>(priv);
 			if (!d) return false;
-			d->flow.reset();
+			for (int i = 0; i < MAX_SUB_CH; ++i)
+				d->sub_channels[i].measure.reset();
+			d->ws_batch_progress.reset();
+			d->rtsp_e2e_measure.cancel();
 			d->inject_impulse.store(false, std::memory_order_release);
 			d->request_props_refresh_for_tabs({3, 4, 5}, "cb_flow_reset");
 			return false;
@@ -430,29 +547,19 @@ namespace ods::ui {
 		void add_flow_rtsp_e2e_measure_section(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
 
-			const FlowPhase  phase                 = d->flow.phase();
-			const FlowResult res                   = d->flow.result();
-			const bool       is_rtsp_e2e_measuring = (phase == FlowPhase::RtspE2eMeasuring);
-			const bool       is_rtsp_e2e_done      = (phase == FlowPhase::RtspE2eDone);
-			const bool       has_rtsp_e2e_result =
-				(is_rtsp_e2e_done || phase == FlowPhase::Complete);
-			const bool obs_streaming = ods::plugin::is_obs_streaming_active();
-			const bool can_start_rtsp_e2e_measure =
-				obs_streaming &&
-				((phase == FlowPhase::Idle) ||
-				 (phase == FlowPhase::WsDone) ||
-				 (phase == FlowPhase::RtspE2eDone) ||
-				 (phase == FlowPhase::Complete));
+			const bool is_ws_measuring    = d->ws_any_measuring();
+			const bool is_rtsp_measuring  = d->rtsp_e2e_measure.is_measuring();
+			const bool obs_streaming      = ods::plugin::is_obs_streaming_active();
+			const bool can_start          = obs_streaming && !is_ws_measuring && !is_rtsp_measuring;
+			const bool rtsp_start_enabled = can_start;
+			const bool rtsp_stop_enabled  = is_rtsp_measuring;
 
-			const bool rtsp_start_enabled = (!is_rtsp_e2e_measuring && can_start_rtsp_e2e_measure);
-			const bool rtsp_stop_enabled  = is_rtsp_e2e_measuring;
-
-			// 開始・停止が両方無効のとき、ユーザに次のアクションを促すヒントを表示する。
 			// 計測完了状態ではヒントを出さない。
-			const bool  rtsp_done = (d->delay.rtsp_e2e_measured || has_rtsp_e2e_result);
-			const char *rtsp_hint = nullptr;
+			const auto  rtsp_result = d->rtsp_e2e_measure.result();
+			const bool  rtsp_done   = d->delay.rtsp_e2e_measured || rtsp_result.valid;
+			const char *rtsp_hint   = nullptr;
 			if (!rtsp_start_enabled && !rtsp_stop_enabled && !rtsp_done) {
-				if (phase == FlowPhase::WsMeasuring)
+				if (is_ws_measuring)
 					rtsp_hint = T_("RtspE2eHintWsMeasuring");
 				else if (!obs_streaming)
 					rtsp_hint = T_("RtspE2eHintStartStreaming");
@@ -494,20 +601,20 @@ namespace ods::ui {
 				int         pct = 0;
 				std::string bar_text_str;
 				const char *bar_text = T_("FlowNotMeasured");
-				if (is_rtsp_e2e_measuring) {
-					pct      = (res.rtsp_e2e_total_sets > 0)
-								   ? (res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets)
-								   : 0;
-					bar_text = T_("StatusMeasuring");
-				} else if (has_rtsp_e2e_result && res.rtsp_e2e_valid) {
+				if (is_rtsp_measuring) {
+					const int total     = d->rtsp_e2e_measure.total_sets();
+					const int completed = d->rtsp_e2e_measure.completed_sets();
+					pct                 = (total > 0) ? (completed * 100 / total) : 0;
+					bar_text            = T_("StatusMeasuring");
+				} else if (rtsp_result.valid) {
 					pct          = 100;
 					bar_text_str = string_printf(
 						T_("RtspE2eResultFmt"),
-						res.rtsp_e2e_latency_ms,
-						res.rtsp_e2e_min_latency_ms,
-						res.rtsp_e2e_max_latency_ms);
+						rtsp_result.latency_ms,
+						rtsp_result.min_latency_ms,
+						rtsp_result.max_latency_ms);
 					bar_text = bar_text_str.c_str();
-				} else if (has_rtsp_e2e_result && !res.rtsp_e2e_valid) {
+				} else if (!d->rtsp_e2e_measure.last_error().empty()) {
 					bar_text = T_("RtspE2eFailed");
 				} else if (d->delay.rtsp_e2e_measured) {
 					pct          = 100;
@@ -517,40 +624,25 @@ namespace ods::ui {
 				obs_properties_add_flow_progress(grp, "flow_s4_status", nullptr, pct, bar_text);
 			}
 
-			if (has_rtsp_e2e_result && !res.rtsp_e2e_valid && !res.rtsp_e2e_error.empty()) {
-				obs_properties_add_text(
-					grp,
-					"flow_s4_error_detail",
-					res.rtsp_e2e_error.c_str(),
-					OBS_TEXT_INFO);
+			{
+				const std::string err = d->rtsp_e2e_measure.last_error();
+				if (!err.empty()) {
+					obs_properties_add_text(
+						grp,
+						"flow_s4_error_detail",
+						err.c_str(),
+						OBS_TEXT_INFO);
+				}
 			}
 		}
 
-		// SyncFlow パネル全体（接続状況/操作/進捗）を構築する。
+		// WS 計測パネル全体（接続状況/操作/進捗）を構築する。
 		void build_flow_panel(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
-			FlowPhase  phase     = d->flow.phase();
-			FlowResult res       = d->flow.result();
-			int        sub_count = d->delay.sub_ch_count;
+			int sub_count = d->delay.sub_ch_count;
 
-			const bool is_complete       = (phase == FlowPhase::Complete);
-			const bool is_ws_measuring   = (phase == FlowPhase::WsMeasuring);
-			const bool is_ws_done        = (phase == FlowPhase::WsDone);
-			const bool is_rtsp_measuring = (phase == FlowPhase::RtspE2eMeasuring);
-			const bool is_rtsp_done      = (phase == FlowPhase::RtspE2eDone);
-			const bool is_ws_done_or_later =
-				is_ws_done || is_rtsp_measuring || is_rtsp_done || is_complete;
-
-			// SyncFlow 外の自動計測が進行中かチェック
-			bool any_auto_measuring = false;
-			if (!is_ws_measuring) {
-				for (int i = 0; i < sub_count; ++i) {
-					if (d->sub_channels[i].measure.is_measuring()) {
-						any_auto_measuring = true;
-						break;
-					}
-				}
-			}
+			const bool is_ws_measuring   = d->ws_any_measuring();
+			const bool is_rtsp_measuring = d->rtsp_e2e_measure.is_measuring();
 
 			obs_data_t *s               = obs_source_get_settings(d->context);
 			auto        format_sub_name = [s](int ch) -> std::string {
@@ -584,11 +676,7 @@ namespace ods::ui {
 				}
 			}
 
-			const bool can_start_ws =
-				(phase == FlowPhase::Idle) ||
-				(phase == FlowPhase::WsDone) ||
-				(phase == FlowPhase::RtspE2eDone) ||
-				(phase == FlowPhase::Complete);
+			const bool can_start_ws  = !is_ws_measuring && !is_rtsp_measuring;
 			const bool can_clear     = can_start_ws && has_any_ws_measured;
 			const bool start_enabled = (can_start_ws && measurable_count > 0);
 			const bool stop_enabled  = is_ws_measuring;
@@ -599,7 +687,7 @@ namespace ods::ui {
 			const bool  ws_all_done = (has_any_ws_measured && measurable_count == 0);
 			const char *ws_hint     = nullptr;
 			if (!start_enabled && !stop_enabled) {
-				if (phase == FlowPhase::RtspE2eMeasuring)
+				if (is_rtsp_measuring)
 					ws_hint = T_("FlowHintRtspMeasuring");
 				else if (!d->router_running.load())
 					ws_hint = T_("FlowHintStartWsServer");
@@ -650,28 +738,17 @@ namespace ods::ui {
 
 			obs_properties_add_bool(grp, "auto_measure", T_("AutoMeasure"));
 
-			// 保存済み計測結果の有無を判定する。
-			bool has_saved_ws = false;
-			if (!is_ws_measuring && !is_ws_done_or_later) {
-				for (int i = 0; i < sub_count; ++i) {
-					if (d->delay.channels[i].ws_measured) {
-						has_saved_ws = true;
-						break;
-					}
-				}
-			}
-
 			{
 				int         pct      = 0;
 				const char *bar_text = T_("FlowNotMeasured");
 				if (is_ws_measuring) {
-					pct      = (res.ping_total_count > 0)
-								   ? res.ping_sent_count * 100 / res.ping_total_count
-								   : 0;
+					const int total = d->ws_batch_progress.ping_total_count.load(
+						std::memory_order_relaxed);
+					const int sent = d->ws_batch_progress.ping_sent_count.load(
+						std::memory_order_relaxed);
+					pct      = (total > 0) ? (sent * 100 / total) : 0;
 					bar_text = T_("StatusMeasuring");
-				} else if (any_auto_measuring) {
-					bar_text = T_("StatusMeasuring");
-				} else if (is_ws_done_or_later || has_saved_ws) {
+				} else if (has_any_ws_measured) {
 					pct      = 100;
 					bar_text = T_("FlowMeasureDoneShort");
 				}
@@ -688,32 +765,15 @@ namespace ods::ui {
 				std::vector<std::string>          name_buf(sub_count);
 				std::vector<FlowTableChannelInfo> table_channels(sub_count);
 				for (int i = 0; i < sub_count; ++i) {
-					name_buf[i]    = format_sub_name(i);
-					auto &tc       = table_channels[i];
-					tc.name        = name_buf[i].c_str();
-					tc.connected   = (d->router.client_count(i) > 0);
-					tc.measured_ms = -1; // 未計測
-				}
-
-				// 計測中もスキップ済みチャンネルの結果を維持する
-				if (is_ws_done_or_later || is_ws_measuring) {
-					for (int i = 0; i < sub_count; ++i) {
-						if (!res.channels[i].connected) continue;
-						if (res.channels[i].measured)
-							table_channels[i].measured_ms = res.ch_measured_ms(i);
-						else if (is_ws_done_or_later)
-							table_channels[i].measured_ms = -2; // 失敗
-					}
-				} else if (has_saved_ws) {
-					for (int i = 0; i < sub_count; ++i) {
-						if (d->delay.channels[i].ws_measured)
-							table_channels[i].measured_ms = d->delay.channels[i].measured_ms;
-					}
-				}
-				// フロー結果で埋まらなかったチャンネルに保存済み計測値をフォールバック
-				for (int i = 0; i < sub_count; ++i) {
-					if (table_channels[i].measured_ms == -1 && d->delay.channels[i].ws_measured)
-						table_channels[i].measured_ms = d->delay.channels[i].measured_ms;
+					name_buf[i]  = format_sub_name(i);
+					auto &tc     = table_channels[i];
+					tc.name      = name_buf[i].c_str();
+					tc.connected = (d->router.client_count(i) > 0);
+					// 計測済みなら保存値を表示、未計測なら -1
+					if (d->delay.channels[i].ws_measured)
+						tc.measured_ms = d->delay.channels[i].measured_ms;
+					else
+						tc.measured_ms = -1;
 				}
 
 				FlowTableLabels tbl_labels{};
@@ -1220,8 +1280,7 @@ namespace ods::ui {
 				OBS_COMBO_FORMAT_INT);
 			obs_property_list_add_int(ping_count_p, T_("PingCountDefault"), 10);
 			obs_property_list_add_int(ping_count_p, T_("PingCountHigh"), 30);
-			const FlowPhase phase = d->flow.phase();
-			if (phase == FlowPhase::WsMeasuring || phase == FlowPhase::RtspE2eMeasuring) {
+			if (d->ws_any_measuring() || d->rtsp_e2e_measure.is_measuring()) {
 				obs_property_set_enabled(ping_count_p, false);
 			}
 		}

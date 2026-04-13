@@ -67,8 +67,6 @@ using ods::plugin::make_sub_measured_key;
 using ods::plugin::DelayStreamData;
 using ods::plugin::UpdateCheckStatus;
 using ods::plugin::SubChannelCtx;
-using ods::sync::FlowResult;
-using ods::sync::FlowPhase;
 using ods::network::LatencyResult;
 using namespace ods::core;
 using namespace ods::widgets;
@@ -163,7 +161,7 @@ void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
 				return;
 			}
 			int pings = d->ping_count_setting.load(std::memory_order_relaxed);
-			// SyncFlow 非経由の自動計測では on_any_ping_sent でプログレスバーを直接更新する
+			// 自動計測では on_any_ping_sent でプログレスバーを直接更新する
 			d->router.on_any_ping_sent = [d, pings](const std::string &sid, int, int seq) {
 				if (sid != d->get_stream_id()) return;
 				int pct = (pings > 0) ? ((seq + 1) * 100 / pings) : 0;
@@ -356,46 +354,6 @@ void on_frontend_event(int event, void *private_data) {
 
 // 各コンポーネントのイベントコールバックを登録する。
 void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
-	d->flow.on_update = [d]() {
-		d->request_props_refresh_for_tabs({3, 4}, "flow.on_update");
-	};
-	d->flow.on_progress = [d]() {
-		const FlowResult res   = d->flow.result();
-		const FlowPhase  phase = d->flow.phase();
-		int              pct   = 0;
-		if (phase == FlowPhase::WsMeasuring) {
-			pct = res.ping_total_count > 0
-					  ? res.ping_sent_count * 100 / res.ping_total_count
-					  : 0;
-		} else if (phase == FlowPhase::RtspE2eMeasuring || phase == FlowPhase::RtspE2eDone) {
-			pct = res.rtsp_e2e_total_sets > 0
-					  ? res.rtsp_e2e_completed_sets * 100 / res.rtsp_e2e_total_sets
-					  : 0;
-		}
-		update_flow_progress(d->context, pct);
-	};
-	d->flow.on_ch_measured = [d](int, LatencyResult) {
-		d->request_props_refresh_for_tabs({3}, "flow.on_ch_measured");
-	};
-	d->flow.on_rtsp_e2e_measured = [d](int rtsp_e2e_ms) {
-		queue_ui_safe(d, [rtsp_e2e_ms](DelayStreamData *d) {
-			d->delay.measured_rtsp_e2e_ms = rtsp_e2e_ms;
-			d->delay.rtsp_e2e_measured    = true;
-			save_measurement_and_recalc(d);
-			d->request_props_refresh_for_tabs({4, 5}, "flow.on_rtsp_e2e_measured");
-		});
-	};
-	d->flow.on_ws_measured = [d](const FlowResult &res) {
-		queue_ui_safe(d, [res](DelayStreamData *d) {
-			for (int i = 0; i < MAX_SUB_CH; ++i) {
-				if (!res.channels[i].measured) continue;
-				d->delay.channels[i].measured_ms = res.ch_measured_ms(i);
-				d->delay.channels[i].ws_measured = true;
-			}
-			save_measurement_and_recalc(d);
-			d->request_props_refresh_for_tabs({3, 5}, "flow.on_ws_measured");
-		});
-	};
 	d->tunnel.on_url_ready = [d](const std::string &) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		d->request_props_refresh_for_tabs({2}, "tunnel.on_url_ready");
@@ -431,8 +389,6 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	d->router.on_any_latency_result = [d](const std::string &sid, int ch, LatencyResult r) {
 		if (sid != d->get_stream_id()) return;
 		if (ch < 0 || ch >= MAX_SUB_CH) return;
-		// SyncFlow 計測中は SyncFlow 側のコールバックに任せる
-		if (d->flow.phase() == FlowPhase::WsMeasuring) return;
 		d->sub_channels[ch].measure.set_result(r, r.valid ? "" : T_("MeasureFailed"));
 		if (r.valid) {
 			queue_ui_safe(d, [ch, ms_val = static_cast<int>(std::lround(r.avg_latency_ms))](DelayStreamData *d) {
@@ -451,15 +407,10 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 // 全コンポーネントのイベントコールバックを解除する。
 void DelayStreamFilter::clear_event_callbacks(DelayStreamData *d) {
 	ods::plugin::remove_obs_frontend_event_callback(on_frontend_event, d);
-	d->flow.on_update            = nullptr;
-	d->flow.on_progress          = nullptr;
-	d->flow.on_ch_measured       = nullptr;
-	d->flow.on_rtsp_e2e_measured = nullptr;
-	d->flow.on_ws_measured       = nullptr;
-	d->tunnel.on_url_ready       = nullptr;
-	d->tunnel.on_error           = nullptr;
-	d->tunnel.on_stopped         = nullptr;
-	d->tunnel.on_download_state  = nullptr;
+	d->tunnel.on_url_ready      = nullptr;
+	d->tunnel.on_error          = nullptr;
+	d->tunnel.on_stopped        = nullptr;
+	d->tunnel.on_download_state = nullptr;
 	d->router.clear_callbacks();
 }
 
@@ -543,7 +494,7 @@ void DelayStreamFilter::destroy(void *data) {
 	obs_source_t *my_source              = d->context;
 	uint64_t      my_gen                 = d->singleton_generation;
 	if (!d->is_duplicate_instance) {
-		d->flow.reset();
+		d->rtsp_e2e_measure.cancel();
 		d->tunnel.stop();
 		d->router.stop();
 		clear_event_callbacks(d.get());

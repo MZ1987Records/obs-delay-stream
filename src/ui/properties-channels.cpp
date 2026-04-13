@@ -52,8 +52,6 @@ namespace ods::ui::channels {
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_add sub_ch_count %d -> %d", cur, next);
 			d->delay.sub_ch_count = next;
 			d->router.set_active_channels(next);
-			d->flow.set_active_channels(next);
-			d->flow.reset();
 			d->request_props_refresh("cb_sub_add");
 			return false;
 		}
@@ -91,8 +89,6 @@ namespace ods::ui::channels {
 
 			d->delay.sub_ch_count = next;
 			d->router.set_active_channels(next);
-			d->flow.set_active_channels(next);
-			d->flow.reset();
 			d->request_props_refresh("cb_sub_remove");
 			return false;
 		}
@@ -124,7 +120,6 @@ namespace ods::ui::channels {
 			d->sub_channels[ch].measure.reset();
 
 			blog(LOG_INFO, "[obs-delay-stream] cb_sub_swap_up ch=%d <-> ch=%d", ch + 1, prev + 1);
-			d->flow.reset();
 			d->request_props_refresh("cb_sub_swap_up");
 			return false;
 		}

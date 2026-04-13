@@ -88,7 +88,6 @@ add_library(obs-delay-stream MODULE
   src/network/rtmp-prober.cpp
   src/network/rtsp-e2e-prober.cpp
   src/tunnel/tunnel-manager.cpp
-  src/sync/sync-flow.cpp
 )
 
 # ---- Build receiver assets with npm ----

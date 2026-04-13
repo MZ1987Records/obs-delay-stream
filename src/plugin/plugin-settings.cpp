@@ -210,8 +210,6 @@ namespace ods::plugin {
 				}
 				data_->delay.sub_ch_count = clamped;
 				data_->router.set_active_channels(clamped);
-				data_->flow.set_active_channels(clamped);
-				if (changed) data_->flow.reset();
 			}
 
 			// 音声コーデック関連設定を正規化して router へ適用する。
@@ -387,7 +385,6 @@ namespace ods::plugin {
 					obs_data_set_int(settings_, "ping_count", pc);
 				}
 				data_->ping_count_setting.store(pc, std::memory_order_relaxed);
-				data_->flow.set_ping_count(pc);
 			}
 		};
 
