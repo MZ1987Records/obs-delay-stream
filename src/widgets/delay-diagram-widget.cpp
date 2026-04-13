@@ -618,41 +618,8 @@ namespace ods::widgets {
 				vlay->setSpacing(0);
 				vlay->addWidget(new DelayDiagramWidget(data, container));
 
-				// ヘルプボックス（左ボーダーアクセント付きコールアウト）
-				if (!data.help_text.isEmpty()) {
-					auto *help = new QLabel(data.help_text, container);
-					help->setTextFormat(Qt::RichText);
-					help->setWordWrap(true);
-					QFont hf = container->font();
-					hf.setPixelSize(11);
-					help->setFont(hf);
-
-					const QPalette pal    = container->palette();
-					const QColor   accent = pal.color(QPalette::Highlight);
-					const QColor   base   = pal.color(QPalette::Window);
-					const QColor   bg(
-						base.red() + (accent.red() - base.red()) * 10 / 100,
-						base.green() + (accent.green() - base.green()) * 10 / 100,
-						base.blue() + (accent.blue() - base.blue()) * 10 / 100);
-					QColor border = accent;
-					border.setAlpha(160);
-					QColor fg = pal.color(QPalette::Text);
-					fg.setAlpha(190);
-
-					help->setStyleSheet(
-						QStringLiteral(
-							"QLabel {"
-							" background-color: %1;"
-							" border: none;"
-							" border-left: 3px solid %2;"
-							" padding: 6px 10px;"
-							" color: %3;"
-							"}")
-							.arg(bg.name(QColor::HexArgb),
-								 border.name(QColor::HexArgb),
-								 fg.name(QColor::HexArgb)));
-					vlay->addWidget(help);
-				}
+				if (!data.help_text.isEmpty())
+					vlay->addWidget(create_help_callout(data.help_text, container));
 
 				form->removeRow(row);
 				form->insertRow(row, container);

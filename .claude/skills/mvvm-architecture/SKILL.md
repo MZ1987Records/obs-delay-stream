@@ -70,8 +70,8 @@ OBS はダイアログ構築時にも modified callback を呼ぶ。その時点
 | タブ | 常に必要 | タブ固有 |
 |---|---|---|
 | 0 (出演者名) | color_button_row | text_button |
-| 1 (WS配信) | color_button_row | pulldown_row, stepper |
-| 2 (URL共有) | color_button_row | text_button, path_mode_row, url_table |
+| 1 (WS配信) | color_button_row | pulldown_row, stepper, help_callout |
+| 2 (URL共有) | color_button_row | text_button, path_mode_row, url_table, help_callout |
 | 3 (WS計測) | color_button_row | flow_progress |
 | 4 (RTSP計測) | color_button_row | flow_progress, path_mode_row, mode_text_row |
 | 5 (遅延) | color_button_row | stepper, delay_diagram, delay_table |

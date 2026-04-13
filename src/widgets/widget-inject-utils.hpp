@@ -105,4 +105,40 @@ namespace ods::widgets {
 		}
 	}
 
+	/// テーマ追従する左ボーダー付きヘルプコールアウト QLabel を生成する。
+	inline QLabel *create_help_callout(const QString &text, QWidget *parent) {
+		auto *help = new QLabel(text, parent);
+		help->setTextFormat(Qt::RichText);
+		help->setWordWrap(true);
+		QFont hf = parent->font();
+		hf.setPixelSize(11);
+		help->setFont(hf);
+
+		const QPalette pal    = parent->palette();
+		const QColor   accent = pal.color(QPalette::Highlight);
+		const QColor   base   = pal.color(QPalette::Window);
+		const QColor   bg(
+			base.red() + (accent.red() - base.red()) * 10 / 100,
+			base.green() + (accent.green() - base.green()) * 10 / 100,
+			base.blue() + (accent.blue() - base.blue()) * 10 / 100);
+		QColor border = accent;
+		border.setAlpha(160);
+		QColor fg = pal.color(QPalette::Text);
+		fg.setAlpha(190);
+
+		help->setStyleSheet(
+			QStringLiteral(
+				"QLabel {"
+				" background-color: %1;"
+				" border: none;"
+				" border-left: 3px solid %2;"
+				" padding: 6px 10px;"
+				" color: %3;"
+				"}")
+				.arg(bg.name(QColor::HexArgb),
+					 border.name(QColor::HexArgb),
+					 fg.name(QColor::HexArgb)));
+		return help;
+	}
+
 } // namespace ods::widgets

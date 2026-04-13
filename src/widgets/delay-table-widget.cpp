@@ -353,42 +353,8 @@ namespace ods::widgets {
 
 				vlay->addWidget(editor_row, 0, Qt::AlignLeft | Qt::AlignTop);
 
-				// ヘルプボックス（左ボーダーアクセント付きコールアウト）
-				if (!help_text.isEmpty()) {
-					auto *help = new QLabel(help_text, this);
-					help->setTextFormat(Qt::RichText);
-					help->setWordWrap(true);
-					QFont hf = font();
-					hf.setPixelSize(11);
-					help->setFont(hf);
-
-					const QPalette pal    = palette();
-					const QColor   accent = pal.color(QPalette::Highlight);
-					const QColor   base   = pal.color(QPalette::Window);
-					// アクセントを 10% ブレンドした背景色
-					const QColor bg(
-						base.red() + (accent.red() - base.red()) * 10 / 100,
-						base.green() + (accent.green() - base.green()) * 10 / 100,
-						base.blue() + (accent.blue() - base.blue()) * 10 / 100);
-					QColor border = accent;
-					border.setAlpha(160);
-					QColor fg = pal.color(QPalette::Text);
-					fg.setAlpha(190);
-
-					help->setStyleSheet(
-						QStringLiteral(
-							"QLabel {"
-							" background-color: %1;"
-							" border: none;"
-							" border-left: 3px solid %2;"
-							" padding: 6px 10px;"
-							" color: %3;"
-							"}")
-							.arg(bg.name(QColor::HexArgb),
-								 border.name(QColor::HexArgb),
-								 fg.name(QColor::HexArgb)));
-					vlay->addWidget(help);
-				}
+				if (!help_text.isEmpty())
+					vlay->addWidget(create_help_callout(help_text, this));
 
 				connect(spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &DelayTableWidget::onValueChanged);
 

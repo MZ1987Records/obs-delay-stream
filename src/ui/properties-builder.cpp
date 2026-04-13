@@ -13,6 +13,7 @@
 #include "widgets/color-buttons-widget.hpp"
 #include "widgets/delay-table-widget.hpp"
 #include "widgets/flow-progress-widget.hpp"
+#include "widgets/help-callout-widget.hpp"
 #include "widgets/flow-table-widget.hpp"
 #include "widgets/mode-text-row-widget.hpp"
 #include "widgets/path-mode-row-widget.hpp"
@@ -1090,12 +1091,7 @@ namespace ods::ui {
 			ws_running ? T_("StatusRunning") : T_("StatusStopped"));
 		const std::string ws_firewall_note =
 			string_printf(T_("WsFirewallNoteFmt"), ws_port);
-		obs_property_t *fw_note_p = obs_properties_add_text(
-			grp,
-			"ws_firewall_note",
-			ws_firewall_note.c_str(),
-			OBS_TEXT_INFO);
-		obs_property_text_set_info_word_wrap(fw_note_p, false);
+		obs_properties_add_help_callout(grp, "ws_firewall_note", ws_firewall_note.c_str());
 
 		obs_property_t *send_p = obs_properties_add_bool(grp, "ws_send_paused", T_("WsSendPause"));
 		if (!ws_running) {
@@ -1207,17 +1203,7 @@ namespace ods::ui {
 			const std::string eb = string_printf(T_("TunnelErrorFmt"), terr.c_str());
 			obs_properties_add_text(grp, "tunnel_error", eb.c_str(), OBS_TEXT_INFO);
 		}
-		{
-			const std::string help_html = string_printf(
-				"<table cellspacing='0' cellpadding='6'><tr>"
-				"<td width='3' bgcolor='#5599cc'></td>"
-				"<td><font color='#888888'>%s</font></td>"
-				"</tr></table>",
-				T_("TunnelDomainHelpText"));
-			obs_property_t *tunnel_help_p =
-				obs_properties_add_text(grp, "tunnel_domain_help", help_html.c_str(), OBS_TEXT_INFO);
-			obs_property_text_set_info_word_wrap(tunnel_help_p, true);
-		}
+		obs_properties_add_help_callout(grp, "tunnel_domain_help", T_("TunnelDomainHelpText"));
 
 		obs_properties_add_group(props, "grp_tunnel", T_("TunnelGroupTitle"), OBS_GROUP_NORMAL, grp);
 	}
