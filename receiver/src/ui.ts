@@ -483,7 +483,7 @@ function renderTimingDiagram(r: TimingDiagramMessage): void {
     // 累積 ms からセグメント境界を算出し、全レーンの右端を揃える
     let cumMs = 0;
     let x = MARGIN_L + leftPadMs * scale;
-    let bufRightX = -1;
+    let hearX = -1;
     for (const seg of lane.segments) {
       if (seg.ms <= 0) continue;
       cumMs += seg.ms;
@@ -509,13 +509,13 @@ function renderTimingDiagram(r: TimingDiagramMessage): void {
         segLabel.textContent = String(Math.round(seg.ms));
         svg.appendChild(segLabel);
       }
+      if (seg.color === DIAGRAM_COLORS.avatar) hearX = x;
       x += w;
-      if (seg.color === DIAGRAM_COLORS.buf) bufRightX = x;
     }
-    // 再生バッファ右端に ▼ マーカー（出演者が音を聴くタイミング）
-    if (li === 0 && bufRightX >= 0) {
+    // 環境遅延右端に ▼ マーカー（出演者が音を聴くタイミング）
+    if (li === 0 && hearX >= 0) {
       const marker = ce('text', {
-        x: bufRightX,
+        x: hearX,
         y: y + 5,
         'text-anchor': 'middle',
         'font-size': '10px',

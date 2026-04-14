@@ -363,7 +363,7 @@ namespace ods::widgets {
 				}
 			}
 
-			// レーン 1 本の描画。is_channel == true のときは再生バッファ右端に ▼ マーカーを描く。
+			// レーン 1 本の描画。is_channel == true のときは環境遅延右端に ▼ マーカーを描く。
 			void drawLane(QPainter &p, const Lane &lane, int y, int maxMs, double scale, bool is_channel = false) const {
 				// レーンラベル
 				{
@@ -383,10 +383,10 @@ namespace ods::widgets {
 				const int totalMs   = lane.total_ms();
 				const int leftPadMs = maxMs - totalMs;
 
-				int   cumMs     = 0;
-				int   x         = kMarginL + static_cast<int>(leftPadMs * scale);
-				int   bufRightX = -1;
-				QFont segFont   = font();
+				int   cumMs   = 0;
+				int   x       = kMarginL + static_cast<int>(leftPadMs * scale);
+				int   hearX   = -1;
+				QFont segFont = font();
 				segFont.setPixelSize(10);
 
 				for (const auto &seg : lane.segments) {
@@ -414,19 +414,19 @@ namespace ods::widgets {
 								   QString::number(seg.ms));
 					}
 
-					x += w;
+					if (seg.color.rgb() == colorAvatar().rgb())
+						hearX = x;
 
-					if (seg.color.rgb() == colorBuf().rgb())
-						bufRightX = x;
+					x += w;
 				}
 
-				// 再生バッファ右端に ▼ マーカー（出演者が音を聴くタイミング）
-				if (is_channel && bufRightX >= 0) {
+				// 環境遅延右端に ▼ マーカー（出演者が音を聴くタイミング）
+				if (is_channel && hearX >= 0) {
 					QFont markerFont = font();
 					markerFont.setPixelSize(10);
 					p.setFont(markerFont);
 					p.setPen(QColor(239, 68, 68));
-					p.drawText(QRect(bufRightX - 6, y - 6, 12, 12),
+					p.drawText(QRect(hearX - 6, y - 6, 12, 12),
 							   int(Qt::AlignCenter),
 							   QStringLiteral("\u25BC"));
 				}
