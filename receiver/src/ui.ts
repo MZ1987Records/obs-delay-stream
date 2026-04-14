@@ -376,18 +376,18 @@ function renderDiagramLegend(legend: HTMLElement): void {
       ),
     );
   }
-  legend.appendChild(
-    h('div', { class: 'legend-item' },
-      h('span', { style: 'color:#ef4444; font-size:12px; margin-right:2px' }, '\u25BC'),
-      t('diagram.listenTiming'),
-    ),
-  );
   legend.appendChild(h('div', { class: 'legend-break' }));
   legend.appendChild(
     h('div', { class: 'legend-item' },
       h('span', { class: 'legend-swatch', style: `background:${DIAGRAM_COLORS.delay}` }),
       h('strong', null, t('diagram.delay')),
       ` ${t('diagram.delayDesc')}`,
+    ),
+  );
+  legend.appendChild(
+    h('div', { class: 'legend-item' },
+      h('span', { style: 'color:#ef4444; font-size:12px; margin-right:2px' }, '\u25BC'),
+      t('diagram.listenTiming'),
     ),
   );
 }
