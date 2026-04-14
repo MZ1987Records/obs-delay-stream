@@ -14,7 +14,7 @@ namespace ods::core {
 	static constexpr float MAX_DELAY_MS               = 10000.0f; ///< ディレイバッファの上限 (ms)
 	static constexpr int   PLAYBACK_BUFFER_MIN_MS     = 20;       ///< 再生バッファの最小値 (ms)
 	static constexpr int   PLAYBACK_BUFFER_MAX_MS     = 500;      ///< 再生バッファの最大値 (ms)
-	static constexpr int   PLAYBACK_BUFFER_DEFAULT_MS = 120;      ///< 再生バッファのデフォルト値 (ms)
+	static constexpr int   PLAYBACK_BUFFER_DEFAULT_MS = 100;      ///< 再生バッファのデフォルト値 (ms)
 
 	// WebSocket レイテンシ計測パラメータ
 	static constexpr int DEFAULT_PING_COUNT    = 10;   ///< 1 回の計測で送信する ping 数（デフォルト精度）

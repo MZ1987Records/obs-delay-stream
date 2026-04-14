@@ -1,5 +1,5 @@
 /** 再生バッファの先読み秒数（ホスト未接続/未通知時のデフォルト） */
-export const PLAYBACK_BUFFER_DEFAULT_MS = 120;
+export const PLAYBACK_BUFFER_DEFAULT_MS = 100;
 export const PLAYBACK_BUFFER_DEFAULT = PLAYBACK_BUFFER_DEFAULT_MS / 1000;
 export const PLAYBACK_BUFFER_MIN_MS = 20;
 export const PLAYBACK_BUFFER_MAX_MS = 500;
