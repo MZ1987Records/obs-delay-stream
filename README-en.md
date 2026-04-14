@@ -1,4 +1,4 @@
-# obs-delay-stream  v5.0.1
+# obs-delay-stream  v7.1.0
 
 **VRChat Dancer/Music Performer Support Tool [obs-delay-stream]**
 
@@ -14,32 +14,31 @@
   <img src="receiver/images/obs-delay-stream-logo.svg" alt="obs-delay-stream logo" width="400">
 </p>
 
-An OBS plugin that automatically measures and resolves sync drift between dancers and between dancer/world music — using only OBS and Google Chrome. It adds a WebSocket audio streaming feature to OBS for performers.
-Supports up to 20 simultaneous dancer/performer connections.
+An OBS plugin that automatically measures and resolves sync drift between dancers and between dancer/world music — using only OBS and Google Chrome. It adds WebSocket audio streaming to OBS for performers.
+Supports up to 20 simultaneous performer connections.
 
 Each performer's individual delay is automatically measured, and a time-corrected audio stream is delivered to their Google Chrome browser for perfectly synchronized playback.
-Also includes delay-sync adjustment for audio streamed to the VRChat world.
+Also supports OBS broadcast (RTSP E2E) latency measurement for synchronization with audio streamed to the VRChat world.
 Built-in IP-hiding tunnel support.
 
 - No SYNCROOM or DAW required.
-- Dancers/performers simply open the receiver URL (provided by the streamer) in Google Chrome to receive low-latency, synchronized audio.
+- Performers simply open the receiver URL (provided by the streamer) in Google Chrome to receive low-latency, synchronized audio.
 - Does not affect the VRChat client.
-- The receiver page supports volume control, re-sync / auto re-sync, and JP/EN language display.
+- The receiver page supports volume control, re-sync / auto re-sync, spectrum meter, and JP/EN language display.
 
 ---
 
-## Settings Overview
+## Settings Tabs
 
-| Section | Description |
+| Tab | Description |
 |------|------|
-| Per-Performer Channel Settings | Manage each performer's name. In advanced edit mode, you can adjust individual sync settings. |
-| Stream ID / IP | Stream ID and host IP are configured automatically. In advanced mode, you can set the host IP manually. |
-| WebSocket | Configure audio codec, start/stop the streaming server, and control transmission. |
+| Performer Names | Manage each performer's name. Add, remove, and reorder channels. |
 | Tunnel | Generate a public URL via cloudflared. Share externally without exposing your IP directly. |
-| URL Distribution | Copy all performer URLs at once. Reduces the hassle and risk of distribution errors. |
-| Sync Flow | Measure and apply delays for performers and RTMP in two steps. Follow the on-screen guide to align overall timing. |
-| Master / RTMP | Manually adjust master delay and apply RTMP measurement results. Fine-tune drift including the streaming path. |
-| Global Offset | Add a common offset to all channels. Correct any remaining perceived timing difference across the board. |
+| WS Streaming | Configure audio codec (Opus / PCM), start/stop the WebSocket server, and control transmission. |
+| URL Sharing | View and copy all performer URLs at once. Reduces the hassle and risk of distribution errors. |
+| WS Measurement | Auto-measure WebSocket delivery latency for all connected performers. Also supports auto-measurement on performer connect. |
+| RTSP Measurement | Measure OBS broadcast (RTSP E2E) latency. Choose between Silent and Mix measurement modes. |
+| Fine Tune | Per-channel environment latency settings and overall delay diagram. Also configure estimated avatar latency here. |
 
 ---
 
@@ -89,8 +88,8 @@ C:\Program Files\obs-studio\data\obs-plugins\
 ### Initial Setup
 
 1. Open the filter panel.
-2. Enter each performer's name under **Per-Performer Channel Settings**.
-3. Click the **Start WebSocket Server** button.
+2. Enter each performer's name under the **Performer Names** tab.
+3. Go to the **WS Streaming** tab and click **Start WebSocket Server**.
 
 ### Using the Tunnel (IP Hiding — Recommended)
 
@@ -106,14 +105,15 @@ The auto-downloaded exe is saved to:
 
 ### Sharing Connection Info with Performers
 
-Click the **Copy All Performer URLs** button and paste into Discord or similar. Have each performer open their corresponding URL.
+In the **URL Sharing** tab, click **Copy performer URL list** and paste into Discord or similar. Have each performer open their corresponding URL in Google Chrome.
 
-### Sync Flow (Recommended Procedure)
+### Latency Measurement (Recommended Procedure)
 
 1. Confirm that all performers are connected to the receiver page.
-2. Click the **Start Sync Flow** button.
-3. Step 1: After automatic measurement completes, confirm that the base delay for each channel has been applied automatically.
-4. Step 2: After RTMP measurement completes, review the master delay and click **Apply and Finish**.
+2. In the **WS Measurement** tab, measure all connected channels (auto-measurement on connect is also available).
+3. After measurement completes, base delays are automatically applied to each channel.
+4. In the **RTSP Measurement** tab, measure OBS broadcast latency (start OBS streaming beforehand).
+5. If needed, use the **Fine Tune** tab to adjust environment latency and avatar latency.
 
 ---
 

@@ -59,6 +59,7 @@ description: |
 |---------|---------|
 | `CMakeLists.txt` | `project(obs-delay-stream VERSION X.Y.Z)` |
 | `README.md` | 1行目のタイトル `# obs-delay-stream  vX.Y.Z` |
+| `README-en.md` | 1行目のタイトル `# obs-delay-stream  vX.Y.Z` |
 | `CHANGELOG.md` | 先頭に新バージョンのセクションを追加（日本語、既存フォーマットに合わせる） |
 
 **CHANGELOG のフォーマット:**
@@ -75,7 +76,7 @@ description: |
 ### 4. コミット
 
 ```
-git add CMakeLists.txt README.md CHANGELOG.md
+git add CMakeLists.txt README.md README-en.md CHANGELOG.md
 git commit -m "Release vX.Y.Z"
 ```
 
