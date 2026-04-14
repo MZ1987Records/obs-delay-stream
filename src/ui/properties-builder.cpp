@@ -1153,6 +1153,29 @@ namespace ods::ui {
 				obs_properties_add_text(grp, "plugin_status_info", "", OBS_TEXT_INFO);
 			obs_property_set_long_description(status_p, status_html.c_str());
 			obs_property_text_set_info_word_wrap(status_p, false);
+
+			// トンネル割当ドメイン
+			{
+				std::string turl   = d->tunnel.url();
+				std::string domain = extract_host_from_url(turl);
+				const char *domain_text;
+				if (d->tunnel.cloudflared_downloading() ||
+					d->manual_cloudflared_download_running.load(std::memory_order_acquire)) {
+					domain_text = T_("CloudflaredDownloading");
+				} else if (ts_plugin == TunnelState::Starting) {
+					domain_text = T_("TunnelStarting");
+				} else if (!domain.empty()) {
+					domain_text = domain.c_str();
+				} else {
+					domain_text = T_("TunnelUnassignedDomain");
+				}
+				std::string tunnel_domain_html = string_printf(
+					"<b>%s</b>: %s", T_("PluginTunnelDomainLabel"), domain_text);
+				obs_property_t *tdom_p = obs_properties_add_text(
+					grp, "plugin_tunnel_domain_info", "", OBS_TEXT_INFO);
+				obs_property_set_long_description(tdom_p, tunnel_domain_html.c_str());
+				obs_property_text_set_info_word_wrap(tdom_p, false);
+			}
 		}
 
 		obs_properties_add_group(props, "grp_plugin", T_("Plugin"), OBS_GROUP_NORMAL, grp);
