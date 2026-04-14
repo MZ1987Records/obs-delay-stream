@@ -376,6 +376,12 @@ function renderDiagramLegend(legend: HTMLElement): void {
       ),
     );
   }
+  legend.appendChild(
+    h('div', { class: 'legend-item' },
+      h('span', { style: 'color:#ef4444; font-size:12px; margin-right:2px' }, '\u25BC'),
+      t('diagram.listenTiming'),
+    ),
+  );
   legend.appendChild(h('div', { class: 'legend-break' }));
   legend.appendChild(
     h('div', { class: 'legend-item' },
@@ -463,7 +469,7 @@ function renderTimingDiagram(r: TimingDiagramMessage): void {
   lanes.forEach((lane, li) => {
     const y = MARGIN_T + li * (LANE_H + LANE_GAP);
     const totalMs = laneTotal(lane.segments);
-    const laneOffset = (maxMs - totalMs) * scale;
+    const leftPadMs = maxMs - totalMs;
 
     const laneLabel = ce('text', {
       x: MARGIN_L - 8,
@@ -474,10 +480,15 @@ function renderTimingDiagram(r: TimingDiagramMessage): void {
     laneLabel.textContent = lane.label;
     svg.appendChild(laneLabel);
 
-    let x = MARGIN_L + laneOffset;
+    // 累積 ms からセグメント境界を算出し、全レーンの右端を揃える
+    let cumMs = 0;
+    let x = MARGIN_L + leftPadMs * scale;
+    let bufRightX = -1;
     for (const seg of lane.segments) {
       if (seg.ms <= 0) continue;
-      const w = Math.max(MIN_SEG_W, seg.ms * scale);
+      cumMs += seg.ms;
+      const nextX = MARGIN_L + (leftPadMs + cumMs) * scale;
+      const w = Math.max(MIN_SEG_W, nextX - x);
       svg.appendChild(ce('rect', {
         x,
         y,
@@ -499,6 +510,19 @@ function renderTimingDiagram(r: TimingDiagramMessage): void {
         svg.appendChild(segLabel);
       }
       x += w;
+      if (seg.color === DIAGRAM_COLORS.buf) bufRightX = x;
+    }
+    // 再生バッファ右端に ▼ マーカー（出演者が音を聴くタイミング）
+    if (li === 0 && bufRightX >= 0) {
+      const marker = ce('text', {
+        x: bufRightX,
+        y: y + 5,
+        'text-anchor': 'middle',
+        'font-size': '10px',
+        fill: '#ef4444',
+      });
+      marker.textContent = '\u25BC';
+      svg.appendChild(marker);
     }
   });
 

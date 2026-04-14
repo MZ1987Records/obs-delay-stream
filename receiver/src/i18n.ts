@@ -72,6 +72,7 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         broadcast: 'OBS配信遅延',
         laneYou: 'あなた',
         laneBroadcast: '配信',
+        listenTiming: '出演者が聴くタイミング',
         noData: '計測データなし',
         noDataRtsp: 'OBS配信遅延が未計測です',
         noDataWs: 'WS配信遅延が未計測です'
@@ -161,6 +162,7 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         broadcast: 'OBS Broadcast Latency',
         laneYou: 'You',
         laneBroadcast: 'Broadcast',
+        listenTiming: 'Performer listen timing',
         noData: 'No measurement data',
         noDataRtsp: 'OBS streaming latency is not measured',
         noDataWs: 'WS streaming latency is not measured'

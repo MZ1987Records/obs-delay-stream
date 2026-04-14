@@ -56,18 +56,19 @@ namespace ods::ui::delay {
 		}
 
 		DelayDiagramLabels labels;
-		labels.legend_delay      = T_("DiagramDelay");
-		labels.legend_delay_desc = T_("DiagramDelayAutoCalcDesc");
-		labels.legend_ws         = T_("DiagramWsLatency");
-		labels.legend_env        = T_("DiagramEnvLatency");
-		labels.legend_buf        = T_("DiagramPlaybackBuf");
-		labels.legend_avatar     = T_("DiagramAvatarLatency");
-		labels.legend_broadcast  = T_("DiagramBroadcastLatency");
-		labels.lane_broadcast    = T_("DiagramLaneBroadcast");
-		labels.no_data           = T_("DiagramNoData");
-		labels.no_data_rtsp      = T_("DiagramNoDataRtsp");
-		labels.no_data_ws        = T_("DiagramNoDataWs");
-		labels.help_text         = T_("DiagramHelpText");
+		labels.legend_delay         = T_("DiagramDelay");
+		labels.legend_delay_desc    = T_("DiagramDelayAutoCalcDesc");
+		labels.legend_ws            = T_("DiagramWsLatency");
+		labels.legend_env           = T_("DiagramEnvLatency");
+		labels.legend_buf           = T_("DiagramPlaybackBuf");
+		labels.legend_avatar        = T_("DiagramAvatarLatency");
+		labels.legend_broadcast     = T_("DiagramBroadcastLatency");
+		labels.lane_broadcast       = T_("DiagramLaneBroadcast");
+		labels.no_data              = T_("DiagramNoData");
+		labels.no_data_rtsp         = T_("DiagramNoDataRtsp");
+		labels.no_data_ws           = T_("DiagramNoDataWs");
+		labels.legend_listen_timing = T_("DiagramListenTiming");
+		labels.help_text            = T_("DiagramHelpText");
 		obs_properties_add_delay_diagram(grp, "delay_diagram", info, labels);
 
 		obs_properties_add_group(
