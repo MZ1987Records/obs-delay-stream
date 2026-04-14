@@ -747,20 +747,34 @@ namespace ods::network {
 			return;
 		}
 
-		ConnChangeCallback    cb;
-		size_t                count = 0;
-		LatencyResult         cached_result;
-		double                cached_delay = -1.0;
-		int                   pb_ms        = playback_buffer_ms_.load(std::memory_order_relaxed);
-		std::string           cached_delay_reason;
-		TimingDiagramSnapshot cached_timing_diagram;
-		bool                  has_cached_timing_diagram = false;
-		std::string           memo;
+		ConnChangeCallback            cb;
+		size_t                        count = 0;
+		LatencyResult                 cached_result;
+		double                        cached_delay = -1.0;
+		int                           pb_ms        = playback_buffer_ms_.load(std::memory_order_relaxed);
+		std::string                   cached_delay_reason;
+		TimingDiagramSnapshot         cached_timing_diagram;
+		bool                          has_cached_timing_diagram = false;
+		std::string                   memo;
+		std::vector<ConnectionHandle> to_evict;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
-			conn_map_[h] = {sid, ch};
 			auto  key    = make_key(sid, ch);
 			auto &cs     = ch_map_[key];
+
+			// 同一チャンネルの既存接続を退去させる（単一クライアント制限）
+			if (!cs.conns.empty()) {
+				to_evict.assign(cs.conns.begin(), cs.conns.end());
+				for (auto &old_h : to_evict)
+					conn_map_.erase(old_h);
+				cs.conns.clear();
+				if (cs.measuring) {
+					cs.measuring = false;
+					cs.ping_times.clear();
+					cs.rtt_samples.clear();
+				}
+			}
+
 			if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
 				auto it = ch_cache_.find(key);
 				if (it != ch_cache_.end()) {
@@ -771,6 +785,7 @@ namespace ods::network {
 					cs.has_timing_diagram  = it->second.has_timing_diagram;
 				}
 			}
+			conn_map_[h] = {sid, ch};
 			cs.conns.insert(h);
 			count                     = cs.conns.size();
 			cb                        = on_conn_change;
@@ -780,6 +795,13 @@ namespace ods::network {
 			cached_timing_diagram     = cs.last_timing_diagram;
 			has_cached_timing_diagram = cs.has_timing_diagram;
 			if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
+		}
+		// ロック外で古い接続を切断（on_close は conn_map_ に不在のため no-op）
+		for (auto &old_h : to_evict) {
+			try {
+				srv->close(old_h, websocketpp::close::status::policy_violation, "replaced");
+			} catch (...) {
+			}
 		}
 		if (cb) cb(sid, ch, count);
 
