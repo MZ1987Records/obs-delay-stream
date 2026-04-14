@@ -1102,6 +1102,16 @@ namespace ods::ui {
 		}
 
 		if (!d->is_warning_only_instance()) {
+			// RTSP 計測中の警告（計測モードに応じたテキスト）
+			if (d->rtsp_e2e_measure.is_measuring()) {
+				const bool  probe_mute = d->probe_mute_active.load(std::memory_order_acquire);
+				const char *warn_text  = probe_mute ? T_("RtspMeasureWarnMute")
+				                                    : T_("RtspMeasureWarnMix");
+				obs_property_t *rtsp_warn_p = obs_properties_add_text(
+					grp, "rtsp_measure_warning", warn_text, OBS_TEXT_INFO);
+				obs_property_text_set_info_word_wrap(rtsp_warn_p, true);
+			}
+
 			const bool  ws_on     = d->router_running.load();
 			const bool  ws_paused = !d->ws_send_enabled.load();
 			const bool  ws_no_dly = !d->enabled.load();
