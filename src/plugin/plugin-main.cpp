@@ -428,11 +428,16 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 			d->ch_connected_at_ms[ch].store(0, std::memory_order_relaxed);
 		}
 		d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY}, "router.on_conn_change");
-		// 自動計測: 接続かつ未計測かつ有効のときスケジュール
-		if (count > 0 && d->auto_measure_enabled.load() &&
-			d->layout.is_active(ch) &&
-			!d->delay.channels[ch].ws_measured) {
-			schedule_auto_measure(d, ch);
+		if (count > 0) {
+			if (d->delay.channels[ch].ws_measured) {
+				// 計測済みチャンネル: タイミング図キャッシュを最新化して送信する
+				queue_ui_safe(d, [](DelayStreamData *dd) {
+					recalc_all_delays(dd);
+				});
+			} else if (d->auto_measure_enabled.load() && d->layout.is_active(ch)) {
+				// 未計測チャンネル: 自動計測をスケジュール
+				schedule_auto_measure(d, ch);
+			}
 		}
 	};
 	d->router.on_any_latency_result = [d](const std::string &sid, int ch, LatencyResult r) {

@@ -149,6 +149,7 @@ namespace ods::ui {
 			int ws_port = d->ws_port.load(std::memory_order_relaxed);
 			if (d->router.start((uint16_t)ws_port)) {
 				d->router_running.store(true);
+				ods::plugin::recalc_all_delays(d);
 				blog(LOG_INFO, "[obs-delay-stream] WebSocket server started on port %d", ws_port);
 			} else {
 				blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", ws_port);
@@ -167,6 +168,7 @@ namespace ods::ui {
 				int ws_port = d->ws_port.load(std::memory_order_relaxed);
 				if (d->router.start(static_cast<uint16_t>(ws_port))) {
 					d->router_running.store(true);
+					ods::plugin::recalc_all_delays(d);
 					blog(LOG_INFO, "[obs-delay-stream] WebSocket server started on port %d (start+next)", ws_port);
 				} else {
 					blog(LOG_ERROR, "[obs-delay-stream] WebSocket server FAILED to start on port %d", ws_port);
