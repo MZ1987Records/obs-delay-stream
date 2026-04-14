@@ -58,6 +58,7 @@ namespace ods::plugin {
 	}
 
 	// DelaySnapshot を計算し、結果を各 DelayBuffer へ適用する。
+	// 計測済みチャンネルのタイミング図もレシーバーへ再送信する。
 	void recalc_all_delays(DelayStreamData *d) {
 		if (!d) return;
 		const auto &lo    = d->layout;
@@ -82,6 +83,24 @@ namespace ods::plugin {
 		}
 
 		d->master_buf.set_delay_ms(static_cast<uint32_t>(snap.master_delay_ms));
+
+		// タイミング図を全計測済みチャンネルの接続先へ再送信する
+		if (d->router_running.load(std::memory_order_relaxed)) {
+			for (int di = 0; di < count; ++di) {
+				const core::Slot slot = order[di];
+				if (!d->delay.channels[slot].ws_measured) continue;
+				d->router.notify_timing_diagram(
+					slot,
+					d->delay.measured_rtsp_e2e_ms,
+					d->delay.avatar_latency_ms,
+					d->delay.playback_buffer_ms,
+					snap.master_delay_ms,
+					static_cast<float>(d->delay.channels[slot].measured_ms),
+					snap.channels[slot].total_ms,
+					d->delay.channels[slot].offset_ms,
+					snap.channels[slot].provisional);
+			}
+		}
 	}
 
 	namespace {
@@ -553,12 +572,18 @@ namespace ods::plugin {
 		private:
 
 			// UI 制御用の active_tab を正規化して保持する。
+			// create 完了前（OBS 再起動直後の初回ロード）は保存値を無視し、
+			// 出演者名タブをアクティブにする。
 			void apply_active_tab() {
-				int active_tab = static_cast<int>(obs_data_get_int(settings_, "active_tab"));
-				if (active_tab < 0 || active_tab >= 6) {
-					active_tab = 0;
-					obs_data_set_int(settings_, "active_tab", active_tab);
+				int active_tab;
+				if (!data_->create_done.load(std::memory_order_relaxed)) {
+					active_tab = TAB_PERFORMER_NAMES;
+				} else {
+					active_tab = static_cast<int>(obs_data_get_int(settings_, "active_tab"));
+					if (active_tab < 0 || active_tab >= TAB_COUNT)
+						active_tab = TAB_PERFORMER_NAMES;
 				}
+				obs_data_set_int(settings_, "active_tab", active_tab);
 				data_->set_active_tab(active_tab);
 			}
 
@@ -582,8 +607,11 @@ namespace ods::plugin {
 				data_->enabled.store(!delay_disable);
 				bool paused = obs_data_get_bool(settings_, "ws_send_paused");
 				data_->ws_send_enabled.store(!paused);
-				data_->auto_measure_enabled.store(
-					obs_data_get_bool(settings_, "auto_measure"));
+				bool new_auto = obs_data_get_bool(settings_, "auto_measure");
+				bool old_auto = data_->auto_measure_enabled.exchange(new_auto);
+				// OFF→ON 切り替え時: 接続済みかつ未計測のチャンネルを即座にスキャン
+				if (new_auto && !old_auto && data_->trigger_auto_measure_scan)
+					data_->trigger_auto_measure_scan();
 			}
 
 			// 表示順テーブルを復元してルーターのアクティブスロットへ反映する。
@@ -922,7 +950,7 @@ namespace ods::plugin {
 		}
 
 		const int active_tab = static_cast<int>(obs_data_get_int(settings, "active_tab"));
-		if (active_tab < 0 || active_tab >= 6) {
+		if (active_tab < 0 || active_tab >= TAB_COUNT) {
 			return fail_with_reason(reason, "active_tab out of range");
 		}
 

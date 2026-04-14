@@ -37,6 +37,7 @@
 #include <QApplication>
 #include <QTimer>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -138,7 +139,16 @@ void DelayStreamFilter::queue_ui_safe(DelayStreamData                       *d,
 					c->fn(c->d); }, c.release(), false);
 }
 
+// steady_clock の現在時刻をミリ秒整数で返す。
+static int64_t steady_now_ms() {
+	return std::chrono::duration_cast<std::chrono::milliseconds>(
+			   DelayStreamData::SteadyClock::now().time_since_epoch())
+		.count();
+}
+
 // 接続後の安定化待機を経てチャンネル単位の自動計測を開始する。
+// 接続確立時刻 (ch_connected_at_ms) から AUTO_MEASURE_DELAY_MS が
+// 経過済みなら即座に開始し、未経過なら残り時間だけスリープする。
 // life_token でフィルタ破棄後の実行を防ぐ。
 void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
 	bool expected = false;
@@ -147,8 +157,13 @@ void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
 	auto life = std::weak_ptr<std::atomic<bool>>(d->life_token);
 	try {
 		std::thread([d, ch, life]() {
-			std::this_thread::sleep_for(
-				std::chrono::milliseconds(AUTO_MEASURE_DELAY_MS));
+			// 接続確立からの経過時間を見て、安定化待機の残り分だけスリープ
+			int64_t connected_at = d->ch_connected_at_ms[ch].load(std::memory_order_relaxed);
+			int64_t remaining_ms = AUTO_MEASURE_DELAY_MS;
+			if (connected_at > 0)
+				remaining_ms = std::max<int64_t>(0, AUTO_MEASURE_DELAY_MS - (steady_now_ms() - connected_at));
+			if (remaining_ms > 0)
+				std::this_thread::sleep_for(std::chrono::milliseconds(remaining_ms));
 			auto token = life.lock();
 			if (!token || !token->load(std::memory_order_acquire)) {
 				d->auto_measure_pending[ch].store(false);
@@ -400,10 +415,21 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 	};
 	d->router.on_conn_change = [d](const std::string &sid, int ch, size_t count) {
 		if (sid != d->get_stream_id()) return;
+		if (ch < 0 || ch >= MAX_SUB_CH) return;
+		// 初回接続時刻を記録（切断時はクリア）
+		if (count > 0) {
+			int64_t expected = 0;
+			d->ch_connected_at_ms[ch].compare_exchange_strong(
+				expected,
+				steady_now_ms(),
+				std::memory_order_relaxed);
+		} else {
+			d->ch_connected_at_ms[ch].store(0, std::memory_order_relaxed);
+		}
 		d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY}, "router.on_conn_change");
 		// 自動計測: 接続かつ未計測かつ有効のときスケジュール
 		if (count > 0 && d->auto_measure_enabled.load() &&
-			ch >= 0 && ch < MAX_SUB_CH && d->layout.is_active(ch) &&
+			d->layout.is_active(ch) &&
 			!d->delay.channels[ch].ws_measured) {
 			schedule_auto_measure(d, ch);
 		}
@@ -416,11 +442,28 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 			queue_ui_safe(d, [ch, ms_val = static_cast<int>(std::lround(r.avg_latency_ms))](DelayStreamData *d) {
 				d->delay.channels[ch].measured_ms = ms_val;
 				d->delay.channels[ch].ws_measured = true;
+				// recalc_all_delays 内で全計測済みチャンネルのタイミング図も再送信される
 				save_measurement_and_recalc(d);
 				d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "router.on_any_latency_result.apply");
 			});
 		} else {
 			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "router.on_any_latency_result.invalid");
+		}
+	};
+	// 接続済み未計測チャンネルをスキャンして自動計測をスケジュールする。
+	// auto_measure チェックボックスの ON 切り替え時やリセット後に呼ばれる。
+	d->trigger_auto_measure_scan = [d]() {
+		if (!d->auto_measure_enabled.load()) return;
+		if (!d->router_running.load()) return;
+		const int n_ch = d->layout.count.load(std::memory_order_relaxed);
+		for (int di = 0; di < n_ch; ++di) {
+			const int ch = d->layout.display_order[di];
+			if (ch >= 0 && ch < MAX_SUB_CH &&
+				d->layout.is_active(ch) &&
+				d->router.client_count(ch) > 0 &&
+				!d->delay.channels[ch].ws_measured) {
+				schedule_auto_measure(d, ch);
+			}
 		}
 	};
 	ods::plugin::add_obs_frontend_event_callback(on_frontend_event, d);
@@ -429,10 +472,11 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 // 全コンポーネントのイベントコールバックを解除する。
 void DelayStreamFilter::clear_event_callbacks(DelayStreamData *d) {
 	ods::plugin::remove_obs_frontend_event_callback(on_frontend_event, d);
-	d->tunnel.on_url_ready      = nullptr;
-	d->tunnel.on_error          = nullptr;
-	d->tunnel.on_stopped        = nullptr;
-	d->tunnel.on_download_state = nullptr;
+	d->tunnel.on_url_ready       = nullptr;
+	d->tunnel.on_error           = nullptr;
+	d->tunnel.on_stopped         = nullptr;
+	d->tunnel.on_download_state  = nullptr;
+	d->trigger_auto_measure_scan = nullptr;
 	d->router.clear_callbacks();
 }
 

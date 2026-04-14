@@ -13,7 +13,7 @@ import {
   latencyCard,
   latencyContent,
   sidInput,
-  chInput,
+  codeInput,
   urlPreview,
   browserWarningBlock,
   connectBtn,
@@ -26,7 +26,7 @@ import {
 import { t, tr } from './i18n';
 import { getOptionalElement, h } from './dom';
 import type {
-  LatencyResultMessage,
+  TimingDiagramMessage,
   ShebangParams,
   StatusClass,
 } from './types';
@@ -147,6 +147,7 @@ export function applyUrlParams(): void {
   }
   if (code) {
     state.channelCode = code;
+    codeInput.value = code;
   }
   if (sid && code) fetchMemoPreview(sid, code);
 }
@@ -205,9 +206,6 @@ export function fetchMemoPreview(sid: string, code: string): void {
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
       if (!data || !isMemoResponse(data)) return;
-      if (typeof data.ch === 'number' && Number.isFinite(data.ch)) {
-        chInput.value = String(data.ch);
-      }
       if (memoEl && typeof data.memo === 'string') {
         updateMemoDisplay(memoEl, data.memo);
       }
@@ -242,7 +240,7 @@ export function clearConnectTimer(): void {
 }
 
 export function setInputsEnabled(_enabled: boolean): void {
-  // sidInput/chInput は常に読み取り専用（URLから取得・サーバから受信）
+  // sidInput/codeInput は常に読み取り専用（URLから取得・サーバから受信）
 }
 
 export function setMeterOffline(offline: boolean): void {
@@ -264,7 +262,264 @@ export function setDisconnectedUi(): void {
 // レイテンシ計測UI
 // ============================================================
 
+type DiagramSegment = {
+  ms: number;
+  color: string;
+};
+
+type DiagramLane = {
+  label: string;
+  segments: DiagramSegment[];
+};
+
+const DIAGRAM_COLORS = {
+  delay: '#ef4444',
+  ws: '#2563eb',
+  buf: '#4b5563',
+  env: '#8b5cf6',
+  avatar: '#f59e0b',
+  broadcast: '#14b8a6',
+} as const;
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const LANE_H = 18;
+const LANE_GAP = 10;
+const MARGIN_L = 56;
+const MARGIN_R = 14;
+const RULER_TOP = 6;
+const RULER_H = 20;
+const RULER_MARGIN_BOTTOM = 8;
+const MARGIN_T = RULER_TOP + RULER_H + RULER_MARGIN_BOTTOM;
+const MARGIN_B = 6;
+const MIN_SEG_W = 3;
+
+let lastTimingDiagram: TimingDiagramMessage | null = null;
+let timingDiagramResizeBound = false;
+
+function ce<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  attrs: Record<string, string | number>,
+): SVGElementTagNameMap[K] {
+  const el = document.createElementNS(SVG_NS, tag) as SVGElementTagNameMap[K];
+  for (const [k, v] of Object.entries(attrs)) {
+    el.setAttribute(k, String(v));
+  }
+  return el;
+}
+
+function laneTotal(segments: DiagramSegment[]): number {
+  return segments.reduce((sum, seg) => sum + Math.max(0, seg.ms), 0);
+}
+
+function getChannelLaneLabel(): string {
+  return t('diagram.laneYou');
+}
+
+function buildChannelLane(r: TimingDiagramMessage): DiagramLane {
+  const c = Math.round(r.ch_measured_ms);
+  const segments =
+    r.ch_offset_ms >= 0
+      ? [
+        { ms: r.ch_total_ms, color: DIAGRAM_COLORS.delay },
+        { ms: c, color: DIAGRAM_COLORS.ws },
+        { ms: r.buf, color: DIAGRAM_COLORS.buf },
+        { ms: r.ch_offset_ms, color: DIAGRAM_COLORS.env },
+        { ms: r.A, color: DIAGRAM_COLORS.avatar },
+      ]
+      : [
+        { ms: r.ch_total_ms, color: DIAGRAM_COLORS.delay },
+        { ms: c + r.ch_offset_ms, color: DIAGRAM_COLORS.ws },
+        { ms: r.buf, color: DIAGRAM_COLORS.buf },
+        { ms: r.A, color: DIAGRAM_COLORS.avatar },
+      ];
+  return {
+    label: getChannelLaneLabel(),
+    segments,
+  };
+}
+
+function buildBroadcastLane(r: TimingDiagramMessage): DiagramLane {
+  return {
+    label: t('diagram.laneBroadcast'),
+    segments: [
+      { ms: r.master_delay, color: DIAGRAM_COLORS.delay },
+      { ms: r.R, color: DIAGRAM_COLORS.broadcast },
+    ],
+  };
+}
+
+function renderNoDataDiagram(lines: string[]): void {
+  latencyContent.textContent = '';
+  const noData = h('div', { class: 'timing-diagram-no-data' });
+  for (const line of lines) {
+    noData.appendChild(h('p', null, line));
+  }
+  latencyContent.appendChild(
+    h('div', { class: 'timing-diagram-wrap' }, noData),
+  );
+}
+
+function renderDiagramLegend(legend: HTMLElement): void {
+  legend.textContent = '';
+  const row1 = [
+    { color: DIAGRAM_COLORS.ws, label: t('diagram.ws') },
+    { color: DIAGRAM_COLORS.buf, label: t('diagram.buf') },
+    { color: DIAGRAM_COLORS.env, label: t('diagram.env') },
+    { color: DIAGRAM_COLORS.avatar, label: t('diagram.avatar') },
+    { color: DIAGRAM_COLORS.broadcast, label: t('diagram.broadcast') },
+  ];
+  for (const item of row1) {
+    legend.appendChild(
+      h('div', { class: 'legend-item' },
+        h('span', { class: 'legend-swatch', style: `background:${item.color}` }),
+        item.label,
+      ),
+    );
+  }
+  legend.appendChild(h('div', { class: 'legend-break' }));
+  legend.appendChild(
+    h('div', { class: 'legend-item' },
+      h('span', { class: 'legend-swatch', style: `background:${DIAGRAM_COLORS.delay}` }),
+      h('strong', null, t('diagram.delay')),
+      ` ${t('diagram.delayDesc')}`,
+    ),
+  );
+}
+
+function renderTimingDiagram(r: TimingDiagramMessage): void {
+  if (r.ch_measured_ms < 0) {
+    renderNoDataDiagram([t('diagram.noDataWs')]);
+    return;
+  }
+
+  const lanes: DiagramLane[] = [
+    buildChannelLane(r),
+    buildBroadcastLane(r),
+  ];
+
+  latencyContent.textContent = '';
+  const wrap = h('div', { class: 'timing-diagram-wrap' });
+  const svg = ce('svg', { width: '100%', role: 'img' });
+  const legend = h('div', { class: 'legend' });
+  wrap.append(svg, legend);
+  latencyContent.appendChild(wrap);
+
+  const containerW = Math.max(
+    320,
+    Math.round(wrap.clientWidth || latencyContent.clientWidth || 640),
+  );
+  const usableW = Math.max(1, containerW - MARGIN_L - MARGIN_R);
+  let maxMs = 0;
+  for (const lane of lanes) {
+    maxMs = Math.max(maxMs, laneTotal(lane.segments));
+  }
+  if (maxMs <= 0) {
+    renderNoDataDiagram([t('diagram.noData')]);
+    return;
+  }
+  const scale = usableW / maxMs;
+
+  const totalH = MARGIN_T + lanes.length * (LANE_H + LANE_GAP) + MARGIN_B;
+  svg.setAttribute('height', String(totalH));
+  svg.setAttribute('viewBox', `0 0 ${containerW} ${totalH}`);
+  svg.innerHTML = '';
+
+  const baseY = RULER_TOP + RULER_H;
+  svg.appendChild(ce('line', {
+    x1: MARGIN_L,
+    y1: baseY,
+    x2: MARGIN_L + maxMs * scale,
+    y2: baseY,
+    stroke: '#4a5568',
+    'stroke-width': 1,
+  }));
+
+  const rawStep = maxMs / 8;
+  const mag = Math.pow(10, Math.floor(Math.log10(Math.max(rawStep, 1))));
+  const niceMul = [1, 2, 5, 10].find((n) => n * mag >= rawStep) ?? 10;
+  const step = Math.max(1, Math.round(niceMul * mag));
+  const tickH = 5;
+  for (let ms = 0; ms <= maxMs; ms += step) {
+    const x = MARGIN_L + ms * scale;
+    svg.appendChild(ce('line', {
+      x1: x,
+      y1: baseY - tickH,
+      x2: x,
+      y2: baseY,
+      stroke: '#4a5568',
+      'stroke-width': 1,
+    }));
+    const label = ce('text', {
+      x,
+      y: baseY - tickH - 3,
+      'text-anchor': 'middle',
+      'font-size': '9px',
+      fill: '#6b7280',
+    });
+    label.textContent = ms === 0 ? '0 ms' : String(ms);
+    svg.appendChild(label);
+  }
+
+  lanes.forEach((lane, li) => {
+    const y = MARGIN_T + li * (LANE_H + LANE_GAP);
+    const totalMs = laneTotal(lane.segments);
+    const laneOffset = (maxMs - totalMs) * scale;
+
+    const laneLabel = ce('text', {
+      x: MARGIN_L - 8,
+      y: y + LANE_H / 2 + 4,
+      'text-anchor': 'end',
+      class: 'lane-label',
+    });
+    laneLabel.textContent = lane.label;
+    svg.appendChild(laneLabel);
+
+    let x = MARGIN_L + laneOffset;
+    for (const seg of lane.segments) {
+      if (seg.ms <= 0) continue;
+      const w = Math.max(MIN_SEG_W, seg.ms * scale);
+      svg.appendChild(ce('rect', {
+        x,
+        y,
+        width: w,
+        height: LANE_H,
+        fill: seg.color,
+        stroke: 'rgba(255,255,255,0.08)',
+        'stroke-width': 0.5,
+      }));
+      if (w > 24) {
+        const segLabel = ce('text', {
+          x: x + w / 2,
+          y: y + LANE_H / 2,
+          'text-anchor': 'middle',
+          'dominant-baseline': 'central',
+          class: 'segment-label',
+        });
+        segLabel.textContent = String(Math.round(seg.ms));
+        svg.appendChild(segLabel);
+      }
+      x += w;
+    }
+  });
+
+  renderDiagramLegend(legend);
+}
+
+function bindTimingDiagramResize(): void {
+  if (timingDiagramResizeBound) return;
+  timingDiagramResizeBound = true;
+  let rafId = 0;
+  window.addEventListener('resize', () => {
+    if (!lastTimingDiagram) return;
+    cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      if (lastTimingDiagram) renderTimingDiagram(lastTimingDiagram);
+    });
+  });
+}
+
 export function showMeasuring(n: number): void {
+  lastTimingDiagram = null;
   const statusMsg = tr(
     'status.measuring',
     { current: n, total: state.pingTotal },
@@ -295,81 +550,12 @@ export function showMeasuring(n: number): void {
   );
 }
 
-export function showLatencyResult(r: LatencyResultMessage): void {
+export function showTimingDiagram(r: TimingDiagramMessage): void {
+  bindTimingDiagramResize();
+  lastTimingDiagram = r;
   setStatus(t('status.receiving'), 'ok');
-  const colCls =
-    r.avg_rtt < 50
-      ? 'has-text-success'
-      : r.avg_rtt < 150
-        ? 'has-text-warning'
-        : 'has-text-danger';
-  const lbl =
-    r.avg_rtt < 50
-      ? tr('quality.good', {}, '良好', 'Good')
-      : r.avg_rtt < 150
-        ? tr('quality.normal', {}, '普通', 'Normal')
-        : tr('quality.high', {}, '高遅延', 'High latency');
-  const estimatedOneWay = tr(
-    'latency.estimatedOneWay',
-    {},
-    '推定片道レイテンシ (RTT÷2)',
-    'Estimated one-way latency (RTT/2)',
-  );
-  const avgRoundTrip = tr(
-    'latency.averageRoundTrip',
-    { label: lbl },
-    '平均往復レイテンシ ({{label}})',
-    'Average round-trip latency ({{label}})',
-  );
-  const minRtt = tr('latency.minRtt', {}, '最小RTT', 'Min RTT');
-  const maxRtt = tr('latency.maxRtt', {}, '最大RTT', 'Max RTT');
-  const waitingApply = tr(
-    'latency.waitingApply',
-    {},
-    'OBSが遅延設定を反映するまでお待ちください。',
-    'Please wait while OBS applies delay settings.',
-  );
-  const metricCell = (
-    val: string, unit: string, label: string, valAttrs: Record<string, string>,
-  ): HTMLElement =>
-    h('div', { class: 'metric has-text-centered' },
-      h('span', valAttrs, val),
-      h('span', { class: 'unit has-text-grey' }, unit),
-      h('div', { class: 'lbl has-text-grey' }, label),
-    );
-
-  const grid = h('div', { class: 'latency-grid' },
-    metricCell(r.one_way.toFixed(1), 'ms', estimatedOneWay, { class: `val ${colCls}` }),
-    metricCell(r.avg_rtt.toFixed(1), 'ms RTT', avgRoundTrip, { class: `val ${colCls}` }),
-    metricCell(r.min.toFixed(1), 'ms', minRtt, { class: 'val', style: 'color:#888' }),
-    metricCell(r.max.toFixed(1), 'ms', maxRtt, { class: 'val', style: 'color:#888' }),
-  );
-
-  latencyContent.textContent = '';
-  latencyContent.append(
-    grid,
-    h('div', { class: 'notification is-info py-3 px-4 mt-3', id: 'waitingApply' },
-      h('i', { class: 'fas fa-info-circle mr-1' }),
-      waitingApply,
-    ),
-  );
+  renderTimingDiagram(r);
   latencyCard.classList.add('has-background-info-light');
-}
-
-export function showApplied(ms: number | string): void {
-  document.getElementById('waitingApply')?.remove();
-  document.getElementById('appliedDelayNote')?.remove();
-  const msText = `${Number.parseFloat(String(ms)).toFixed(1)} ms`;
-  const prefix = tr('latency.appliedPrefix', {}, 'OBSがチャンネル遅延を ', 'OBS auto-set channel delay to ');
-  const suffix = tr('latency.appliedSuffix', {}, ' に自動設定しました', '');
-  latencyContent.appendChild(
-    h('div', { class: 'notification is-success py-3 px-4 mt-3', id: 'appliedDelayNote' },
-      h('i', { class: 'fas fa-check-circle mr-1' }),
-      prefix,
-      h('strong', null, msText),
-      suffix,
-    ),
-  );
 }
 
 // ============================================================

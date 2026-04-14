@@ -81,15 +81,17 @@ namespace ods::network {
 		}
 		if (thread_.joinable()) thread_.join();
 
-		// 4. 計測結果・適用ディレイをキャッシュに退避してから状態をクリア
+		// 4. 計測結果・適用ディレイ・タイミング図をキャッシュに退避してから状態をクリア
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			for (auto &[key, cs] : ch_map_) {
-				if (cs.last_result.valid || cs.last_applied_delay >= 0.0)
+				if (cs.last_result.valid || cs.last_applied_delay >= 0.0 || cs.has_timing_diagram)
 					ch_cache_[key] = {
 						cs.last_result,
 						cs.last_applied_delay,
-						cs.last_applied_reason};
+						cs.last_applied_reason,
+						cs.last_timing_diagram,
+						cs.has_timing_diagram};
 			}
 			conn_map_.clear();
 			ch_map_.clear();
@@ -384,6 +386,26 @@ namespace ods::network {
 			"{\"type\":\"apply_delay\",\"ms\":%d,\"reason\":\"%s\"}",
 			rounded_ms,
 			reason_escaped.c_str());
+		broadcast_text(stream_id_, ch, msg);
+	}
+
+	void StreamRouter::notify_timing_diagram(int   ch,
+											 int   R,
+											 int   A,
+											 int   buf,
+											 int   master_delay,
+											 float ch_measured_ms,
+											 int   ch_total_ms,
+											 int   ch_offset_ms,
+											 bool  ch_provisional) {
+		const TimingDiagramSnapshot snap{R, A, buf, master_delay, ch_measured_ms, ch_total_ms, ch_offset_ms, ch_provisional};
+		const std::string           msg = format_timing_diagram_json(snap);
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			auto                       &cs = ch_map_[make_key(stream_id_, ch)];
+			cs.last_timing_diagram         = snap;
+			cs.has_timing_diagram          = true;
+		}
 		broadcast_text(stream_id_, ch, msg);
 	}
 
@@ -725,13 +747,15 @@ namespace ods::network {
 			return;
 		}
 
-		ConnChangeCallback cb;
-		size_t             count = 0;
-		LatencyResult      cached_result;
-		double             cached_delay = -1.0;
-		int                pb_ms        = playback_buffer_ms_.load(std::memory_order_relaxed);
-		std::string        cached_delay_reason;
-		std::string        memo;
+		ConnChangeCallback    cb;
+		size_t                count = 0;
+		LatencyResult         cached_result;
+		double                cached_delay = -1.0;
+		int                   pb_ms        = playback_buffer_ms_.load(std::memory_order_relaxed);
+		std::string           cached_delay_reason;
+		TimingDiagramSnapshot cached_timing_diagram;
+		bool                  has_cached_timing_diagram = false;
+		std::string           memo;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
 			conn_map_[h] = {sid, ch};
@@ -743,19 +767,23 @@ namespace ods::network {
 					cs.last_result         = it->second.last_result;
 					cs.last_applied_delay  = it->second.last_applied_delay;
 					cs.last_applied_reason = it->second.last_applied_reason;
+					cs.last_timing_diagram = it->second.last_timing_diagram;
+					cs.has_timing_diagram  = it->second.has_timing_diagram;
 				}
 			}
 			cs.conns.insert(h);
-			count               = cs.conns.size();
-			cb                  = on_conn_change;
-			cached_result       = cs.last_result;
-			cached_delay        = cs.last_applied_delay;
-			cached_delay_reason = cs.last_applied_reason;
+			count                     = cs.conns.size();
+			cb                        = on_conn_change;
+			cached_result             = cs.last_result;
+			cached_delay              = cs.last_applied_delay;
+			cached_delay_reason       = cs.last_applied_reason;
+			cached_timing_diagram     = cs.last_timing_diagram;
+			has_cached_timing_diagram = cs.has_timing_diagram;
 			if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
 		}
 		if (cb) cb(sid, ch, count);
 
-		std::string info = "{\"type\":\"session_info\",\"stream_id\":\"" + sid + "\",\"ch\":" + std::to_string(ch + 1) + ",\"code\":\"" + json_escape(code) + "\"";
+		std::string info = "{\"type\":\"session_info\",\"stream_id\":\"" + sid + "\",\"code\":\"" + json_escape(code) + "\"";
 		if (!memo.empty()) info += ",\"memo\":\"" + json_escape(memo) + "\"";
 		info += "}";
 		try {
@@ -784,6 +812,12 @@ namespace ods::network {
 				reason_escaped.c_str());
 			try {
 				srv->send(h, msg, websocketpp::frame::opcode::text);
+			} catch (...) {
+			}
+		}
+		if (has_cached_timing_diagram) {
+			try {
+				srv->send(h, format_timing_diagram_json(cached_timing_diagram), websocketpp::frame::opcode::text);
 			} catch (...) {
 			}
 		}
@@ -975,7 +1009,7 @@ namespace ods::network {
 					return;
 				}
 
-				std::string resp = "{\"ok\":true,\"stream_id\":\"" + current_sid + "\",\"ch\":" + std::to_string(ch + 1) + ",\"code\":\"" + json_escape(code) + "\",\"memo\":\"" + json_escape(memo) + "\"}";
+				std::string resp = "{\"ok\":true,\"stream_id\":\"" + current_sid + "\",\"code\":\"" + json_escape(code) + "\",\"memo\":\"" + json_escape(memo) + "\"}";
 				con->set_status(websocketpp::http::status_code::ok);
 				con->replace_header("Content-Type", "application/json; charset=utf-8");
 				con->replace_header("Cache-Control", "no-store");
@@ -1155,6 +1189,28 @@ namespace ods::network {
 		}
 		if (cb) cb(sid, ch, r);
 		if (cb_any) cb_any(sid, ch, r);
+	}
+
+	std::string StreamRouter::format_timing_diagram_json(const TimingDiagramSnapshot &s) {
+		char measured_buf[32];
+		std::snprintf(
+			measured_buf,
+			sizeof(measured_buf),
+			"%.6g",
+			static_cast<double>(s.ch_measured_ms));
+		return string_printf(
+			"{\"type\":\"timing_diagram\","
+			"\"R\":%d,\"A\":%d,\"buf\":%d,\"master_delay\":%d,"
+			"\"ch_measured_ms\":%s,\"ch_total_ms\":%d,"
+			"\"ch_offset_ms\":%d,\"ch_provisional\":%s}",
+			s.R,
+			s.A,
+			s.buf,
+			s.master_delay,
+			measured_buf,
+			s.ch_total_ms,
+			s.ch_offset_ms,
+			s.ch_provisional ? "true" : "false");
 	}
 
 	std::string StreamRouter::format_latency_result_json(const LatencyResult &r) {

@@ -77,6 +77,20 @@ namespace ods::network {
 	};
 
 	/**
+	 * チャンネル単位で保持するタイミング図スナップショット。
+	 */
+	struct TimingDiagramSnapshot {
+		int   R              = 0;     ///< OBS 配信遅延 R (ms)
+		int   A              = 0;     ///< 想定アバター遅延 A (ms)
+		int   buf            = 0;     ///< 再生バッファ (ms)
+		int   master_delay   = 0;     ///< 配信レーンのディレイ値 (ms)
+		float ch_measured_ms = -1.0f; ///< チャンネル計測値 C (ms)
+		int   ch_total_ms    = 0;     ///< チャンネルディレイ total (ms)
+		int   ch_offset_ms   = 0;     ///< チャンネル補正値 offset (ms)
+		bool  ch_provisional = false; ///< 仮値チャンネルか
+	};
+
+	/**
 	 * 配信ID + チャンネル単位の状態。
 	 */
 	struct ChannelState {
@@ -87,8 +101,10 @@ namespace ods::network {
 		std::atomic<bool>                measuring{false}; ///< RTT 計測中フラグ
 		LatencyResult                    last_result;      ///< 直近計測結果
 
-		double      last_applied_delay{-1.0}; ///< 最後に通知したディレイ値
-		std::string last_applied_reason;      ///< ディレイ通知の理由
+		double                last_applied_delay{-1.0};  ///< 最後に通知したディレイ値
+		std::string           last_applied_reason;       ///< ディレイ通知の理由
+		TimingDiagramSnapshot last_timing_diagram;       ///< 最後に通知したタイミング図データ
+		bool                  has_timing_diagram{false}; ///< タイミング図データが有効か
 
 		LatencyCallback on_result; ///< チャンネル別結果通知
 	};

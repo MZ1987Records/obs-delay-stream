@@ -365,6 +365,9 @@ namespace ods::ui {
 			for (int i = 0; i < MAX_SUB_CH; ++i)
 				d->sub_channels[i].measure.reset();
 			d->ws_batch_progress.reset();
+			// リセット後に自動計測が有効なら未計測チャンネルの計測を開始
+			if (d->trigger_auto_measure_scan)
+				d->trigger_auto_measure_scan();
 			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "cb_flow_clear_results");
 			return false;
 		}
@@ -413,10 +416,10 @@ namespace ods::ui {
 				return false;
 			}
 
-			// 測定モードを読み取り、ミュートモードならフラグを立てる
+			// 測定モードを読み取り、サイレントモードならフラグを立てる
 			const int probe_mode = static_cast<int>(
 				obs_data_get_int(settings, ods::plugin::kRtspE2eProbeModeKey));
-			d->probe_mute_active.store(probe_mode == 1, std::memory_order_release);
+			d->probe_silent_active.store(probe_mode == 1, std::memory_order_release);
 
 			// 進捗を初期化
 			d->rtsp_e2e_measure.set_last_error("");
@@ -437,7 +440,7 @@ namespace ods::ui {
 				update_flow_progress(d->context, pct);
 			};
 			prober.on_result = [d](ods::network::RtspE2eResult r) {
-				d->probe_mute_active.store(false, std::memory_order_release);
+				d->probe_silent_active.store(false, std::memory_order_release);
 				d->rtsp_e2e_measure.apply_result(r);
 				if (r.valid) {
 					// 計測結果を Model に反映し、UI スレッドで永続化する
@@ -539,7 +542,7 @@ namespace ods::ui {
 			d->ws_batch_progress.reset();
 			d->rtsp_e2e_measure.cancel();
 			d->inject_impulse.store(false, std::memory_order_release);
-			d->probe_mute_active.store(false, std::memory_order_release);
+			d->probe_silent_active.store(false, std::memory_order_release);
 			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "cb_flow_reset");
 			return false;
 		}
@@ -620,7 +623,7 @@ namespace ods::ui {
 				T_("RtspE2eProbeMode"),
 				OBS_COMBO_TYPE_LIST,
 				OBS_COMBO_FORMAT_INT);
-			obs_property_list_add_int(mode_list, T_("RtspE2eProbeMute"), 1);
+			obs_property_list_add_int(mode_list, T_("RtspE2eProbeSilent"), 1);
 			obs_property_list_add_int(mode_list, T_("RtspE2eProbeMix"), 0);
 			obs_property_set_enabled(mode_list, !is_rtsp_measuring);
 			const bool obs_streaming      = ods::plugin::is_obs_streaming_active();

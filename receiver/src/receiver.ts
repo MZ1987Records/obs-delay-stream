@@ -5,7 +5,7 @@ import { applyStaticI18n, initI18n, renderLanguageSwitcher, t } from './i18n';
 import { DEFAULT_MAX_CH, DEFAULT_VOLUME } from './constants';
 import {
   sidInput,
-  chInput,
+  codeInput,
   volSlider,
   syncIntervalSelect,
   connectBtn,
@@ -29,8 +29,7 @@ import {
   setDisconnectedUi,
   enableSyncOptions,
   showMeasuring,
-  showLatencyResult,
-  showApplied,
+  showTimingDiagram,
   setMeterOffline,
   updateMemoDisplay,
 } from './ui';
@@ -83,7 +82,7 @@ initMeter();
 // 初期URL表示
 // ============================================================
 
-// sidInput/chInput は読み取り専用。URLパラメータから初期値を表示する。
+// sidInput/codeInput は読み取り専用。URLパラメータから初期値を表示する。
 if (state.streamId) sidInput.value = state.streamId;
 updateUrlPreview();
 
@@ -136,18 +135,15 @@ bus.on('ws:close', ({ code, reason, cause }) => {
   setDisconnectedUi();
 });
 
-bus.on('ctrl:session', ({ streamId, ch, code, memo }) => {
+bus.on('ctrl:session', ({ streamId, code, memo }) => {
   // サーバーから受信した値で表示を更新（編集不可）
   if (typeof streamId === 'string') {
     state.streamId = streamId;
     sidInput.value = streamId;
   }
-  if (ch !== undefined) {
-    const chNum = Number(ch);
-    if (Number.isFinite(chNum)) chInput.value = String(chNum);
-  }
   if (typeof code === 'string') {
     state.channelCode = code;
+    codeInput.value = code;
   }
   updateShebang(state.streamId, state.channelCode);
   const memoEl = getOptionalElement<HTMLElement>('infoMemo');
@@ -161,13 +157,11 @@ bus.on('ctrl:memo', ({ memo }) => {
 
 bus.on('ctrl:ping', ({ count }) => showMeasuring(count));
 
-bus.on('ctrl:latency', (r) => showLatencyResult(r));
-
-bus.on('ctrl:delay', ({ ms, reason }) => {
-  if (reason === 'auto_measure' || getOptionalElement<HTMLElement>('waitingApply')) {
-    showApplied(ms);
-  }
+bus.on('ctrl:latency', () => {
+  setStatus(t('status.receiving'), 'ok');
 });
+
+bus.on('ctrl:timing_diagram', (r) => showTimingDiagram(r));
 
 // ============================================================
 // デバッグ: バッファオフセット調整 (?debug=1 で有効)

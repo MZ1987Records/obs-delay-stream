@@ -91,9 +91,20 @@ export type LatencyResultMessage = {
   max: number;
 };
 
+export type TimingDiagramMessage = {
+  R: number;
+  A: number;
+  buf: number;
+  master_delay: number;
+  ch_measured_ms: number;
+  ch_total_ms: number;
+  ch_offset_ms: number;
+  ch_provisional: boolean;
+};
+
 export type ShebangParams = { sid: string | null; code: string | null };
 export type ConfigResponse = { active_ch?: number };
-export type MemoResponse = { memo?: string; ch?: number };
+export type MemoResponse = { memo?: string };
 
 export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null;
@@ -115,6 +126,21 @@ export function isLatencyResultMessage(
     typeof value.avg_rtt === 'number' &&
     typeof value.min === 'number' &&
     typeof value.max === 'number'
+  );
+}
+
+export function isTimingDiagramMessage(
+  value: JsonRecord,
+): value is TimingDiagramMessage {
+  return (
+    typeof value.R === 'number' &&
+    typeof value.A === 'number' &&
+    typeof value.buf === 'number' &&
+    typeof value.master_delay === 'number' &&
+    typeof value.ch_measured_ms === 'number' &&
+    typeof value.ch_total_ms === 'number' &&
+    typeof value.ch_offset_ms === 'number' &&
+    typeof value.ch_provisional === 'boolean'
   );
 }
 

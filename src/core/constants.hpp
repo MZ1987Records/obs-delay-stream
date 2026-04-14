@@ -19,7 +19,7 @@ namespace ods::core {
 	// WebSocket レイテンシ計測パラメータ
 	static constexpr int DEFAULT_PING_COUNT    = 10;   ///< 1 回の計測で送信する ping 数（デフォルト精度）
 	static constexpr int PING_INTV_MS          = 150;  ///< ping 送信間隔 (ms)
-	static constexpr int AUTO_MEASURE_DELAY_MS = 5000; ///< 自動計測開始までの待機時間 (ms)
+	static constexpr int AUTO_MEASURE_DELAY_MS = 3000; ///< 自動計測開始までの待機時間 (ms)
 
 	// RTMP プローブパラメータ
 	static constexpr int RTMP_PROBE_CNT  = 10;  ///< プローブ試行回数

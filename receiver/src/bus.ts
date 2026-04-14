@@ -1,5 +1,5 @@
 import { Emitter } from './emitter';
-import type { LatencyResultMessage } from './types';
+import type { LatencyResultMessage, TimingDiagramMessage } from './types';
 
 export type AppEvents = {
   /** 接続前バリデーション失敗 */
@@ -19,7 +19,6 @@ export type AppEvents = {
   /** session_info 受信 */
   'ctrl:session': {
     streamId?: string;
-    ch?: number | string;
     code?: string;
     memo?: unknown;
   };
@@ -29,8 +28,8 @@ export type AppEvents = {
   'ctrl:ping': { count: number };
   /** レイテンシ計測結果 */
   'ctrl:latency': LatencyResultMessage;
-  /** 遅延適用通知 */
-  'ctrl:delay': { ms: number | string; reason: string };
+  /** タイミング図描画データ */
+  'ctrl:timing_diagram': TimingDiagramMessage;
 };
 
 export const bus = new Emitter<AppEvents>();

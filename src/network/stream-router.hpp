@@ -121,6 +121,17 @@ namespace ods::network {
 		/// ディレイ反映通知を送る
 		void notify_apply_delay(int ch, double ms, const char *reason = "auto_measure");
 
+		/// タイミング図データを送る
+		void notify_timing_diagram(int   ch,
+								   int   R,
+								   int   A,
+								   int   buf,
+								   int   master_delay,
+								   float ch_measured_ms,
+								   int   ch_total_ms,
+								   int   ch_offset_ms,
+								   bool  ch_provisional);
+
 		/// 接続数を返す（ch は 0-indexed）
 		size_t client_count(int ch) const;
 
@@ -141,9 +152,11 @@ namespace ods::network {
 		};
 
 		struct ChannelCache {
-			LatencyResult last_result;              ///< 最終計測結果キャッシュ
-			double        last_applied_delay{-1.0}; ///< 最終反映ディレイキャッシュ
-			std::string   last_applied_reason;      ///< 最終反映理由キャッシュ
+			LatencyResult         last_result;               ///< 最終計測結果キャッシュ
+			double                last_applied_delay{-1.0};  ///< 最終反映ディレイキャッシュ
+			std::string           last_applied_reason;       ///< 最終反映理由キャッシュ
+			TimingDiagramSnapshot last_timing_diagram;       ///< 最終タイミング図キャッシュ
+			bool                  has_timing_diagram{false}; ///< タイミング図キャッシュの有効フラグ
 		};
 
 		std::shared_ptr<WsServer> server_ptr_;                 ///< websocketpp サーバー本体
@@ -194,6 +207,9 @@ namespace ods::network {
 
 		/// レイテンシ結果を JSON 文字列に整形する。
 		static std::string format_latency_result_json(const LatencyResult &r);
+
+		/// タイミング図スナップショットを JSON 文字列に整形する。
+		static std::string format_timing_diagram_json(const TimingDiagramSnapshot &s);
 
 		/// 配信 ID + CH に対応する状態を取得する（非 const）。
 		ChannelState *find_ch(const std::string &sid, int ch);

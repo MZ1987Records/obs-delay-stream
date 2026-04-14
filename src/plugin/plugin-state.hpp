@@ -13,7 +13,9 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -342,7 +344,7 @@ namespace ods::plugin {
 		std::atomic<bool>       enabled{true};                   ///< フィルタ有効フラグ
 		std::atomic<bool>       ws_send_enabled{true};           ///< WebSocket 音声送信有効フラグ
 		std::atomic<bool>       inject_impulse{false};           ///< RTSP E2E 計測用プローブ注入フラグ
-		std::atomic<bool>       probe_mute_active{false};        ///< ミュートモード計測中フラグ（入力音声をミュート）
+		std::atomic<bool>       probe_silent_active{false};      ///< サイレントモード計測中フラグ（出力音声をゼロクリア）
 		ods::audio::ProbeSignal probe_signal;                    ///< RTSP E2E 計測用チャープ信号
 
 		/// 非同期タスクがフィルタ生存中かチェックするトークン
@@ -366,6 +368,12 @@ namespace ods::plugin {
 		std::atomic<bool>                         router_running{false};                           ///< WebSocket ルーター起動中フラグ
 		std::atomic<bool>                         auto_measure_enabled{false};                     ///< 接続時の自動計測フラグ
 		std::array<std::atomic<bool>, MAX_SUB_CH> auto_measure_pending{};                          ///< チャンネル別自動計測予約中フラグ
+		std::function<void()>                     trigger_auto_measure_scan;                       ///< 接続済み未計測チャンネルの自動計測を開始する
+
+		using SteadyClock = std::chrono::steady_clock;
+		/// チャンネルごとの初回接続時刻。安定化待機の残り時間を算出するために使用する。
+		/// time_since_epoch == 0 は「未接続」を示す。
+		std::array<std::atomic<int64_t>, MAX_SUB_CH> ch_connected_at_ms{};
 
 		// WS 一括計測の進捗トラッキング
 		struct WsBatchProgress {

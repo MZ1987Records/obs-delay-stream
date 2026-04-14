@@ -8,8 +8,12 @@ import {
   CONNECT_TIMEOUT_MS,
   DEFAULT_PING_COUNT,
 } from './constants';
-import { isRecord, isLatencyResultMessage, safeParseJson } from './types';
-import type { JsonRecord } from './types';
+import {
+  isRecord,
+  isLatencyResultMessage,
+  isTimingDiagramMessage,
+  safeParseJson,
+} from './types';
 import { buildUrl, clearConnectTimer, resync } from './ui';
 import { ensureAudioContext, handlePcm16 } from './audio';
 import { handleOpus, sendPcmFallbackIfPossible } from './opus';
@@ -46,7 +50,6 @@ function handleControl(text: string): void {
     case 'session_info':
       bus.emit('ctrl:session', {
         streamId: typeof msg.stream_id === 'string' ? msg.stream_id : undefined,
-        ch: msg.ch !== undefined && msg.ch !== null ? Number(msg.ch) : undefined,
         code: typeof msg.code === 'string' ? msg.code : undefined,
         memo: msg.memo,
       });
@@ -67,25 +70,16 @@ function handleControl(text: string): void {
       break;
 
     case 'latency_result':
-      if (isLatencyResultMessage(msg as JsonRecord)) {
-        bus.emit('ctrl:latency', msg as unknown as {
-          one_way: number;
-          avg_rtt: number;
-          min: number;
-          max: number;
-        });
+      if (isLatencyResultMessage(msg)) {
+        bus.emit('ctrl:latency', msg);
       }
       state.pingCount = 0;
       state.pingTotal = DEFAULT_PING_COUNT;
       break;
 
-    case 'apply_delay':
-      {
-        const reason = typeof msg.reason === 'string' ? msg.reason : '';
-        if (reason === 'manual_adjust') break;
-        if (typeof msg.ms === 'number' || typeof msg.ms === 'string') {
-          bus.emit('ctrl:delay', { ms: msg.ms as number | string, reason });
-        }
+    case 'timing_diagram':
+      if (isTimingDiagramMessage(msg)) {
+        bus.emit('ctrl:timing_diagram', msg);
       }
       break;
 

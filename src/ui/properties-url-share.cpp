@@ -132,11 +132,13 @@ namespace ods::ui::url_share {
 					const char *nc = T_("NotConfigured");
 					std::strncpy(tbl_info.not_configured, nc ? nc : "-", sizeof(tbl_info.not_configured) - 1);
 				}
+				const char *reassigning = (ts == TunnelState::Starting) ? T_("UrlShareReassigning") : nullptr;
 				for (int i = 0; i < tbl_info.ch_count && i < ods::widgets::UrlTableInfo::kMaxCh; ++i) {
 					auto &dst       = tbl_info.rows[i];
 					dst.ch_1indexed = rows[i].ch_1indexed;
 					std::strncpy(dst.name, rows[i].name.c_str(), sizeof(dst.name) - 1);
-					std::strncpy(dst.url, rows[i].url.c_str(), sizeof(dst.url) - 1);
+					const char *url_src = reassigning ? reassigning : rows[i].url.c_str();
+					std::strncpy(dst.url, url_src, sizeof(dst.url) - 1);
 				}
 				obs_property_t *list_info_p = ods::widgets::obs_properties_add_url_table(
 					grp,

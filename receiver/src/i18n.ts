@@ -14,7 +14,7 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         streamId: '配信ID',
         streamIdHint: '(半角英数字)',
         streamIdPlaceholder: 'myshow2024',
-        chNumber: 'CH番号',
+        code: '出演者コード',
         resync: '再同期',
         autoResyncInterval: '自動再同期間隔',
         off: 'オフ',
@@ -23,7 +23,7 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         channel: 'CH',
         buffer: 'Buffer',
         codec: 'Codec',
-        latencyMeasure: 'レイテンシ計測'
+        timingDiagram: 'タイミング図'
       },
       button: {
         connect: '接続',
@@ -59,20 +59,22 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         measuring: 'レイテンシ計測中... ({{current}}/{{total}})'
       },
       latency: {
-        initialHint: '接続後、OBS側でレイテンシ計測が開始されると、ここに結果が表示されます。',
-        measuring: '計測中 ({{current}} / {{total}} ping)',
-        estimatedOneWay: '推定片道レイテンシ (RTT÷2)',
-        averageRoundTrip: '平均往復レイテンシ ({{label}})',
-        minRtt: '最小RTT',
-        maxRtt: '最大RTT',
-        waitingApply: 'OBSが遅延設定を反映するまでお待ちください。',
-        appliedPrefix: 'OBSがチャンネル遅延を ',
-        appliedSuffix: ' に自動設定しました'
+        initialHint: '接続後、OBS側でレイテンシ計測が完了すると、ここにタイミング図が表示されます。',
+        measuring: '計測中 ({{current}} / {{total}} ping)'
       },
-      quality: {
-        good: '良好',
-        normal: '普通',
-        high: '高遅延'
+      diagram: {
+        delay: 'チャンネルディレイ',
+        delayDesc: 'は上記の値に基づいて自動調整',
+        ws: 'WS配信遅延',
+        env: '想定環境遅延',
+        buf: '再生バッファ',
+        avatar: '想定アバター遅延',
+        broadcast: 'OBS配信遅延',
+        laneYou: 'あなた',
+        laneBroadcast: '配信',
+        noData: '計測データなし',
+        noDataRtsp: 'OBS配信遅延が未計測です',
+        noDataWs: 'WS配信遅延が未計測です'
       },
       format: {
         chRange: '{{min}}〜{{max}}',
@@ -101,7 +103,7 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         streamId: 'Stream ID',
         streamIdHint: '(alphanumeric)',
         streamIdPlaceholder: 'myshow2024',
-        chNumber: 'Channel',
+        code: 'Performer Code',
         resync: 'Resync',
         autoResyncInterval: 'Auto-resync Interval',
         off: 'Off',
@@ -110,7 +112,7 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         channel: 'CH',
         buffer: 'Buffer',
         codec: 'Codec',
-        latencyMeasure: 'Latency Measurement'
+        timingDiagram: 'Timing Diagram'
       },
       button: {
         connect: 'Connect',
@@ -146,20 +148,22 @@ const I18N_RESOURCES: Record<'ja' | 'en', I18nResource> = {
         measuring: 'Measuring latency... ({{current}}/{{total}})'
       },
       latency: {
-        initialHint: 'After connecting, results will appear here when OBS starts latency measurement.',
-        measuring: 'Measuring ({{current}} / {{total}} ping)',
-        estimatedOneWay: 'Estimated one-way latency (RTT/2)',
-        averageRoundTrip: 'Average round-trip latency ({{label}})',
-        minRtt: 'Min RTT',
-        maxRtt: 'Max RTT',
-        waitingApply: 'Please wait while OBS applies delay settings.',
-        appliedPrefix: 'OBS auto-set channel delay to ',
-        appliedSuffix: ''
+        initialHint: 'After connecting, the timing diagram appears here when OBS latency measurement completes.',
+        measuring: 'Measuring ({{current}} / {{total}} ping)'
       },
-      quality: {
-        good: 'Good',
-        normal: 'Normal',
-        high: 'High latency'
+      diagram: {
+        delay: 'Channel delay',
+        delayDesc: 'is auto-adjusted from the above values',
+        ws: 'WS streaming latency',
+        env: 'Estimated environment latency',
+        buf: 'Playback buffer',
+        avatar: 'Estimated avatar latency',
+        broadcast: 'OBS streaming latency',
+        laneYou: 'You',
+        laneBroadcast: 'Broadcast',
+        noData: 'No measurement data',
+        noDataRtsp: 'OBS streaming latency is not measured',
+        noDataWs: 'WS streaming latency is not measured'
       },
       format: {
         chRange: '{{min}}-{{max}}',
