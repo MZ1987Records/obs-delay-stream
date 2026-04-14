@@ -246,6 +246,7 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		break;
 	case TAB_RTSP_LATENCY:
 		schedule_flow_progress_inject(ctx);
+		schedule_help_callout_inject(ctx);
 		schedule_path_mode_row_inject(ctx);
 		schedule_mode_text_row_inject(ctx);
 		schedule_button_bar_inject(ctx);

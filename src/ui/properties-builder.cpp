@@ -631,11 +631,9 @@ namespace ods::ui {
 			const bool rtsp_start_enabled = can_start;
 			const bool rtsp_stop_enabled  = is_rtsp_measuring;
 
-			// 計測完了状態ではヒントを出さない。
 			const auto  rtsp_result = d->rtsp_e2e_measure.result();
-			const bool  rtsp_done   = d->delay.rtsp_e2e_measured || rtsp_result.valid;
 			const char *rtsp_hint   = nullptr;
-			if (!rtsp_start_enabled && !rtsp_stop_enabled && !rtsp_done) {
+			if (!rtsp_start_enabled && !rtsp_stop_enabled) {
 				if (is_ws_measuring)
 					rtsp_hint = T_("RtspE2eHintWsMeasuring");
 				else if (!obs_streaming)
@@ -673,6 +671,8 @@ namespace ods::ui {
 				"#14b8a6",
 				rtsp_hint ? kWarningTextColorLight : nullptr,
 				rtsp_hint ? kWarningTextColorDark : nullptr);
+
+			obs_properties_add_help_callout(grp, "rtsp_e2e_probe_help", T_("RtspE2eProbeHelp"));
 
 			{
 				int         pct = 0;
@@ -1105,16 +1105,6 @@ namespace ods::ui {
 		}
 
 		if (!d->is_warning_only_instance()) {
-			// RTSP 計測中の警告（計測モードに応じたテキスト）
-			if (d->rtsp_e2e_measure.is_measuring()) {
-				const bool  probe_mute = d->probe_mute_active.load(std::memory_order_acquire);
-				const char *warn_text  = probe_mute ? T_("RtspMeasureWarnMute")
-				                                    : T_("RtspMeasureWarnMix");
-				obs_property_t *rtsp_warn_p = obs_properties_add_text(
-					grp, "rtsp_measure_warning", warn_text, OBS_TEXT_INFO);
-				obs_property_text_set_info_word_wrap(rtsp_warn_p, true);
-			}
-
 			const bool  ws_on     = d->router_running.load();
 			const bool  ws_paused = !d->ws_send_enabled.load();
 			const bool  ws_no_dly = !d->enabled.load();
@@ -1131,20 +1121,33 @@ namespace ods::ui {
 
 			std::string ws_status = ws_on ? T_("StatusRunning") : T_("StatusStopped");
 			if (ws_paused) ws_status += T_("WsPausedSuffix");
-			const char       *tun_label   = tun_on     ? T_("StatusRunning")
-											: tun_busy ? T_("TunnelStarting")
-													   : T_("StatusStopped");
+			const char *tun_label = tun_on     ? T_("StatusRunning")
+									: tun_busy ? T_("TunnelStarting")
+											   : T_("StatusStopped");
+			// RTSP 計測中の警告（計測モードに応じたテキスト・警告色）をステータス行の右に結合
+			std::string rtsp_warn_part;
+			if (d->rtsp_e2e_measure.is_measuring()) {
+				const bool  probe_silent = d->probe_silent_active.load(std::memory_order_acquire);
+				const char *warn_text    = probe_silent ? T_("RtspMeasureWarnMute")
+														: T_("RtspMeasureWarnMix");
+				rtsp_warn_part           = string_printf(
+					"&nbsp;&nbsp;|&nbsp;&nbsp;"
+					"<span style='color:%s'>⚠ %s</span>",
+					kWarningTextColorLight,
+					warn_text);
+			}
 			const std::string status_html = string_printf(
-				"<span style='color:%s'>●</span> %s %s"
-				"&nbsp;&nbsp;|&nbsp;&nbsp;"
-				"<span style='color:%s'>●</span> %s %s",
-				tun_color,
-				T_("PluginTunnelStatusLabel"),
-				tun_label,
-				ws_color,
-				T_("PluginWsStatusLabel"),
-				ws_status.c_str());
-			obs_property_t *status_p =
+												"<span style='color:%s'>●</span> %s %s"
+												"&nbsp;&nbsp;|&nbsp;&nbsp;"
+												"<span style='color:%s'>●</span> %s %s",
+												tun_color,
+												T_("PluginTunnelStatusLabel"),
+												tun_label,
+												ws_color,
+												T_("PluginWsStatusLabel"),
+												ws_status.c_str()) +
+											rtsp_warn_part;
+			obs_property_t   *status_p =
 				obs_properties_add_text(grp, "plugin_status_info", "", OBS_TEXT_INFO);
 			obs_property_set_long_description(status_p, status_html.c_str());
 			obs_property_text_set_info_word_wrap(status_p, false);
