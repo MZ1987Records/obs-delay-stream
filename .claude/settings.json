@@ -32,6 +32,7 @@
       "Bash(pwd)",
       "Bash(sed *)",
       "Bash(jq *)",
+      "Bash(stat *)",
       "Bash(cmake *)",
       "Bash(xargs grep *)",
       "Bash(xargs wc *)",
