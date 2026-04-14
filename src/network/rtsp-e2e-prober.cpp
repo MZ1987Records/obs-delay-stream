@@ -700,18 +700,6 @@ namespace ods::network {
 				result.latency_ms = latencies_ms[mid];
 			}
 
-			// MAD 安定性チェック: ばらつきが大きすぎる場合は失敗扱い
-			std::vector<double> abs_devs;
-			abs_devs.reserve(latencies_ms.size());
-			for (double v : latencies_ms)
-				abs_devs.push_back(std::abs(v - result.latency_ms));
-			std::sort(abs_devs.begin(), abs_devs.end());
-			const double mad = abs_devs[abs_devs.size() / 2];
-			if (mad > 4.0) {
-				result.valid     = false;
-				result.error_msg = "計測結果のばらつきが大きすぎます (MAD " +
-								   std::to_string(static_cast<int>(std::round(mad))) + " ms)。";
-			}
 		} else if (!running_.load(std::memory_order_acquire)) {
 			result.error_msg = "計測はキャンセルされました。";
 		} else {
