@@ -23,13 +23,13 @@ namespace ods::audio {
 	class ProbeSignal {
 	public:
 
-		static constexpr int    kSampleRate = 48000;  ///< 想定サンプルレート (Hz)
-		static constexpr int    kLength     = 1024;   ///< チャープ長 (sample, 21.3 ms)
-		static constexpr float  kAmplitude  = 0.04f;  ///< 基準振幅（加算合成, -28 dBFS）
-		static constexpr float  kScaleMix   = 2.5f;   ///< ミックスモード注入スケール（実効 -20 dBFS）
-		static constexpr float  kScaleMuted = 0.25f;  ///< ミュートモード注入スケール（実効 -40 dBFS）
-		static constexpr double kFreqStart  = 1000.0; ///< 開始周波数 (Hz)
-		static constexpr double kFreqEnd    = 3000.0; ///< 終了周波数 (Hz)
+		static constexpr int    kSampleRate  = 48000;  ///< 想定サンプルレート (Hz)
+		static constexpr int    kLength      = 1024;   ///< チャープ長 (sample, 21.3 ms)
+		static constexpr float  kAmplitude   = 0.04f;  ///< 基準振幅（加算合成, -28 dBFS）
+		static constexpr float  kScaleMix    = 2.5f;   ///< ミックスモード注入スケール（実効 -20 dBFS）
+		static constexpr float  kScaleSilent = 0.25f;  ///< サイレントモード注入スケール（実効 -40 dBFS）
+		static constexpr double kFreqStart   = 1000.0; ///< 開始周波数 (Hz)
+		static constexpr double kFreqEnd     = 3000.0; ///< 終了周波数 (Hz)
 
 		ProbeSignal();
 

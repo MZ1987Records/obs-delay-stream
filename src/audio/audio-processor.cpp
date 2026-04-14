@@ -66,9 +66,9 @@ namespace ods::audio {
 					dst[f] = out[f * num_channels + c];
 			}
 
-			// ミュートモード計測中は出力音声をゼロクリアする。
-			const bool mute_active = d->probe_mute_active.load(std::memory_order_acquire);
-			if (mute_active) {
+			// サイレントモード計測中は出力音声をゼロクリアする。
+			const bool silent_active = d->probe_silent_active.load(std::memory_order_acquire);
+			if (silent_active) {
 				for (uint32_t c = 0; c < num_channels; ++c) {
 					if (!audio->data[c]) continue;
 					float *dst = reinterpret_cast<float *>(audio->data[c]);
@@ -78,8 +78,8 @@ namespace ods::audio {
 
 			// RTSP E2E 計測用チャープ信号は 1 回だけ加算注入する。
 			if (d->inject_impulse.exchange(false, std::memory_order_acq_rel)) {
-				const float scale    = mute_active
-										   ? ProbeSignal::kScaleMuted
+				const float scale    = silent_active
+										   ? ProbeSignal::kScaleSilent
 										   : ProbeSignal::kScaleMix;
 				const auto &chirp    = d->probe_signal.waveform();
 				const int   inject_n = std::min<int>(static_cast<int>(chirp.size()),
