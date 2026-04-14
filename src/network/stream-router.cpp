@@ -759,8 +759,8 @@ namespace ods::network {
 		std::vector<ConnectionHandle> to_evict;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
-			auto  key    = make_key(sid, ch);
-			auto &cs     = ch_map_[key];
+			auto                        key = make_key(sid, ch);
+			auto                       &cs  = ch_map_[key];
 
 			// 同一チャンネルの既存接続を退去させる（単一クライアント制限）
 			if (!cs.conns.empty()) {
