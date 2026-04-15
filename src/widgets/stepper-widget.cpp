@@ -316,27 +316,20 @@ namespace ods::widgets {
 					max_input_chars,
 					parent);
 
-				// help_text がある場合はコンテナで StepperRow + ヘルプ吹き出しを包む
-				QWidget *inject_widget = stepper;
-				if (!help_text.isEmpty()) {
-					auto *container = new QWidget(parent);
-					auto *vlay      = new QVBoxLayout(container);
-					vlay->setContentsMargins(0, 0, 0, 0);
-					vlay->setSpacing(0);
-					vlay->addWidget(stepper);
-					vlay->addWidget(create_help_callout(help_text, container));
-					inject_widget = container;
-				}
-
 				form->removeRow(row);
 				if (!row_label.isEmpty()) {
 					QColor color(label_color);
 					if (color.isValid())
-						form->insertRow(row, create_colored_label(row_label, color, parent), inject_widget);
+						form->insertRow(row, create_colored_label(row_label, color, parent), stepper);
 					else
-						form->insertRow(row, row_label, inject_widget);
+						form->insertRow(row, row_label, stepper);
 				} else {
-					form->insertRow(row, inject_widget);
+					form->insertRow(row, stepper);
+				}
+
+				// help_text は全幅を使えるようラベルなし行として挿入する
+				if (!help_text.isEmpty()) {
+					form->insertRow(row + 1, create_help_callout(help_text, parent));
 				}
 				++replaced_count;
 			}
