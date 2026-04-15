@@ -39,7 +39,8 @@ namespace ods::ui::delay {
 			" ms",
 			true,
 			7,
-			"#f59e0b");
+			"#f59e0b",
+			T_("AvatarLatencyHelpText"));
 
 		// タイミング図
 		DelayDiagramInfo info{};

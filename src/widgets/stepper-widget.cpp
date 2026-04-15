@@ -8,6 +8,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QVBoxLayout>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QSizePolicy>
@@ -256,6 +257,7 @@ namespace ods::widgets {
 				int           max_input_chars = 7;
 				QString       row_label;
 				QString       label_color;
+				QString       help_text;
 				if (fields.size() >= 11) {
 					bool      ok           = false;
 					const int parsed_chars = fields[8].toInt(&ok);
@@ -264,6 +266,9 @@ namespace ods::widgets {
 						max_input_chars = std::max(1, parsed_chars);
 						row_label       = fields[9];
 						label_color     = fields[10];
+						// fields[11] 以降は help_text（| を含む可能性があるため join で復元）
+						if (fields.size() >= 12)
+							help_text = fields.mid(11).join(QChar('|'));
 					} else {
 						store_as_int = (fields[7] == QLatin1String("1"));
 						row_label    = fields.mid(8).join(QStringLiteral(" "));
@@ -311,15 +316,27 @@ namespace ods::widgets {
 					max_input_chars,
 					parent);
 
+				// help_text がある場合はコンテナで StepperRow + ヘルプ吹き出しを包む
+				QWidget *inject_widget = stepper;
+				if (!help_text.isEmpty()) {
+					auto *container = new QWidget(parent);
+					auto *vlay      = new QVBoxLayout(container);
+					vlay->setContentsMargins(0, 0, 0, 0);
+					vlay->setSpacing(0);
+					vlay->addWidget(stepper);
+					vlay->addWidget(create_help_callout(help_text, container));
+					inject_widget = container;
+				}
+
 				form->removeRow(row);
 				if (!row_label.isEmpty()) {
 					QColor color(label_color);
 					if (color.isValid())
-						form->insertRow(row, create_colored_label(row_label, color, parent), stepper);
+						form->insertRow(row, create_colored_label(row_label, color, parent), inject_widget);
 					else
-						form->insertRow(row, row_label, stepper);
+						form->insertRow(row, row_label, inject_widget);
 				} else {
-					form->insertRow(row, stepper);
+					form->insertRow(row, inject_widget);
 				}
 				++replaced_count;
 			}
@@ -350,15 +367,17 @@ namespace ods::widgets {
 											   const char       *suffix,
 											   bool              store_as_int,
 											   int               max_input_chars,
-											   const char       *label_color) {
+											   const char       *label_color,
+											   const char       *help_text) {
 		const int   clamped_chars = std::max(1, max_input_chars);
 		const char *color_str     = (label_color && *label_color) ? label_color : "";
-		const int   len           = std::snprintf(nullptr, 0, "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%d|%s|%s", setting_key, min_val, max_val, def_val, decimals, suffix ? suffix : "", store_as_int ? 1 : 0, clamped_chars, label ? label : "", color_str);
+		const char *help_str      = (help_text && *help_text) ? help_text : "";
+		const int   len           = std::snprintf(nullptr, 0, "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%d|%s|%s|%s", setting_key, min_val, max_val, def_val, decimals, suffix ? suffix : "", store_as_int ? 1 : 0, clamped_chars, label ? label : "", color_str, help_str);
 		if (len < 0)
 			return nullptr;
 
 		std::string buf(static_cast<size_t>(len) + 1, '\0');
-		std::snprintf(buf.data(), buf.size(), "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%d|%s|%s", setting_key, min_val, max_val, def_val, decimals, suffix ? suffix : "", store_as_int ? 1 : 0, clamped_chars, label ? label : "", color_str);
+		std::snprintf(buf.data(), buf.size(), "STEPPER|%s|%.10g|%.10g|%.10g|%d|%s|%d|%d|%s|%s|%s", setting_key, min_val, max_val, def_val, decimals, suffix ? suffix : "", store_as_int ? 1 : 0, clamped_chars, label ? label : "", color_str, help_str);
 		return obs_properties_add_text(props, prop_name, buf.c_str(), OBS_TEXT_INFO);
 	}
 
