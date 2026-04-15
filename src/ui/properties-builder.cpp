@@ -914,8 +914,8 @@ namespace ods::ui {
 			"TabTunnel",
 			"TabAudioStreaming",
 			"TabUrlSharing",
-			"TabSyncLatency",
 			"TabRtmpLatency",
+			"TabSyncLatency",
 			"TabFineAdjust",
 		};
 		const char *kInactiveBg = "auto";

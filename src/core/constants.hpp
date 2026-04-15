@@ -43,8 +43,8 @@ namespace ods::core {
 	static constexpr int TAB_TUNNEL          = 1; ///< トンネルタブ
 	static constexpr int TAB_AUDIO_STREAMING = 2; ///< WS配信タブ
 	static constexpr int TAB_URL_SHARING     = 3; ///< URL共有タブ
-	static constexpr int TAB_SYNC_LATENCY    = 4; ///< WS計測タブ
-	static constexpr int TAB_RTSP_LATENCY    = 5; ///< RTSP計測タブ
+	static constexpr int TAB_RTSP_LATENCY    = 4; ///< RTSP計測タブ
+	static constexpr int TAB_SYNC_LATENCY    = 5; ///< WS計測タブ
 	static constexpr int TAB_FINE_ADJUST     = 6; ///< 微調整タブ
 	static constexpr int TAB_COUNT           = 7; ///< タブ総数
 

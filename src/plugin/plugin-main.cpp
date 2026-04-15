@@ -239,16 +239,16 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		schedule_url_table_inject(ctx);
 		schedule_button_bar_inject(ctx);
 		break;
-	case TAB_SYNC_LATENCY:
-		schedule_flow_progress_inject(ctx);
-		schedule_flow_table_inject(ctx);
-		schedule_button_bar_inject(ctx);
-		break;
 	case TAB_RTSP_LATENCY:
 		schedule_flow_progress_inject(ctx);
 		schedule_help_callout_inject(ctx);
 		schedule_path_mode_row_inject(ctx);
 		schedule_mode_text_row_inject(ctx);
+		schedule_button_bar_inject(ctx);
+		break;
+	case TAB_SYNC_LATENCY:
+		schedule_flow_progress_inject(ctx);
+		schedule_flow_table_inject(ctx);
 		schedule_button_bar_inject(ctx);
 		break;
 	case TAB_FINE_ADJUST:
@@ -660,12 +660,12 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			ods::ui::url_share::add_url_share_group(props, d);
 			ods::ui::url_share::add_url_share_next_button_bar(props, d);
 			break;
-		case TAB_SYNC_LATENCY:
-			ods::ui::add_flow_group(props, d);
-			ods::ui::add_next_tab_button_bar(props, d, TAB_RTSP_LATENCY);
-			break;
 		case TAB_RTSP_LATENCY:
 			ods::ui::add_master_group(props, d);
+			ods::ui::add_next_tab_button_bar(props, d, TAB_SYNC_LATENCY);
+			break;
+		case TAB_SYNC_LATENCY:
+			ods::ui::add_flow_group(props, d);
 			ods::ui::add_next_tab_button_bar(props, d, TAB_FINE_ADJUST);
 			break;
 		case TAB_FINE_ADJUST: {

@@ -159,7 +159,7 @@ namespace ods::ui::url_share {
 			"url_share_copy_next_act",
 			T_("BtnCopyAndNext"),
 			cb_copy_and_goto_tab,
-			&d->tab_btn_ctx[TAB_SYNC_LATENCY],
+			&d->tab_btn_ctx[TAB_RTSP_LATENCY],
 			enabled,
 		};
 		obs_properties_add_button_bar(
