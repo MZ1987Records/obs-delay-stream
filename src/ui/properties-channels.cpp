@@ -7,12 +7,18 @@
 #include "plugin/plugin-utils.hpp"
 #include "ui/properties-builder.hpp"
 #include "ui/properties-channels.hpp"
+#include "widgets/bulk-add-dialog.hpp"
 #include "widgets/button-bar-widget.hpp"
 #include "widgets/text-button-widget.hpp"
 
 #include <obs-module.h>
+
+#include <QApplication>
+#include <QWidget>
+
 #include <string>
 #include <utility>
+#include <vector>
 
 #define T_(s) obs_module_text(s)
 
@@ -93,6 +99,88 @@ namespace ods::ui::channels {
 			return false;
 		}
 
+		// 1スロットを追加し、メモ・コードを設定する（一括追加用ヘルパー）。
+		// memo_auto_counter は使わず、呼び出し側が指定した名前のみ採用する。
+		bool bulk_add_one_slot(DelayStreamData          *d,
+							   ods::model::SettingsRepo &repo,
+							   const std::string        &memo) {
+			const Slot vacant = d->layout.find_vacant();
+			if (vacant < 0) return false;
+
+			repo.set_ch_memo(vacant, memo);
+			d->router.set_sub_memo(vacant, memo);
+
+			std::string code = ods::plugin::generate_stream_id(8);
+			repo.set_ch_code(vacant, code);
+			d->router.set_sub_code(vacant, code);
+
+			d->layout.append(vacant);
+			d->router.activate_slot(vacant);
+			return true;
+		}
+
+		// すべての出演者をクリアする（チャンネルディレイ設定も削除）。
+		void bulk_clear_all_channels(DelayStreamData          *d,
+									 ods::model::SettingsRepo &repo) {
+			std::vector<Slot> active_slots;
+			active_slots.reserve(MAX_SUB_CH);
+			const int n = d->layout.count.load(std::memory_order_relaxed);
+			for (int i = 0; i < n; ++i) {
+				active_slots.push_back(d->layout.display_order[i]);
+			}
+			for (Slot slot : active_slots) {
+				d->router.deactivate_slot(slot);
+				d->delay.channels[slot] = {};
+				d->sub_channels[slot].measure.reset();
+				repo.clear_channel(slot);
+				d->layout.remove(slot);
+			}
+		}
+
+		// 出演者名を一括追加する。複数行テキストをダイアログで受け取り、各行を1スロットへ展開する。
+		bool cb_sub_bulk_add(obs_properties_t *, obs_property_t *, void *priv) {
+			auto *d = static_cast<DelayStreamData *>(priv);
+			if (!d) return false;
+
+			const int existing = d->layout.count.load(std::memory_order_relaxed);
+			auto      result   = ods::widgets::bulk_add_dialog_exec(
+				QApplication::activeWindow(),
+				existing,
+				MAX_SUB_CH);
+			if (!result) return false;
+			if (result->names.empty()) return false;
+
+			obs_data_t              *s = obs_source_get_settings(d->context);
+			ods::model::SettingsRepo repo(s);
+
+			if (result->replace_all) {
+				bulk_clear_all_channels(d, repo);
+			}
+
+			int added = 0;
+			for (const auto &name : result->names) {
+				if (!bulk_add_one_slot(d, repo, name)) break;
+				++added;
+			}
+
+			const int next = d->layout.count.load(std::memory_order_relaxed);
+			repo.set_sub_ch_count(next);
+			repo.set_ch_display_order(d->layout.serialize());
+			obs_data_release(s);
+
+			blog(LOG_INFO,
+				 "[obs-delay-stream] cb_sub_bulk_add replace=%d added=%d count=%d",
+				 result->replace_all ? 1 : 0,
+				 added,
+				 next);
+
+			if (result->replace_all) {
+				ods::plugin::recalc_all_delays(d);
+			}
+			d->request_props_refresh("cb_sub_bulk_add");
+			return false;
+		}
+
 		// 表示順テーブル内で直前と入れ替える（データ移動なし）。
 		bool cb_sub_swap_up(obs_properties_t *, obs_property_t *, void *priv) {
 			auto *ctx = static_cast<SubChannelCtx *>(priv);
@@ -142,6 +230,29 @@ namespace ods::ui::channels {
 		if (!props || !d) return;
 		obs_properties_t *grp       = obs_properties_create();
 		const int         sub_count = d->layout.count.load(std::memory_order_relaxed);
+
+		// グループ内先頭に「一括追加…」と「Ch.N を追加」を右寄せで並べる（右端が Ch追加）。
+		std::string add_label;
+		if (sub_count >= MAX_SUB_CH) {
+			add_label = T_("SubAddLimitReached");
+		} else {
+			add_label = string_printf(T_("SubAddFmt"), sub_count + 1);
+		}
+		const bool add_enabled = (sub_count < MAX_SUB_CH);
+
+		const ObsButtonBarSpec in_group_btns[] = {
+			{"sub_bulk_add_act", T_("SubBulkAdd"), cb_sub_bulk_add, d, add_enabled},
+			{"sub_add_act", add_label.c_str(), cb_sub_add, d, add_enabled},
+		};
+		obs_properties_add_button_bar(
+			grp,
+			"sub_add_bar",
+			"",
+			nullptr,
+			0,
+			in_group_btns,
+			sizeof(in_group_btns) / sizeof(in_group_btns[0]));
+
 		for (int di = 0; di < sub_count; ++di) {
 			const Slot slot      = d->layout.display_order[di];
 			d->sub_btn_ctx[slot] = {d, slot};
@@ -168,24 +279,10 @@ namespace ods::ui::channels {
 				true,
 				SUB_MEMO_MAX_CHARS);
 		}
+
 		obs_properties_add_group(props, "grp_sub", T_("GroupSubChannels"), OBS_GROUP_NORMAL, grp);
 
-		// グループ外にチャンネル追加ボタン（左）と「次へ」ボタン（右）を配置する。
-		std::string add_label;
-		if (sub_count >= MAX_SUB_CH) {
-			add_label = T_("SubAddLimitReached");
-		} else {
-			add_label = string_printf(T_("SubAddFmt"), sub_count + 1);
-		}
-		const bool add_enabled = (sub_count < MAX_SUB_CH);
-
-		const ObsButtonBarSpec add_btn = {
-			"sub_add_act",
-			add_label.c_str(),
-			cb_sub_add,
-			d,
-			add_enabled,
-		};
+		// グループ外は「次へ」ボタンのみ（右寄せ）。
 		const ObsButtonBarSpec next_btn = {
 			"sub_next_tab_act",
 			T_("BtnNextWsTab"),
@@ -197,8 +294,8 @@ namespace ods::ui::channels {
 			props,
 			"sub_button_bar",
 			"",
-			&add_btn,
-			1,
+			nullptr,
+			0,
 			&next_btn,
 			1);
 	}
