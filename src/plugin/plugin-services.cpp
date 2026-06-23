@@ -75,6 +75,29 @@ namespace ods::plugin {
 		return fn ? fn() : false;
 	}
 
+	uint32_t get_obs_streaming_output_mixers() {
+		using get_streaming_output_fn = obs_output_t *(*)();
+		static get_streaming_output_fn get_output =
+			find_obs_symbol<get_streaming_output_fn>("obs_frontend_get_streaming_output");
+		if (!get_output) return 0;
+		// obs_frontend_get_streaming_output は参照付きで返るため release が必要。
+		obs_output_t *output = get_output();
+		if (!output) return 0;
+
+		// 配信出力はトラックを mixer_mask ではなく音声エンコーダ経由で持つ
+		// (frontend は obs_output_set_audio_encoder を使い、obs_output_set_mixers は
+		//  録画出力専用)。そのため obs_output_get_mixers だけでは 0 になる。
+		// 各音声エンコーダのミキサーインデックスからトラックビットを復元する。
+		uint32_t mixers = static_cast<uint32_t>(obs_output_get_mixers(output));
+		for (size_t i = 0; i < MAX_AUDIO_MIXES; ++i) {
+			obs_encoder_t *aenc = obs_output_get_audio_encoder(output, i);
+			if (aenc)
+				mixers |= 1u << obs_encoder_get_mixer_index(aenc);
+		}
+		obs_output_release(output);
+		return mixers;
+	}
+
 	void add_obs_frontend_event_callback(obs_frontend_event_cb callback, void *private_data) {
 		using add_cb_fn = void (*)(obs_frontend_event_cb, void *);
 		static add_cb_fn fn =

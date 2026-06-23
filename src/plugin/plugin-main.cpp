@@ -276,6 +276,23 @@ void DelayStreamFilter::schedule_audio_sync_check(
 		if (current != last) {
 			d->request_props_refresh("audio_sync_offset_poll");
 		}
+
+		// 配信トラック割当を監視し、計測タブの注意表示状態が変われば再描画する。
+		// 詳細音声プロパティでのトラック変更はコールバックを発火しないためポーリングで拾う。
+		const bool streaming = ods::plugin::is_obs_streaming_active();
+		bool       on_track  = false;
+		if (ods::plugin::try_get_parent_on_streaming_track(d->context, on_track)) {
+			if (streaming && !on_track)
+				d->rtsp_seen_offtrack.store(true, std::memory_order_relaxed);
+			const auto note = ods::plugin::classify_rtsp_track_note(
+				on_track,
+				d->rtsp_seen_offtrack.load(std::memory_order_relaxed),
+				streaming);
+			const int note_i = static_cast<int>(note);
+			if (note_i != d->rtsp_track_note_state.exchange(note_i, std::memory_order_relaxed))
+				d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "rtsp_track_note_poll");
+		}
+
 		schedule_audio_sync_check(d, life_token_weak);
 	});
 }

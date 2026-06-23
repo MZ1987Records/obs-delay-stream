@@ -17,6 +17,26 @@ namespace ods::plugin {
 		return true;
 	}
 
+	bool try_get_parent_on_streaming_track(obs_source_t *filter_source, bool &out_on_track) {
+		if (!filter_source) return false;
+		obs_source_t *parent = obs_filter_get_parent(filter_source);
+		if (!parent) parent = obs_filter_get_target(filter_source);
+		if (!parent || is_obs_source_removed(parent)) return false;
+		const uint32_t parent_mixers = obs_source_get_audio_mixers(parent);
+		const uint32_t stream_mixers = get_obs_streaming_output_mixers();
+		// 配信出力が無い(stream_mixers==0)場合は重なり 0 = 未割当扱い。
+		out_on_track = (parent_mixers & stream_mixers) != 0;
+		return true;
+	}
+
+	RtspTrackNote classify_rtsp_track_note(bool on_track, bool seen_offtrack, bool streaming) {
+		// 配信中にトラック未割当 → 計測シグナルが配信に届かず計測不可。
+		if (streaming && !on_track) return RtspTrackNote::WarnOffTrack;
+		// 過去に未割当を観測した分離運用で、現在トラックに乗っている → 戻し忘れ注意。
+		if (seen_offtrack && on_track) return RtspTrackNote::NoteRevert;
+		return RtspTrackNote::None;
+	}
+
 	std::string resolve_rtmp_url_from_source(obs_source_t *source) {
 		if (!source) return "";
 		std::string url;

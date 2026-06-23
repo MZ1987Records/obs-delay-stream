@@ -615,6 +615,31 @@ namespace ods::ui {
 		void add_flow_rtsp_e2e_measure_section(obs_properties_t *grp, DelayStreamData *d) {
 			if (!grp || !d) return;
 
+			// 配信トラック割当の注意表示（計測不可の警告 / 戻し忘れ注意）。
+			// 状態の起点となる rtsp_seen_offtrack の更新はポーリング側が担い、ここでは読み取りのみ。
+			{
+				bool on_track = false;
+				if (ods::plugin::try_get_parent_on_streaming_track(d->context, on_track)) {
+					const auto note = ods::plugin::classify_rtsp_track_note(
+						on_track,
+						d->rtsp_seen_offtrack.load(std::memory_order_relaxed),
+						ods::plugin::is_obs_streaming_active());
+					const char *note_text = nullptr;
+					if (note == ods::plugin::RtspTrackNote::WarnOffTrack)
+						note_text = T_("RtspTrackWarnOffTrack");
+					else if (note == ods::plugin::RtspTrackNote::NoteRevert)
+						note_text = T_("RtspTrackNoteRevert");
+					if (note_text) {
+						obs_property_t *note_p = obs_properties_add_text(
+							grp,
+							"rtsp_track_note",
+							note_text,
+							OBS_TEXT_INFO);
+						obs_property_text_set_info_word_wrap(note_p, true);
+					}
+				}
+			}
+
 			const bool is_ws_measuring   = d->ws_any_measuring();
 			const bool is_rtsp_measuring = d->rtsp_e2e_measure.is_measuring();
 

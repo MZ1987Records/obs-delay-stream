@@ -1,6 +1,7 @@
 #pragma once
 
 #include <obs-module.h>
+#include <cstdint>
 #include <string>
 
 namespace ods::plugin {
@@ -10,6 +11,10 @@ namespace ods::plugin {
 
 	/// OBS の配信出力が現在アクティブか判定する
 	bool is_obs_streaming_active();
+
+	/// OBS 配信出力が使用するトラック（ミキサー）のビットマスクを取得する。
+	/// 配信出力が存在しない場合は 0 を返す。
+	uint32_t get_obs_streaming_output_mixers();
 
 	/// OBS フロントエンドイベントコールバックの型（obs-frontend-api.h 相当）
 	using obs_frontend_event_cb = void (*)(int event, void *private_data);

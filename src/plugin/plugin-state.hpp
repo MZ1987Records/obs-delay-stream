@@ -345,6 +345,8 @@ namespace ods::plugin {
 		std::atomic<bool>       ws_send_enabled{true};           ///< WebSocket 音声送信有効フラグ
 		std::atomic<bool>       inject_impulse{false};           ///< RTSP E2E 計測用プローブ注入フラグ
 		std::atomic<bool>       probe_silent_active{false};      ///< サイレントモード計測中フラグ（出力音声をゼロクリア）
+		std::atomic<bool>       rtsp_seen_offtrack{false};       ///< 計測文脈で配信トラック未割当を観測したか（戻し忘れ注意の起点）
+		std::atomic<int>        rtsp_track_note_state{0};        ///< 計測タブのトラック注意表示状態（再描画判定用、RtspTrackNote 値）
 		ods::audio::ProbeSignal probe_signal;                    ///< RTSP E2E 計測用チャープ信号
 
 		/// 非同期タスクがフィルタ生存中かチェックするトークン
