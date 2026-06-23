@@ -82,7 +82,12 @@ namespace ods::plugin {
 				d->sub_channels[s].buf.set_delay_ms(0);
 		}
 
-		d->master_buf.set_delay_ms(static_cast<uint32_t>(snap.master_delay_ms));
+		// 生演奏成立時はプラグイン挿入チャンネルが配信に乗らない前提のため、
+		// 本線(master_buf)へは自動調整ディレイを適用しない。配信側ディレイは
+		// 配信チャンネルの同期オフセットでユーザが手動設定する。
+		const uint32_t master_ms =
+			snap.live_perf_ok ? 0u : static_cast<uint32_t>(snap.master_delay_ms);
+		d->master_buf.set_delay_ms(master_ms);
 
 		// タイミング図を全計測済みチャンネルの接続先へ再送信する
 		if (d->router_running.load(std::memory_order_relaxed)) {
@@ -109,6 +114,8 @@ namespace ods::plugin {
 		constexpr int kSubOffsetMaxMs     = 3000;
 		constexpr int kAvatarLatencyMinMs = 0;
 		constexpr int kAvatarLatencyMaxMs = 5000;
+		constexpr int kLivePerfLeadMinMs  = 0;
+		constexpr int kLivePerfLeadMaxMs  = 10000;
 
 		// 既存設定（path文字列のみ）から cloudflared モードを推定する。
 		ExePathMode infer_cloudflared_mode_from_path(const char *raw_path) {
@@ -411,6 +418,8 @@ namespace ods::plugin {
 			fields.push_back({"stream_id", JsonFieldType::String});
 			fields.push_back({"host_ip_manual", JsonFieldType::String});
 			fields.push_back({kAvatarLatencyKey, JsonFieldType::Number});
+			fields.push_back({kLivePerfEnabledKey, JsonFieldType::Bool});
+			fields.push_back({kLivePerfLeadKey, JsonFieldType::Number});
 			fields.push_back({kMeasuredRtspE2eKey, JsonFieldType::Number});
 			fields.push_back({kRtspE2eMeasuredKey, JsonFieldType::Bool});
 			fields.push_back({"delay_table_selected_ch", JsonFieldType::Number});
@@ -580,6 +589,10 @@ namespace ods::plugin {
 					active_tab = TAB_PERFORMER_NAMES;
 				} else {
 					active_tab = static_cast<int>(obs_data_get_int(settings_, "active_tab"));
+					// 独立した生演奏タブがあった版の微調整タブ (7) を現在位置へ移行する。
+					if (active_tab == 7) {
+						active_tab = TAB_FINE_ADJUST;
+					}
 					if (active_tab < 0 || active_tab >= TAB_COUNT)
 						active_tab = TAB_PERFORMER_NAMES;
 				}
@@ -767,6 +780,15 @@ namespace ods::plugin {
 				// 再生バッファ
 				delay.playback_buffer_ms = data_->playback_buffer_ms;
 
+				delay.live_perf_enabled = obs_data_get_bool(settings_, kLivePerfEnabledKey);
+				{
+					int lead = static_cast<int>(obs_data_get_int(settings_, kLivePerfLeadKey));
+					if (lead < kLivePerfLeadMinMs) lead = kLivePerfLeadMinMs;
+					if (lead > kLivePerfLeadMaxMs) lead = kLivePerfLeadMaxMs;
+					delay.lead_time_ms = lead;
+					obs_data_set_int(settings_, kLivePerfLeadKey, lead);
+				}
+
 				// RTSP E2E 計測結果（OBS 設定から復元）
 				delay.measured_rtsp_e2e_ms =
 					static_cast<int>(obs_data_get_int(settings_, kMeasuredRtspE2eKey));
@@ -815,7 +837,9 @@ namespace ods::plugin {
 				recalc_all_delays(data_);
 
 				// タイミング図・サマリテーブルを最新の計算結果で再描画する。
-				data_->request_props_refresh_for_tabs({TAB_FINE_ADJUST}, "delay_recalc");
+				data_->request_props_refresh_for_tabs(
+					{TAB_FINE_ADJUST},
+					"delay_recalc");
 			}
 
 			// Ping 回数設定を正規化して flow へ適用する。
@@ -858,6 +882,8 @@ namespace ods::plugin {
 				obs_data_set_string(settings_, "host_ip_manual", obs_data_get_string(settings_, "host_ip_manual"));
 
 				obs_data_set_int(settings_, kAvatarLatencyKey, data_->delay.avatar_latency_ms);
+				obs_data_set_bool(settings_, kLivePerfEnabledKey, data_->delay.live_perf_enabled);
+				obs_data_set_int(settings_, kLivePerfLeadKey, data_->delay.lead_time_ms);
 				obs_data_set_int(settings_, kMeasuredRtspE2eKey, data_->delay.measured_rtsp_e2e_ms);
 				obs_data_set_bool(settings_, kRtspE2eMeasuredKey, data_->delay.rtsp_e2e_measured);
 				obs_data_set_int(settings_, "delay_table_selected_ch", static_cast<int>(obs_data_get_int(settings_, "delay_table_selected_ch")));
@@ -949,8 +975,10 @@ namespace ods::plugin {
 			return fail_with_reason(reason, "sub_ch_count out of range");
 		}
 
-		const int active_tab = static_cast<int>(obs_data_get_int(settings, "active_tab"));
-		if (active_tab < 0 || active_tab >= TAB_COUNT) {
+		const int     active_tab           = static_cast<int>(obs_data_get_int(settings, "active_tab"));
+		constexpr int kLegacyFineAdjustTab = 7;
+		if (active_tab < 0 ||
+			(active_tab >= TAB_COUNT && active_tab != kLegacyFineAdjustTab)) {
 			return fail_with_reason(reason, "active_tab out of range");
 		}
 
@@ -998,6 +1026,12 @@ namespace ods::plugin {
 		const int avatar_latency = static_cast<int>(obs_data_get_int(settings, kAvatarLatencyKey));
 		if (avatar_latency < kAvatarLatencyMinMs || avatar_latency > kAvatarLatencyMaxMs) {
 			return fail_with_reason(reason, "avatar_latency_ms out of range");
+		}
+		if (has_key(kLivePerfLeadKey)) {
+			const int lead = static_cast<int>(obs_data_get_int(settings, kLivePerfLeadKey));
+			if (lead < kLivePerfLeadMinMs || lead > kLivePerfLeadMaxMs) {
+				return fail_with_reason(reason, "live_perf_lead_ms out of range");
+			}
 		}
 
 		const std::string stream_id = obs_data_get_string(settings, "stream_id");

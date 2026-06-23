@@ -23,9 +23,16 @@ namespace ods::model {
 			bool warn            = false; ///< floor 補正の原因チャンネルか
 		};
 		std::array<ChDelay, MAX_SUB_CH> channels{};
-		int                             neg_max_ms      = 0; ///< 負値 raw の最大絶対値
-		int                             master_delay_ms = 0; ///< OBS 出力へのディレイ = neg_max
-		int                             active_count    = 0; ///< 計算対象チャンネル数
+		int                             neg_max_ms            = 0;     ///< 負値 raw の最大絶対値
+		int                             master_delay_ms       = 0;     ///< OBS 出力へのディレイ = neg_max
+		int                             active_count          = 0;     ///< 計算対象チャンネル数
+		bool                            live_perf_enabled     = false; ///< ローカル生演奏調整が有効か
+		bool                            live_perf_ok          = false; ///< 生演奏調整が成立しているか
+		int                             live_extra_ms         = 0;     ///< 成立時に追加したディレイ
+		int                             live_min_lead_ms      = 0;     ///< 成立に必要な最小先行時間
+		bool                            live_service_too_slow = false; ///< OBS配信遅延がアバター遅延を超えているか
+		bool                            live_lead_too_short   = false; ///< 先行時間が不足しているか
+		int                             live_lead_ms          = 0;     ///< 設定された先行時間
 	};
 
 	/**
@@ -46,6 +53,8 @@ namespace ods::model {
 		bool                            rtsp_e2e_measured    = false; ///< RTSP E2E 計測済みフラグ
 		int                             avatar_latency_ms    = 0;     ///< アバター同期レイテンシ (ms, 0-5000)
 		int                             playback_buffer_ms   = 0;     ///< 再生バッファ量 (ms)
+		bool                            live_perf_enabled    = false; ///< ローカル生演奏調整の有効フラグ
+		int                             lead_time_ms         = 500;   ///< 配信チャンネルに対する先行時間 (ms)
 		std::array<ChDelay, MAX_SUB_CH> channels{};                   ///< チャンネルごとのディレイ計算入力
 
 		/// 1 チャンネルの補正前ディレイ値を計算する。
@@ -106,7 +115,30 @@ namespace ods::model {
 				}
 			}
 
-			snap.master_delay_ms = snap.neg_max_ms;
+			snap.master_delay_ms   = snap.neg_max_ms;
+			snap.live_perf_enabled = live_perf_enabled;
+			snap.live_lead_ms      = lead_time_ms;
+			if (live_perf_enabled) {
+				snap.live_min_lead_ms      = snap.neg_max_ms + R - A;
+				snap.live_service_too_slow = R > A;
+				snap.live_lead_too_short =
+					!snap.live_service_too_slow && lead_time_ms < snap.live_min_lead_ms;
+				snap.live_perf_ok =
+					!snap.live_service_too_slow && !snap.live_lead_too_short;
+
+				if (snap.live_perf_ok) {
+					snap.live_extra_ms = lead_time_ms - snap.live_min_lead_ms;
+					// total_ms を設定済みのチャンネル（計測済み or 仮値）にのみ加算する。
+					// 未設定（全 ch 未計測）の total_ms=0 を live_extra で汚さない。
+					for (int di = 0; di < active_count; ++di) {
+						const int slot = display_order[di];
+						auto     &out  = snap.channels[slot];
+						if (out.has_measurement || out.provisional)
+							out.total_ms += snap.live_extra_ms;
+					}
+					snap.master_delay_ms += snap.live_extra_ms;
+				}
+			}
 			return snap;
 		}
 	};

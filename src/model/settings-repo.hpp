@@ -117,6 +117,20 @@ namespace ods::model {
 		void set_rtsp_e2e_measured(bool v) {
 			obs_data_set_bool(s_, plugin::kRtspE2eMeasuredKey, v);
 		}
+
+		bool live_perf_enabled() const {
+			return obs_data_get_bool(s_, plugin::kLivePerfEnabledKey);
+		}
+		void set_live_perf_enabled(bool v) {
+			obs_data_set_bool(s_, plugin::kLivePerfEnabledKey, v);
+		}
+
+		int live_perf_lead_ms() const {
+			return static_cast<int>(obs_data_get_int(s_, plugin::kLivePerfLeadKey));
+		}
+		void set_live_perf_lead_ms(int v) {
+			obs_data_set_int(s_, plugin::kLivePerfLeadKey, v);
+		}
 	};
 
 } // namespace ods::model

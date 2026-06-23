@@ -11,11 +11,14 @@ namespace ods::widgets {
 	 * QPainter によるタイミング図描画に必要な値をまとめる。
 	 */
 	struct DelayDiagramInfo {
-		int R;            ///< OBS 配信レイテンシ (ms)
-		int A;            ///< アバターレイテンシ (ms)
-		int buf;          ///< 再生バッファ (ms)
-		int ch_count;     ///< チャンネル数
-		int master_delay; ///< OBS 出力ディレイ = neg_max (ms)
+		int  R;            ///< OBS 配信レイテンシ (ms)
+		int  A;            ///< アバターレイテンシ (ms)
+		int  buf;          ///< 再生バッファ (ms)
+		int  ch_count;     ///< チャンネル数
+		int  master_delay; ///< OBS 出力ディレイ = neg_max (ms)
+		bool live_perf;    ///< ローカル生演奏の絶対時間軸を表示するか
+		bool live_ok;      ///< 生演奏調整が成立しているか（配信レーンを先行時間分ずらす）
+		int  lead_ms;      ///< ローカル音源の先行時間 (ms)
 
 		struct ChInfo {
 			float measured_ms; ///< ブラウザ配信レイテンシ C[i] (ms)。未計測は -1.0f
@@ -40,7 +43,9 @@ namespace ods::widgets {
 		const char *legend_buf           = nullptr; ///< "再生バッファ"
 		const char *legend_avatar        = nullptr; ///< "アバターレイテンシ"
 		const char *legend_broadcast     = nullptr; ///< "OBS配信レイテンシ"
+		const char *legend_lead          = nullptr; ///< "先行時間"
 		const char *lane_broadcast       = nullptr; ///< "配信" (レーンラベル)
+		const char *lane_local           = nullptr; ///< "Local" (レーンラベル)
 		const char *no_data              = nullptr; ///< "計測データなし"
 		const char *no_data_rtsp         = nullptr; ///< "OBS配信遅延が未計測です（…）"
 		const char *no_data_ws           = nullptr; ///< "WS配信遅延が未計測です（…）"

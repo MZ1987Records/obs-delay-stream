@@ -48,6 +48,9 @@ namespace ods::core {
 	static constexpr int TAB_FINE_ADJUST     = 6; ///< 微調整タブ
 	static constexpr int TAB_COUNT           = 7; ///< タブ総数
 
+	// 音声同期オフセット
+	static constexpr int REQUIRED_AUDIO_SYNC_OFFSET_MS = -950; ///< 配信に求める親ソースの同期オフセット (ms)
+
 	// UI 色（ステータスインジケーター）
 	static constexpr const char *UI_COLOR_STATUS_DOT_OK   = "#22CC44"; ///< 起動中・正常ステータスの丸アイコン色
 	static constexpr const char *UI_COLOR_STATUS_DOT_BUSY = "#FFAA00"; ///< 開始中・処理中ステータスの丸アイコン色

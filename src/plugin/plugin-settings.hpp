@@ -9,6 +9,8 @@ namespace ods::plugin {
 	struct DelayStreamData;
 
 	inline constexpr char kAvatarLatencyKey[]          = "avatar_latency_ms";
+	inline constexpr char kLivePerfEnabledKey[]        = "live_perf_enabled";
+	inline constexpr char kLivePerfLeadKey[]           = "live_perf_lead_ms";
 	inline constexpr char kMeasuredRtspE2eKey[]        = "measured_rtsp_e2e_ms";
 	inline constexpr char kRtspE2eMeasuredKey[]        = "rtsp_e2e_measured";
 	inline constexpr char kRtspUrlKey[]                = "rtsp_url";

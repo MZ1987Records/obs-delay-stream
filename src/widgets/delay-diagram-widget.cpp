@@ -7,8 +7,9 @@
  *   Ch.N : [ディレイ total_ms] [WS C[i]] ([環境 offset[i]]) [再生バッファ] [アバター遅延 A]
  *   ※ offset < 0 の場合は WS+offset を合算し環境セグメントを省略
  *   配信 : [ディレイ master]   [OBS配信遅延 R]
+ *   Local: [先行時間 Lead]      [アバター遅延 A]（生演奏 ON 時のみ）
  *
- * 全レーンの右端を揃えて「同期点」を視覚化する。
+ * 通常時は全レーンの右端を揃え、生演奏 ON 時はソース起点の絶対時間軸で描画する。
  */
 
 #include "widgets/delay-diagram-widget.hpp"
@@ -65,6 +66,9 @@ namespace ods::widgets {
 		inline QColor colorBroadcast() {
 			return QColor(20, 184, 166);
 		} // #14b8a6
+		inline QColor colorLead() {
+			return QColor(0, 0, 0);
+		} // #000000
 		// 仮値チャンネル用に色のアルファを下げる
 		inline QColor dimmed(QColor c) {
 			c.setAlpha(100);
@@ -73,11 +77,14 @@ namespace ods::widgets {
 
 		// 描画に必要なパース済みデータ。
 		struct DiagramData {
-			int R            = 0;
-			int A            = 0;
-			int buf          = 0;
-			int ch_count     = 0;
-			int master_delay = 0;
+			int  R            = 0;
+			int  A            = 0;
+			int  buf          = 0;
+			int  ch_count     = 0;
+			int  master_delay = 0;
+			bool live_perf    = false;
+			bool live_ok      = false;
+			int  lead_ms      = 0;
 
 			struct Ch {
 				float measured_ms = -1.0f;
@@ -95,7 +102,9 @@ namespace ods::widgets {
 			QString lbl_buf;
 			QString lbl_avatar;
 			QString lbl_broadcast;
+			QString lbl_lead;
 			QString lbl_lane_broadcast;
+			QString lbl_lane_local;
 			QString lbl_no_data;
 			QString lbl_no_data_rtsp;
 			QString lbl_no_data_ws;
@@ -154,12 +163,32 @@ namespace ods::widgets {
 			return lane;
 		}
 
-		Lane build_broadcast_lane(const QString &label, int master_delay, int R) {
+		Lane build_broadcast_lane(const QString &label, int master_delay, int R, bool live_split, int lead_ms) {
+			Lane lane;
+			lane.label = label;
+			if (live_split) {
+				// 生演奏成立時: プラグインチャンネルは配信に乗らないため、配信レーンも
+				// Local と同じく左端へ先行時間を置き、自動調整ディレイから先行時間を引く。
+				lane.segments = {
+					{lead_ms, colorLead()},
+					{master_delay - lead_ms, colorDelay()},
+					{R, colorBroadcast()},
+				};
+			} else {
+				lane.segments = {
+					{master_delay, colorDelay()},
+					{R, colorBroadcast()},
+				};
+			}
+			return lane;
+		}
+
+		Lane build_local_lane(const QString &label, int lead_ms, int A) {
 			Lane lane;
 			lane.label    = label;
 			lane.segments = {
-				{master_delay, colorDelay()},
-				{R, colorBroadcast()},
+				{lead_ms, colorLead()},
+				{A, colorAvatar()},
 			};
 			return lane;
 		}
@@ -217,10 +246,19 @@ namespace ods::widgets {
 						data_.buf,
 						ch.provisional));
 				}
+				// Local レーンは配信レーンの直前に置く。
+				if (data_.live_perf) {
+					lanes.push_back(build_local_lane(
+						data_.lbl_lane_local,
+						data_.lead_ms,
+						data_.A));
+				}
 				lanes.push_back(build_broadcast_lane(
 					data_.lbl_lane_broadcast,
 					data_.master_delay,
-					data_.R));
+					data_.R,
+					data_.live_perf && data_.live_ok,
+					data_.lead_ms));
 
 				// スケーリング
 				const int usableW = width() - kMarginL - kMarginR;
@@ -242,7 +280,13 @@ namespace ods::widgets {
 				const int broadcastIdx = static_cast<int>(lanes.size()) - 1;
 				for (int li = 0; li < static_cast<int>(lanes.size()); ++li) {
 					const int y = lanesTop + li * (kLaneH + kLaneGap);
-					drawLane(p, lanes[li], y, maxMs, scale, /*is_channel=*/li != broadcastIdx);
+					drawLane(
+						p,
+						lanes[li],
+						y,
+						maxMs,
+						scale,
+						/*mark_listen_timing=*/li != broadcastIdx);
 				}
 
 				// 凡例
@@ -254,6 +298,7 @@ namespace ods::widgets {
 
 			bool hasData() const {
 				if (data_.R <= 0) return false;
+				if (data_.live_perf) return true;
 				for (int i = 0; i < data_.ch_count && i < static_cast<int>(data_.channels.size()); ++i) {
 					if (data_.channels[i].measured_ms >= 0.0f) return true;
 				}
@@ -265,7 +310,7 @@ namespace ods::widgets {
 				for (int i = 0; i < data_.ch_count && i < static_cast<int>(data_.channels.size()); ++i) {
 					if (data_.channels[i].measured_ms >= 0.0f) ++n; // 計測済み + 仮値
 				}
-				return n + 1; // +1 for broadcast lane
+				return n + 1 + (data_.live_perf ? 1 : 0);
 			}
 
 			int noDataLineCount() const {
@@ -278,7 +323,7 @@ namespace ods::widgets {
 						break;
 					}
 				}
-				if (!has_ws) ++n;
+				if (!data_.live_perf && !has_ws) ++n;
 				return std::max(n, 1);
 			}
 
@@ -298,7 +343,7 @@ namespace ods::widgets {
 						break;
 					}
 				}
-				if (!has_ws && !data_.lbl_no_data_ws.isEmpty())
+				if (!data_.live_perf && !has_ws && !data_.lbl_no_data_ws.isEmpty())
 					lines << data_.lbl_no_data_ws;
 				if (data_.R <= 0 && !data_.lbl_no_data_rtsp.isEmpty())
 					lines << data_.lbl_no_data_rtsp;
@@ -363,8 +408,14 @@ namespace ods::widgets {
 				}
 			}
 
-			// レーン 1 本の描画。is_channel == true のときは環境遅延右端に ▼ マーカーを描く。
-			void drawLane(QPainter &p, const Lane &lane, int y, int maxMs, double scale, bool is_channel = false) const {
+			// レーン 1 本の描画。指定時はアバター区間の左端に ▼ マーカーを描く。
+			void drawLane(
+				QPainter   &p,
+				const Lane &lane,
+				int         y,
+				int         maxMs,
+				double      scale,
+				bool        mark_listen_timing = false) const {
 				// レーンラベル
 				{
 					const QColor textColor = palette().color(QPalette::Text);
@@ -378,10 +429,8 @@ namespace ods::widgets {
 							   lane.label);
 				}
 
-				// 右端揃え: 全レーンの右端を同じピクセルに合わせるため、
-				// 累積 ms から各セグメント境界のピクセル位置を算出する。
 				const int totalMs   = lane.total_ms();
-				const int leftPadMs = maxMs - totalMs;
+				const int leftPadMs = data_.live_perf ? 0 : maxMs - totalMs;
 
 				int   cumMs   = 0;
 				int   x       = kMarginL + static_cast<int>(leftPadMs * scale);
@@ -420,8 +469,7 @@ namespace ods::widgets {
 					x += w;
 				}
 
-				// 環境遅延右端に ▼ マーカー（出演者が音を聴くタイミング）
-				if (is_channel && hearX >= 0) {
+				if (mark_listen_timing && hearX >= 0) {
 					QFont markerFont = font();
 					markerFont.setPixelSize(10);
 					p.setFont(markerFont);
@@ -439,13 +487,15 @@ namespace ods::widgets {
 					QString label;
 				};
 				// 1行目: レイテンシ系の凡例（ディレイ以外）
-				const std::array<LegendItem, 5> row1Items = {{
+				std::vector<LegendItem> row1Items = {
 					{colorWs(), data_.lbl_ws},
 					{colorBuf(), data_.lbl_buf},
 					{colorEnv(), data_.lbl_env},
 					{colorAvatar(), data_.lbl_avatar},
 					{colorBroadcast(), data_.lbl_broadcast},
-				}};
+				};
+				if (data_.live_perf)
+					row1Items.push_back({colorLead(), data_.lbl_lead});
 
 				// 凡例の上に区切り線
 				const QColor lineColor = palette().color(QPalette::Mid);
@@ -553,8 +603,8 @@ namespace ods::widgets {
 		};
 
 		// ペイロード文字列をパースする。
-		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay
-		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws|lbl_listen_timing
+		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay|live_perf|lead_ms
+		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lead|lbl_lane_broadcast|lbl_lane_local|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws|lbl_listen_timing
 		//       |help_text|ch0_measured|ch0_total|ch0_offset|ch0_provisional|...
 		bool parse_diagram_payload(const QString &text, DiagramData &out) {
 			QStringList fields;
@@ -563,8 +613,8 @@ namespace ods::widgets {
 			if (fields.empty() || fields[0] != QLatin1String("DDIAGRAM"))
 				return false;
 
-			constexpr int kFixedFields = 6; // magic + R + A + buf + chCount + master_delay
-			constexpr int kLabelFields = 13;
+			constexpr int kFixedFields = 9;
+			constexpr int kLabelFields = 15;
 			if (fields.size() < kFixedFields + kLabelFields)
 				return false;
 
@@ -579,23 +629,29 @@ namespace ods::widgets {
 			if (!ok) return false;
 			out.master_delay = fields[5].toInt(&ok);
 			if (!ok) return false;
+			out.live_perf = fields[6] == QLatin1String("1");
+			out.lead_ms   = fields[7].toInt(&ok);
+			if (!ok) return false;
+			out.live_ok = fields[8] == QLatin1String("1");
 
-			out.lbl_delay          = fields[6];
-			out.lbl_delay_desc     = fields[7];
-			out.lbl_ws             = fields[8];
-			out.lbl_env            = fields[9];
-			out.lbl_buf            = fields[10];
-			out.lbl_avatar         = fields[11];
-			out.lbl_broadcast      = fields[12];
-			out.lbl_lane_broadcast = fields[13];
-			out.lbl_no_data        = fields[14];
-			out.lbl_no_data_rtsp   = fields[15];
-			out.lbl_no_data_ws     = fields[16];
-			out.lbl_listen_timing  = fields[17];
-			out.help_text          = fields[18];
+			out.lbl_delay          = fields[9];
+			out.lbl_delay_desc     = fields[10];
+			out.lbl_ws             = fields[11];
+			out.lbl_env            = fields[12];
+			out.lbl_buf            = fields[13];
+			out.lbl_avatar         = fields[14];
+			out.lbl_broadcast      = fields[15];
+			out.lbl_lead           = fields[16];
+			out.lbl_lane_broadcast = fields[17];
+			out.lbl_lane_local     = fields[18];
+			out.lbl_no_data        = fields[19];
+			out.lbl_no_data_rtsp   = fields[20];
+			out.lbl_no_data_ws     = fields[21];
+			out.lbl_listen_timing  = fields[22];
+			out.help_text          = fields[23];
 
-			constexpr int kChFieldStart = kFixedFields + kLabelFields; // 18
-			constexpr int kChFieldCount = 4;                           // measured_ms, total_ms, offset_ms, provisional
+			constexpr int kChFieldStart = kFixedFields + kLabelFields;
+			constexpr int kChFieldCount = 4; // measured_ms, total_ms, offset_ms, provisional
 			if (fields.size() < kChFieldStart + out.ch_count * kChFieldCount)
 				return false;
 
@@ -690,16 +746,27 @@ namespace ods::widgets {
 		if (!props || !prop_name || !*prop_name)
 			return nullptr;
 
-		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay
-		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lane_broadcast|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws|lbl_listen_timing
+		// 書式: DDIAGRAM|R|A|buf|chCount|master_delay|live_perf|lead_ms|live_ok
+		//       |lbl_delay|lbl_delay_desc|lbl_ws|lbl_env|lbl_buf|lbl_avatar|lbl_broadcast|lbl_lead|lbl_lane_broadcast|lbl_lane_local|lbl_no_data|lbl_no_data_rtsp|lbl_no_data_ws|lbl_listen_timing
 		//       |help_text|ch0_measured|ch0_total|ch0_offset|ch0_provisional|...
 		std::string payload = "DDIAGRAM";
 		{
-			char buf[64];
-			std::snprintf(buf, sizeof(buf), "|%d|%d|%d|%d|%d", info.R, info.A, info.buf, info.ch_count, info.master_delay);
+			char buf[80];
+			std::snprintf(
+				buf,
+				sizeof(buf),
+				"|%d|%d|%d|%d|%d|%d|%d|%d",
+				info.R,
+				info.A,
+				info.buf,
+				info.ch_count,
+				info.master_delay,
+				info.live_perf ? 1 : 0,
+				info.lead_ms,
+				info.live_ok ? 1 : 0);
 			payload += buf;
 		}
-		// 13 label fields
+		// 15 label fields
 		for (const char *s : {
 				 labels.legend_delay,
 				 labels.legend_delay_desc,
@@ -708,7 +775,9 @@ namespace ods::widgets {
 				 labels.legend_buf,
 				 labels.legend_avatar,
 				 labels.legend_broadcast,
+				 labels.legend_lead,
 				 labels.lane_broadcast,
+				 labels.lane_local,
 				 labels.no_data,
 				 labels.no_data_rtsp,
 				 labels.no_data_ws,

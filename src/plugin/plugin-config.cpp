@@ -69,6 +69,8 @@ namespace ods::plugin {
 		obs_data_set_default_string(settings, "stream_id", "");
 		obs_data_set_default_string(settings, "host_ip_manual", "");
 		obs_data_set_default_int(settings, kAvatarLatencyKey, 200);
+		obs_data_set_default_bool(settings, kLivePerfEnabledKey, false);
+		obs_data_set_default_int(settings, kLivePerfLeadKey, 500);
 		obs_data_set_default_int(settings, kMeasuredRtspE2eKey, 0);
 		obs_data_set_default_bool(settings, kRtspE2eMeasuredKey, false);
 		obs_data_set_default_int(settings, "delay_table_selected_ch", 0);

@@ -32,12 +32,19 @@ namespace ods::viewmodel {
 			core::Slot  slot = -1;   ///< 内部スロット番号
 		};
 
-		DelaySnapshot          snapshot;               ///< 全チャンネルディレイ計算結果
-		std::vector<ChDisplay> channels;               ///< チャンネルごとの表示データ
-		int                    selected_ch;            ///< テーブルで選択中のチャンネル
-		int                    rtsp_e2e_ms        = 0; ///< R: OBS 配信レイテンシ (ms)
-		int                    avatar_latency_ms  = 0; ///< A: アバターレイテンシ (ms)
-		int                    playback_buffer_ms = 0; ///< B: 再生バッファ (ms)
+		DelaySnapshot          snapshot;                      ///< 全チャンネルディレイ計算結果
+		std::vector<ChDisplay> channels;                      ///< チャンネルごとの表示データ
+		int                    selected_ch;                   ///< テーブルで選択中のチャンネル
+		int                    rtsp_e2e_ms           = 0;     ///< R: OBS 配信レイテンシ (ms)
+		int                    avatar_latency_ms     = 0;     ///< A: アバターレイテンシ (ms)
+		int                    playback_buffer_ms    = 0;     ///< B: 再生バッファ (ms)
+		bool                   live_perf_enabled     = false; ///< ローカル生演奏調整が有効か
+		bool                   live_perf_ok          = false; ///< 生演奏調整が成立しているか
+		int                    live_extra_ms         = 0;     ///< 成立時の追加ディレイ
+		int                    live_min_lead_ms      = 0;     ///< 必要な最小先行時間
+		bool                   live_service_too_slow = false; ///< 配信サービスの遅延が大きすぎるか
+		bool                   live_lead_too_short   = false; ///< 先行時間が不足しているか
+		int                    lead_time_ms          = 0;     ///< 設定された先行時間
 
 		/// DelayState と ChannelLayout から表示用 ViewModel を構築する。
 		static DelayViewModel build(const DelayState           &delay,
@@ -51,9 +58,16 @@ namespace ods::viewmodel {
 				order[i] = layout.display_order[i];
 			vm.snapshot = delay.calc_all_delays(order, sub_count);
 
-			vm.rtsp_e2e_ms        = delay.measured_rtsp_e2e_ms;
-			vm.avatar_latency_ms  = delay.avatar_latency_ms;
-			vm.playback_buffer_ms = delay.playback_buffer_ms;
+			vm.rtsp_e2e_ms           = delay.measured_rtsp_e2e_ms;
+			vm.avatar_latency_ms     = delay.avatar_latency_ms;
+			vm.playback_buffer_ms    = delay.playback_buffer_ms;
+			vm.live_perf_enabled     = vm.snapshot.live_perf_enabled;
+			vm.live_perf_ok          = vm.snapshot.live_perf_ok;
+			vm.live_extra_ms         = vm.snapshot.live_extra_ms;
+			vm.live_min_lead_ms      = vm.snapshot.live_min_lead_ms;
+			vm.live_service_too_slow = vm.snapshot.live_service_too_slow;
+			vm.live_lead_too_short   = vm.snapshot.live_lead_too_short;
+			vm.lead_time_ms          = vm.snapshot.live_lead_ms;
 
 			vm.selected_ch = 0;
 			if (settings) {

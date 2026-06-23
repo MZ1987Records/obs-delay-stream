@@ -198,7 +198,9 @@ void DelayStreamFilter::schedule_auto_measure(DelayStreamData *d, int ch) {
 			};
 			if (d->router.start_measurement(ch, pings, PING_INTV_MS)) {
 				d->sub_channels[ch].measure.start();
-				d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "auto_measure_start");
+				d->request_props_refresh_for_tabs(
+					{TAB_SYNC_LATENCY, TAB_FINE_ADJUST},
+					"auto_measure_start");
 				blog(LOG_INFO,
 					 "[obs-delay-stream] auto-measure started for ch=%d",
 					 ch + 1);
@@ -253,6 +255,7 @@ void DelayStreamFilter::schedule_widget_injects_for_tab(DelayStreamData *d, int 
 		break;
 	case TAB_FINE_ADJUST:
 		schedule_stepper_inject(ctx);
+		schedule_help_callout_inject(ctx);
 		schedule_delay_diagram_inject(ctx);
 		schedule_delay_table_inject(ctx);
 		break;
@@ -467,10 +470,14 @@ void DelayStreamFilter::setup_event_callbacks(DelayStreamData *d) {
 				d->delay.channels[ch].ws_measured = true;
 				// recalc_all_delays 内で全計測済みチャンネルのタイミング図も再送信される
 				save_measurement_and_recalc(d);
-				d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "router.on_any_latency_result.apply");
+				d->request_props_refresh_for_tabs(
+					{TAB_SYNC_LATENCY, TAB_FINE_ADJUST},
+					"router.on_any_latency_result.apply");
 			});
 		} else {
-			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "router.on_any_latency_result.invalid");
+			d->request_props_refresh_for_tabs(
+				{TAB_SYNC_LATENCY, TAB_FINE_ADJUST},
+				"router.on_any_latency_result.invalid");
 		}
 	};
 	// 接続済み未計測チャンネルをスキャンして自動計測をスケジュールする。
@@ -626,7 +633,9 @@ bool DelayStreamFilter::cb_measure_subchannel(obs_properties_t *, obs_property_t
 	if (d->router.client_count(i) == 0) return false;
 	bool ok = d->router.start_measurement(i, d->ping_count_setting.load(std::memory_order_relaxed), PING_INTV_MS);
 	if (ok) d->sub_channels[i].measure.start();
-	d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "cb_measure_subchannel");
+	d->request_props_refresh_for_tabs(
+		{TAB_SYNC_LATENCY, TAB_FINE_ADJUST},
+		"cb_measure_subchannel");
 	return false;
 }
 
@@ -690,6 +699,7 @@ obs_properties_t *DelayStreamFilter::get_properties(void *data) {
 			auto        vm = ods::viewmodel::DelayViewModel::build(d->delay, s5, d->layout);
 			if (s5) obs_data_release(s5);
 			ods::ui::delay::add_fine_tune_group(props, d, vm);
+			ods::ui::delay::add_live_perf_group(props, d, vm);
 			ods::ui::delay::add_delay_diagram_group(props, d, vm);
 			break;
 		}

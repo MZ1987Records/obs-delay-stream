@@ -45,8 +45,9 @@ namespace ods::ui {
 		using ods::plugin::make_sub_memo_key;
 		using ods::plugin::to_rtsp_url_from_rtmp;
 
-		static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS = -950LL * 1000000LL;
-		static constexpr char    kEmptyAbsolutePathSentinel[]  = "__OBS_DELAY_STREAM_EMPTY_ABSOLUTE_PATH__";
+		static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS =
+			static_cast<int64_t>(ods::core::REQUIRED_AUDIO_SYNC_OFFSET_MS) * 1000000LL;
+		static constexpr char kEmptyAbsolutePathSentinel[] = "__OBS_DELAY_STREAM_EMPTY_ABSOLUTE_PATH__";
 
 		static constexpr const char *kWarningTextColorLight = ods::core::UI_COLOR_WARNING_LIGHT;
 		static constexpr const char *kWarningTextColorDark  = ods::core::UI_COLOR_WARNING_DARK;
@@ -347,7 +348,9 @@ namespace ods::ui {
 				d->router.start_measurement(slot, pings, PING_INTV_MS, ch_index * PING_INTV_MS);
 				++ch_index;
 			}
-			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_FINE_ADJUST}, "cb_flow_start");
+			d->request_props_refresh_for_tabs(
+				{TAB_SYNC_LATENCY, TAB_FINE_ADJUST},
+				"cb_flow_start");
 			return false;
 		}
 
@@ -370,7 +373,9 @@ namespace ods::ui {
 			// リセット後に自動計測が有効なら未計測チャンネルの計測を開始
 			if (d->trigger_auto_measure_scan)
 				d->trigger_auto_measure_scan();
-			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "cb_flow_clear_results");
+			d->request_props_refresh_for_tabs(
+				{TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST},
+				"cb_flow_clear_results");
 			return false;
 		}
 
@@ -472,7 +477,9 @@ namespace ods::ui {
 							obs_data_release(s);
 						}
 						ods::plugin::recalc_all_delays(dd);
-						dd->request_props_refresh_for_tabs({TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "rtsp_e2e.on_result.apply"); }, c.release(), false);
+						dd->request_props_refresh_for_tabs(
+							{TAB_RTSP_LATENCY, TAB_FINE_ADJUST},
+							"rtsp_e2e.on_result.apply"); }, c.release(), false);
 				} else {
 					d->rtsp_e2e_measure.set_last_error(r.error_msg);
 					d->request_props_refresh_for_tabs({TAB_RTSP_LATENCY}, "rtsp_e2e.on_result.error");
@@ -545,7 +552,9 @@ namespace ods::ui {
 			d->rtsp_e2e_measure.cancel();
 			d->inject_impulse.store(false, std::memory_order_release);
 			d->probe_silent_active.store(false, std::memory_order_release);
-			d->request_props_refresh_for_tabs({TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST}, "cb_flow_reset");
+			d->request_props_refresh_for_tabs(
+				{TAB_SYNC_LATENCY, TAB_RTSP_LATENCY, TAB_FINE_ADJUST},
+				"cb_flow_reset");
 			return false;
 		}
 
@@ -624,18 +633,21 @@ namespace ods::ui {
 						on_track,
 						d->rtsp_seen_offtrack.load(std::memory_order_relaxed),
 						ods::plugin::is_obs_streaming_active());
-					const char *note_text = nullptr;
-					if (note == ods::plugin::RtspTrackNote::WarnOffTrack)
-						note_text = T_("RtspTrackWarnOffTrack");
-					else if (note == ods::plugin::RtspTrackNote::NoteRevert)
-						note_text = T_("RtspTrackNoteRevert");
+					const char    *note_text    = nullptr;
+					CalloutVariant note_variant = CalloutVariant::Warning;
+					if (note == ods::plugin::RtspTrackNote::WarnOffTrack) {
+						note_text    = T_("RtspTrackWarnOffTrack");
+						note_variant = CalloutVariant::Error;
+					} else if (note == ods::plugin::RtspTrackNote::NoteRevert) {
+						note_text    = T_("RtspTrackNoteRevert");
+						note_variant = CalloutVariant::Warning;
+					}
 					if (note_text) {
-						obs_property_t *note_p = obs_properties_add_text(
+						obs_properties_add_help_callout(
 							grp,
 							"rtsp_track_note",
 							note_text,
-							OBS_TEXT_INFO);
-						obs_property_text_set_info_word_wrap(note_p, true);
+							note_variant);
 					}
 				}
 			}
@@ -1055,6 +1067,27 @@ namespace ods::ui {
 		}
 	}
 
+	// 生演奏成立時、配信チャンネルへ設定すべき同期オフセット値の警告を追加する。
+	// グローバル top グループ / WS計測タブから呼ぶため、inject 不要の OBS_TEXT_INFO を使う。
+	static void add_live_perf_offset_warning_if_needed(
+		obs_properties_t *grp,
+		DelayStreamData  *d,
+		const char       *prop_name) {
+		if (!grp || !d) return;
+		const int                          count = d->layout.count.load(std::memory_order_acquire);
+		std::array<core::Slot, MAX_SUB_CH> order{};
+		for (int i = 0; i < count; ++i)
+			order[i] = d->layout.display_order[i];
+		const auto snap = d->delay.calc_all_delays(order, count);
+		if (!snap.live_perf_ok) return;
+
+		const int sync_offset_ms =
+			REQUIRED_AUDIO_SYNC_OFFSET_MS + (snap.master_delay_ms - d->delay.lead_time_ms);
+		const std::string text = string_printf(T_("LivePerfSyncOffsetBanner"), sync_offset_ms);
+		obs_property_t   *p    = obs_properties_add_text(grp, prop_name, text.c_str(), OBS_TEXT_INFO);
+		obs_property_text_set_info_word_wrap(p, true);
+	}
+
 	void add_plugin_group(obs_properties_t *props, DelayStreamData *d) {
 		if (!props || !d) return;
 		obs_properties_t *grp = obs_properties_create();
@@ -1129,6 +1162,7 @@ namespace ods::ui {
 					OBS_TEXT_INFO);
 				obs_property_text_set_info_word_wrap(warn_p, true);
 			}
+			add_live_perf_offset_warning_if_needed(grp, d, "live_perf_offset_warning_top");
 		}
 
 		if (!d->is_warning_only_instance()) {
@@ -1562,6 +1596,7 @@ namespace ods::ui {
 				OBS_TEXT_INFO);
 			obs_property_text_set_info_word_wrap(warn_p, true);
 		}
+		add_live_perf_offset_warning_if_needed(grp, d, "live_perf_offset_warning");
 		obs_properties_add_group(props, "grp_flow", T_("GroupSyncFlow"), OBS_GROUP_NORMAL, grp);
 	}
 
