@@ -255,7 +255,7 @@ jobs:
       - name: Configure plugin (ProgramData layout)
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=OFF
+          cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=OFF
 
       - name: Build plugin
         shell: pwsh
@@ -273,7 +273,7 @@ jobs:
       - name: Configure legacy layout
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=ON
+          cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=ON
 
       - name: Install to dist (Program Files legacy layout)
         shell: pwsh
