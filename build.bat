@@ -193,10 +193,22 @@ echo   Cloning asio v1.18.2...
 git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git "%PLUGIN_DIR%\third_party\asio"
 if errorlevel 1 goto :error
 echo   asio: OK
-goto :step2
+goto :opus_check
 
 :asio_ok
 echo   asio: already exists
+
+:opus_check
+if exist "%PLUGIN_DIR%\third_party\opus\include\opus.h" goto :opus_ok
+if exist "%PLUGIN_DIR%\third_party\opus" rmdir /s /q "%PLUGIN_DIR%\third_party\opus"
+echo   Cloning opus v1.5.2...
+git clone --branch v1.5.2 --depth 1 https://github.com/xiph/opus.git "%PLUGIN_DIR%\third_party\opus"
+if errorlevel 1 goto :error
+echo   opus: OK
+goto :step2
+
+:opus_ok
+echo   opus: already exists
 
 :step2
 echo.

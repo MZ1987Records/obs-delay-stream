@@ -582,7 +582,7 @@ namespace ods::network {
 		int target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
 		if (!is_valid_opus_sample_rate(target_sample_rate)) target_sample_rate = 48000;
 		int output_sample_rate = target_sample_rate;
-		if (enc.ctx &&
+		if (enc.ready() &&
 			enc.input_sample_rate == (int)sample_rate &&
 			enc.output_sample_rate == output_sample_rate &&
 			enc.channels == (int)channels &&
@@ -602,62 +602,21 @@ namespace ods::network {
 	bool StreamRouter::encode_opus_packets(int ch, const float *data, size_t frames, uint32_t sample_rate, uint32_t channels, OpusPacketList &out) {
 		if (!ensure_opus_encoder(ch, sample_rate, channels)) return false;
 		OpusEncoder &enc = opus_[ch];
-		if (!enc.ctx || enc.disabled || !enc.fifo) return false;
+		if (!enc.ready() || enc.disabled) return false;
 
-		// ディレイ変更に伴うフラッシュ: 完全フレームを吐き切ってからエンコーダ状態リセット
+		// ディレイ変更に伴うフラッシュ: 完全フレームを吐き切ってからエンコーダ状態をリセット
 		if (enc.flush_pending) {
 			enc.flush_pending = false;
-			if (!enc.drain(MAGIC_OPUS, out)) {
+			if (!enc.flush(MAGIC_OPUS, out)) {
 				enc.disabled = true;
 				return false;
 			}
 		}
 
-		if (!enc.feed_fifo(data, frames)) {
+		// 入力 PCM を取り込み、揃った完全フレームをエンコードして out に追加する。
+		if (!enc.feed(data, frames, MAGIC_OPUS, out)) {
 			enc.disabled = true;
 			return false;
-		}
-
-		while (av_audio_fifo_size(enc.fifo) >= enc.frame_size) {
-			if (av_frame_make_writable(enc.frame) < 0) {
-				enc.disabled = true;
-				return false;
-			}
-			enc.frame->nb_samples = enc.frame_size;
-			enc.frame->pts        = enc.pts;
-			enc.pts += enc.frame_size;
-			int read = av_audio_fifo_read(enc.fifo, (void **)enc.frame->data, enc.frame_size);
-			if (read != enc.frame_size) {
-				enc.disabled = true;
-				return false;
-			}
-
-			int ret = avcodec_send_frame(enc.ctx, enc.frame);
-			if (ret < 0) {
-				enc.disabled = true;
-				return false;
-			}
-
-			while (ret >= 0) {
-				ret = avcodec_receive_packet(enc.ctx, enc.pkt);
-				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
-				if (ret < 0) {
-					enc.disabled = true;
-					return false;
-				}
-				uint32_t  pkt_frames = (enc.pkt->duration > 0)
-										   ? (uint32_t)enc.pkt->duration
-										   : (uint32_t)enc.frame_size;
-				auto      pkt        = std::make_shared<std::string>(16 + enc.pkt->size, '\0');
-				uint32_t *hdr        = reinterpret_cast<uint32_t *>(&(*pkt)[0]);
-				hdr[0]               = MAGIC_OPUS;
-				hdr[1]               = (uint32_t)enc.output_sample_rate;
-				hdr[2]               = channels;
-				hdr[3]               = pkt_frames;
-				std::memcpy(&(*pkt)[16], enc.pkt->data, enc.pkt->size);
-				out.push_back(std::move(pkt));
-				av_packet_unref(enc.pkt);
-			}
 		}
 		return true;
 	}
@@ -954,7 +913,7 @@ namespace ods::network {
 		}
 		if (!srv) return;
 		try {
-			auto        con  = srv->get_con_from_hdl(h);
+			auto con = srv->get_con_from_hdl(h);
 			std::string raw  = con->get_resource();
 			std::string path = raw;
 			std::string query;

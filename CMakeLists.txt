@@ -50,6 +50,18 @@ if(NOT Qt6_FOUND)
   find_package(Qt5 5.15 COMPONENTS Widgets REQUIRED)
 endif()
 
+# ---- libopus (vendored, static link) ----
+# Opus エンコードは FFmpeg ではなく libopus を直接静的リンクして行う。
+# これにより plugin の import から avcodec/avutil/swresample が消え、
+# OBS 同梱 FFmpeg の世代差に依存せずロードできる。
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/opus/CMakeLists.txt")
+  message(FATAL_ERROR "libopus source not found at third_party/opus. Run build.bat / CI clone step.")
+endif()
+set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/opus EXCLUDE_FROM_ALL)
+
 # ---- Plugin target ----
 add_library(obs-delay-stream MODULE
   src/plugin/plugin-main.cpp
@@ -181,14 +193,16 @@ target_include_directories(obs-delay-stream BEFORE PRIVATE
 # OBS include dirs come AFTER (added via target_link_libraries OBS::libobs)
 target_link_libraries(obs-delay-stream
   OBS::libobs
-  avcodec
-  avutil
-  swresample
+  opus
   ws2_32
   wininet
   mswsock
   iphlpapi
   psapi
+)
+
+target_include_directories(obs-delay-stream PRIVATE
+  third_party/opus/include
 )
 
 

@@ -1,268 +1,199 @@
+/*
+ * opus-encoder.cpp
+ *
+ * libopus による Opus エンコード実装。サンプルレート変換は libobs の
+ * audio_resampler（obs.dll 内）に委譲し、FFmpeg(libav*) には依存しない。
+ * これによりプラグインの import から avcodec/avutil/swresample が消え、
+ * OBS 同梱 FFmpeg の世代差に影響されずロードできる。
+ */
+
 #include "network/opus-encoder.hpp"
 
 #include <cstring>
 
 namespace ods::network {
 
+	namespace {
+
+		// チャンネル数に対応する libobs スピーカーレイアウト。
+		// リサンプルではレートのみ変換し、チャンネル数は変えない。
+		speaker_layout speakers_from_channels(int ch) {
+			switch (ch) {
+			case 1:
+				return SPEAKERS_MONO;
+			case 2:
+				return SPEAKERS_STEREO;
+			case 3:
+				return SPEAKERS_2POINT1;
+			case 4:
+				return SPEAKERS_4POINT0;
+			case 5:
+				return SPEAKERS_4POINT1;
+			case 6:
+				return SPEAKERS_5POINT1;
+			case 8:
+				return SPEAKERS_7POINT1;
+			default:
+				return SPEAKERS_STEREO;
+			}
+		}
+
+	} // namespace
+
 	void OpusEncoder::reset() {
-		if (pkt) {
-			av_packet_free(&pkt);
+		if (enc_) {
+			opus_encoder_destroy(enc_);
+			enc_ = nullptr;
 		}
-		if (frame) {
-			av_frame_free(&frame);
+		if (resampler_) {
+			audio_resampler_destroy(resampler_);
+			resampler_ = nullptr;
 		}
-		if (fifo) {
-			av_audio_fifo_free(fifo);
-			fifo = nullptr;
-		}
-		if (swr) {
-			swr_free(&swr);
-		}
-		if (ctx) {
-			avcodec_free_context(&ctx);
-		}
+		fifo_.clear();
+		fifo_head_         = 0;
+		frame_size         = 0;
 		input_sample_rate  = 0;
 		output_sample_rate = 0;
 		channels           = 0;
-		frame_size         = 0;
 		bitrate_kbps       = 0;
 		complexity         = 10;
-		pts                = 0;
 		disabled           = false;
 		flush_pending      = false;
 	}
 
-	bool OpusEncoder::init(int input_sample_rate,
-						   int num_channels,
-						   int bitrate_kbps,
-						   int target_sample_rate) {
+	bool OpusEncoder::init(int in_rate, int num_channels, int br_kbps, int target_sample_rate) {
 		reset();
-		const AVCodec *codec = avcodec_find_encoder_by_name("libopus");
-		if (!codec) codec = avcodec_find_encoder_by_name("opus");
-		if (!codec) {
-			blog(LOG_WARNING, "[obs-delay-stream] Opus encoder not found (libopus/opus)");
+
+		int rate = is_valid_opus_sample_rate(target_sample_rate) ? target_sample_rate : 48000;
+		if (br_kbps < 24) br_kbps = 24;
+		if (br_kbps > 320) br_kbps = 320;
+
+		int err = OPUS_OK;
+		enc_    = opus_encoder_create(rate, num_channels, OPUS_APPLICATION_AUDIO, &err);
+		if (err != OPUS_OK || !enc_) {
+			blog(LOG_WARNING, "[obs-delay-stream] Opus encoder create failed (%d)", err);
+			enc_     = nullptr;
 			disabled = true;
 			return false;
 		}
+		opus_encoder_ctl(enc_, OPUS_SET_BITRATE(br_kbps * 1000));
+		opus_encoder_ctl(enc_, OPUS_SET_COMPLEXITY(complexity));
+		opus_encoder_ctl(enc_, OPUS_SET_VBR(1));
 
-		ctx = avcodec_alloc_context3(codec);
-		if (!ctx) {
-			disabled = true;
-			return false;
+		frame_size = rate / 50; // 20ms
+
+		// 入力レートが Opus 出力レートと異なる場合のみリサンプラを生成する。
+		// libopus はインターリーブ float をそのまま受け取れるため、
+		// AUDIO_FORMAT_FLOAT（インターリーブ）で揃える。
+		if (in_rate != rate) {
+			resample_info src{};
+			src.samples_per_sec = static_cast<uint32_t>(in_rate);
+			src.format          = AUDIO_FORMAT_FLOAT;
+			src.speakers        = speakers_from_channels(num_channels);
+			resample_info dst   = src;
+			dst.samples_per_sec = static_cast<uint32_t>(rate);
+			resampler_          = audio_resampler_create(&dst, &src);
+			if (!resampler_) {
+				blog(LOG_WARNING, "[obs-delay-stream] audio_resampler_create failed");
+				disabled = true;
+				return false;
+			}
 		}
 
-		int actual_sample_rate = is_valid_opus_sample_rate(target_sample_rate)
-									 ? target_sample_rate
-									 : 48000;
-		if (bitrate_kbps < 24) bitrate_kbps = 24;
-		if (bitrate_kbps > 320) bitrate_kbps = 320;
+		input_sample_rate  = in_rate;
+		output_sample_rate = rate;
+		channels           = num_channels;
+		bitrate_kbps       = br_kbps;
+		fifo_.clear();
+		fifo_head_ = 0;
+		return true;
+	}
 
-		ctx->sample_rate = actual_sample_rate;
-		av_channel_layout_default(&ctx->ch_layout, num_channels);
-		ctx->bit_rate              = static_cast<int64_t>(bitrate_kbps) * 1000;
-		ctx->time_base             = AVRational{1, actual_sample_rate};
-		ctx->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
-		(void)av_opt_set_int(ctx, "compression_level", complexity, 0);
+	bool OpusEncoder::feed(const float *data, size_t frames, uint32_t magic_opus, OpusPacketList &out) {
+		if (!enc_) return true;
 
-		const enum AVSampleFormat *sample_fmts = nullptr;
-#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(61, 13, 100)
-		sample_fmts = codec->sample_fmts;
-#else
-		avcodec_get_supported_config(
-			ctx,
-			codec,
-			AV_CODEC_CONFIG_SAMPLE_FORMAT,
-			0,
-			(const void **)&sample_fmts,
-			nullptr);
-#endif
-		ctx->sample_fmt = AV_SAMPLE_FMT_NONE;
-		if (sample_fmts) {
-			for (const enum AVSampleFormat *fmt = sample_fmts;
-				 *fmt != AV_SAMPLE_FMT_NONE;
-				 ++fmt) {
-				if (*fmt == AV_SAMPLE_FMT_FLT) {
-					ctx->sample_fmt = *fmt;
-					break;
+		if (data && frames > 0) {
+			if (!resampler_) {
+				fifo_.insert(fifo_.end(), data, data + frames * static_cast<size_t>(channels));
+			} else {
+				uint8_t       *out_planes[MAX_AV_PLANES] = {};
+				uint32_t       out_frames                = 0;
+				uint64_t       ts_offset                 = 0;
+				const uint8_t *in_planes[MAX_AV_PLANES]  = {};
+				in_planes[0]                             = reinterpret_cast<const uint8_t *>(data);
+				if (!audio_resampler_resample(
+						resampler_,
+						out_planes,
+						&out_frames,
+						&ts_offset,
+						in_planes,
+						static_cast<uint32_t>(frames))) {
+					return false;
+				}
+				if (out_frames > 0 && out_planes[0]) {
+					const float *res = reinterpret_cast<const float *>(out_planes[0]);
+					fifo_.insert(fifo_.end(), res, res + static_cast<size_t>(out_frames) * channels);
 				}
 			}
-			if (ctx->sample_fmt == AV_SAMPLE_FMT_NONE) {
-				ctx->sample_fmt = sample_fmts[0];
-			}
-		} else {
-			ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;
 		}
 
-		if (avcodec_open2(ctx, codec, nullptr) < 0) {
-			blog(LOG_WARNING, "[obs-delay-stream] Opus encoder open failed");
-			disabled = true;
-			return false;
-		}
-
-		frame_size = ctx->frame_size;
-		if (frame_size <= 0) {
-			blog(LOG_WARNING, "[obs-delay-stream] Opus frame_size unavailable");
-			disabled = true;
-			return false;
-		}
-
-		frame = av_frame_alloc();
-		pkt   = av_packet_alloc();
-		if (!frame || !pkt) {
-			disabled = true;
-			return false;
-		}
-
-		frame->nb_samples  = frame_size;
-		frame->format      = ctx->sample_fmt;
-		frame->sample_rate = ctx->sample_rate;
-		if (av_channel_layout_copy(&frame->ch_layout, &ctx->ch_layout) < 0) {
-			disabled = true;
-			return false;
-		}
-		if (av_frame_get_buffer(frame, 0) < 0) {
-			blog(LOG_WARNING, "[obs-delay-stream] Opus frame buffer alloc failed");
-			disabled = true;
-			return false;
-		}
-
-		if (ctx->sample_fmt != AV_SAMPLE_FMT_FLT || input_sample_rate != actual_sample_rate) {
-			AVChannelLayout in_layout;
-			av_channel_layout_default(&in_layout, num_channels);
-			if (swr_alloc_set_opts2(
-					&swr,
-					&ctx->ch_layout,
-					ctx->sample_fmt,
-					actual_sample_rate,
-					&in_layout,
-					AV_SAMPLE_FMT_FLT,
-					input_sample_rate,
-					0,
-					nullptr) < 0 ||
-				!swr) {
-				blog(LOG_WARNING, "[obs-delay-stream] Opus swr_alloc failed");
-				disabled = true;
-				return false;
-			}
-			if (swr_init(swr) < 0) {
-				blog(LOG_WARNING, "[obs-delay-stream] Opus swr_init failed");
-				disabled = true;
-				return false;
-			}
-		}
-
-		fifo = av_audio_fifo_alloc(ctx->sample_fmt, num_channels, frame_size * 8);
-		if (!fifo) {
-			blog(LOG_WARNING, "[obs-delay-stream] Opus fifo alloc failed");
-			disabled = true;
-			return false;
-		}
-
-		this->input_sample_rate  = input_sample_rate;
-		this->output_sample_rate = actual_sample_rate;
-		this->channels           = num_channels;
-		this->bitrate_kbps       = bitrate_kbps;
-		pts                      = 0;
-		return true;
+		return encode_ready_frames(magic_opus, out);
 	}
 
-	bool OpusEncoder::drain(uint32_t magic_opus, OpusPacketList &out) {
-		if (!ctx || !fifo || !frame || !pkt) return true;
+	bool OpusEncoder::encode_ready_frames(uint32_t magic_opus, OpusPacketList &out) {
+		if (!enc_ || frame_size <= 0 || channels <= 0) return true;
 
-		// 完全フレーム単位でのみ送出する。
-		while (av_audio_fifo_size(fifo) >= frame_size) {
-			if (av_frame_make_writable(frame) < 0) return false;
-			frame->nb_samples = frame_size;
-			frame->pts        = pts;
-			pts += frame_size;
-			int rd = av_audio_fifo_read(fifo, (void **)frame->data, frame_size);
-			if (rd != frame_size) return false;
+		const size_t  need = static_cast<size_t>(frame_size) * static_cast<size_t>(channels);
+		unsigned char packet[4000]; // Opus 推奨の最大パケットサイズ
 
-			int ret = avcodec_send_frame(ctx, frame);
-			if (ret < 0) return false;
-			while (ret >= 0) {
-				ret = avcodec_receive_packet(ctx, pkt);
-				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) break;
-				if (ret < 0) return false;
-				uint32_t  pkt_frames = (pkt->duration > 0)
-										   ? (uint32_t)pkt->duration
-										   : (uint32_t)frame_size;
-				auto      p          = std::make_shared<std::string>(16 + pkt->size, '\0');
-				uint32_t *hdr        = reinterpret_cast<uint32_t *>(&(*p)[0]);
-				hdr[0]               = magic_opus;
-				hdr[1]               = (uint32_t)output_sample_rate;
-				hdr[2]               = (uint32_t)channels;
-				hdr[3]               = pkt_frames;
-				std::memcpy(&(*p)[16], pkt->data, pkt->size);
+		while (fifo_.size() - fifo_head_ >= need) {
+			const float *pcm = fifo_.data() + fifo_head_;
+			int          n   = opus_encode_float(
+				enc_,
+				pcm,
+				frame_size,
+				packet,
+				static_cast<opus_int32>(sizeof(packet)));
+			if (n < 0) {
+				blog(LOG_WARNING, "[obs-delay-stream] opus_encode_float failed (%d)", n);
+				return false;
+			}
+			if (n > 0) {
+				auto      p   = std::make_shared<std::string>(16 + static_cast<size_t>(n), '\0');
+				uint32_t *hdr = reinterpret_cast<uint32_t *>(&(*p)[0]);
+				hdr[0]        = magic_opus;
+				hdr[1]        = static_cast<uint32_t>(output_sample_rate);
+				hdr[2]        = static_cast<uint32_t>(channels);
+				hdr[3]        = static_cast<uint32_t>(frame_size);
+				std::memcpy(&(*p)[16], packet, static_cast<size_t>(n));
 				out.push_back(std::move(p));
-				av_packet_unref(pkt);
 			}
+			fifo_head_ += need;
 		}
 
-		// 端数はフレーム化できないため破棄する。
-		int remain = av_audio_fifo_size(fifo);
-		if (remain > 0) av_audio_fifo_drain(fifo, remain);
-
-		// 予測状態だけをリセットし、PTS 連続性は維持する。
-		avcodec_flush_buffers(ctx);
+		compact_fifo();
 		return true;
 	}
 
-	bool OpusEncoder::feed_fifo(const float *data, size_t frames) {
-		if (!ctx || !fifo || !data || frames == 0) return true;
-
-		if (!swr) {
-			int next_size = av_audio_fifo_size(fifo) + static_cast<int>(frames);
-			if (av_audio_fifo_realloc(fifo, next_size) < 0) return false;
-			const uint8_t *in_data[1] = {
-				reinterpret_cast<const uint8_t *>(data)};
-			int wrote = av_audio_fifo_write(fifo, (void **)in_data, static_cast<int>(frames));
-			return wrote == static_cast<int>(frames);
+	void OpusEncoder::compact_fifo() {
+		if (fifo_head_ == 0) return;
+		if (fifo_head_ >= fifo_.size()) {
+			fifo_.clear();
+		} else {
+			fifo_.erase(fifo_.begin(), fifo_.begin() + static_cast<std::ptrdiff_t>(fifo_head_));
 		}
+		fifo_head_ = 0;
+	}
 
-		int out_capacity = static_cast<int>(av_rescale_rnd(
-			swr_get_delay(swr, input_sample_rate) + static_cast<int64_t>(frames),
-			output_sample_rate,
-			input_sample_rate,
-			AV_ROUND_UP));
-		if (out_capacity <= 0) return true;
+	bool OpusEncoder::flush(uint32_t magic_opus, OpusPacketList &out) {
+		if (!enc_) return true;
 
-		uint8_t **conv_data     = nullptr;
-		int       conv_linesize = 0;
-		if (av_samples_alloc_array_and_samples(
-				&conv_data,
-				&conv_linesize,
-				channels,
-				out_capacity,
-				ctx->sample_fmt,
-				0) < 0) {
-			return false;
-		}
-
-		const uint8_t *in_data[1] = {
-			reinterpret_cast<const uint8_t *>(data)};
-		int converted = swr_convert(
-			swr,
-			conv_data,
-			out_capacity,
-			in_data,
-			static_cast<int>(frames));
-		if (converted < 0) {
-			av_freep(&conv_data[0]);
-			av_freep(&conv_data);
-			return false;
-		}
-
-		int next_size = av_audio_fifo_size(fifo) + converted;
-		if (av_audio_fifo_realloc(fifo, next_size) < 0) {
-			av_freep(&conv_data[0]);
-			av_freep(&conv_data);
-			return false;
-		}
-		int wrote = av_audio_fifo_write(fifo, (void **)conv_data, converted);
-		av_freep(&conv_data[0]);
-		av_freep(&conv_data);
-		return wrote == converted;
+		// 端数（部分フレーム）は破棄せず保持し、続く feed() の新規サンプルと
+		// 連続して符号化する。破棄すると再同期ごとに最大 1 フレーム(20ms)の
+		// タイムライン欠損が生じ、受信側のアンダーラン（再同期ギャップ）を誘発する。
+		// ディレイ変更前後の不連続は 1 フレーム内の軽微なクリックで済み、Opus は
+		// これをそのまま符号化できる。エンコーダ状態もリセットしない（連続デコーダ整合のため）。
+		return encode_ready_frames(magic_opus, out);
 	}
 
 } // namespace ods::network

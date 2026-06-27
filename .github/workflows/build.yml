@@ -11,9 +11,21 @@ jobs:
     permissions:
       contents: write
     env:
-      OBS_STUDIO_REF: master
+      # 実値はリポジトリ直下 OBS_STUDIO_REF ファイルから次ステップで上書きする。
+      # ここでの宣言は env コンテキストの静的解析を満たすためのプレースホルダ。
+      OBS_STUDIO_REF: ""
     steps:
       - uses: actions/checkout@v7
+
+      - name: Resolve target OBS ref (single source of truth)
+        shell: pwsh
+        run: |
+          # サポート下限の OBS バージョンはリポジトリ直下 OBS_STUDIO_REF で一元管理する。
+          # FFmpeg 依存は排除済みのため、ここは「libobs API 下限」を決めるだけの意味になる。
+          $ref = (Get-Content "$env:GITHUB_WORKSPACE/OBS_STUDIO_REF" -Raw).Trim()
+          if (-not $ref) { throw "OBS_STUDIO_REF file is empty" }
+          Add-Content $env:GITHUB_ENV "OBS_STUDIO_REF=$ref"
+          Write-Host "Target OBS ref (from OBS_STUDIO_REF file): $ref"
 
       - uses: actions/setup-node@v6
         with:
@@ -154,11 +166,17 @@ jobs:
         id: obs
         shell: pwsh
         run: |
-          $sha = (git ls-remote https://github.com/obsproject/obs-studio.git "refs/heads/$env:OBS_STUDIO_REF" | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
-          if (-Not $sha) { throw "Failed to resolve OBS ref: $env:OBS_STUDIO_REF" }
+          # タグ（注釈付き含む）・ブランチのいずれでも解決できるようにする。
+          # 注釈付きタグは ^{} で参照先 commit を優先採用する。
+          $ref = $env:OBS_STUDIO_REF
+          $lines = git ls-remote https://github.com/obsproject/obs-studio.git "refs/tags/$ref^{}" "refs/tags/$ref" "refs/heads/$ref"
+          $deref = $lines | Where-Object { $_ -match '\^\{\}$' } | Select-Object -First 1
+          $line  = if ($deref) { $deref } else { $lines | Select-Object -First 1 }
+          $sha   = ($line -split '\s+')[0]
+          if (-Not $sha) { throw "Failed to resolve OBS ref: $ref" }
           Add-Content $env:GITHUB_ENV "OBS_STUDIO_SHA=$sha"
           Add-Content $env:GITHUB_OUTPUT "sha=$sha"
-          Write-Host "OBS ref $env:OBS_STUDIO_REF => $sha"
+          Write-Host "OBS ref $ref => $sha"
 
       - name: Prepare third_party
         shell: pwsh
@@ -184,11 +202,11 @@ jobs:
             third_party/obs-studio/build_x64
             third_party/obs-studio/.deps
           key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
+          # 同一 ref かつ同一 SHA の範囲のみフォールバックを許可する。
+          # 旧来の広いフォールバックは異なる OBS/obs-deps 世代を跨いで拾うため撤去した。
           restore-keys: |
             ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-
             ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-
-            ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-
-            ${{ runner.os }}-obs-build-
 
       - name: Patch OBS SDK version
         shell: pwsh
@@ -251,6 +269,13 @@ jobs:
             git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git third_party/asio
           }
 
+      - name: Clone opus
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "third_party/opus/include/opus.h")) {
+            git clone --branch v1.5.2 --depth 1 https://github.com/xiph/opus.git third_party/opus
+          }
+
       - name: Configure plugin (ProgramData layout)
         shell: pwsh
         run: |
@@ -260,6 +285,20 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Guard against FFmpeg imports
+        shell: pwsh
+        run: |
+          # 案 C の核心: プラグインは FFmpeg(libav*/libsw*) を import してはならない。
+          # import すると OBS 同梱 FFmpeg の世代差でロード不可になるため、ここで必ず検知する。
+          $dll = "$env:GITHUB_WORKSPACE/build/RelWithDebInfo/obs-delay-stream.dll"
+          if (-Not (Test-Path $dll)) { throw "DLL not found: $dll" }
+          $bytes = [System.IO.File]::ReadAllBytes($dll)
+          $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $bad   = @('avcodec-','avutil-','swresample-','swscale-','avformat-') |
+                   Where-Object { $text.Contains($_) }
+          if ($bad) { throw "FFmpeg import detected in plugin DLL: $($bad -join ', ')" }
+          Write-Host "OK: no FFmpeg(libav*/libsw*) import in plugin DLL"
 
       - name: Install to dist (ProgramData layout)
         shell: pwsh
