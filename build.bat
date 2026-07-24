@@ -33,6 +33,10 @@ set "OBS_LEGACY_INSTALL="
 set "OBS_CI="
 set "RECEIVER_ONLY=0"
 set "CLEAN_BUILD=0"
+set "OBS_STUDIO_REF=unknown"
+if exist "%PLUGIN_DIR%\OBS_STUDIO_REF" (
+    for /f "usebackq" %%R in ("%PLUGIN_DIR%\OBS_STUDIO_REF") do set "OBS_STUDIO_REF=%%R"
+)
 set "ENV_FILE=%PLUGIN_DIR%\build.env"
 if exist "%ENV_FILE%" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
@@ -151,19 +155,30 @@ goto :step1_libs
 
 :build_obs
 if not exist "%PLUGIN_DIR%\third_party" mkdir "%PLUGIN_DIR%\third_party"
-if not exist "%OBS_SOURCE_DIR%\CMakeLists.txt" (
-    echo   Cloning OBS Studio...
-    git clone --recursive https://github.com/obsproject/obs-studio.git "%OBS_SOURCE_DIR%"
-    if errorlevel 1 goto :error
+if not exist "%OBS_SOURCE_DIR%\.git" (
+    echo   Cloning OBS Studio %OBS_STUDIO_REF%. This may take a few minutes...
+    git clone --depth 1 --branch %OBS_STUDIO_REF% --recurse-submodules https://github.com/obsproject/obs-studio.git "%OBS_SOURCE_DIR%"
+    if errorlevel 1 (
+        echo [ERROR] Failed to clone OBS Studio.
+        goto :error
+    )
 )
-cd /d "%OBS_SOURCE_DIR%"
-cmake --list-presets
+echo   OBS library not found. Building OBS Studio (this may take 30+ minutes)...
+pushd "%OBS_SOURCE_DIR%"
 cmake --preset windows-x64
-if errorlevel 1 goto :error
-cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
-if errorlevel 1 goto :error
+if errorlevel 1 (
+    popd
+    echo [ERROR] OBS Studio CMake configure failed.
+    goto :error
+)
+cmake --build build_x64 --config RelWithDebInfo --parallel
+if errorlevel 1 (
+    popd
+    echo [ERROR] OBS Studio build failed.
+    goto :error
+)
+popd
 echo   OBS build complete.
-cd /d "%PLUGIN_DIR%"
 
 :step1_libs
 echo.
