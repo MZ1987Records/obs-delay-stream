@@ -29,8 +29,6 @@ namespace ods::plugin {
 	/// @param streaming      OBS 配信がアクティブか
 	RtspTrackNote classify_rtsp_track_note(bool on_track, bool seen_offtrack, bool streaming);
 
-	/// ソースの設定から RTMP URL を解決する
-	std::string resolve_rtmp_url_from_source(obs_source_t *source);
 	/// RTMP URL のスキームを RTSP 系へ変換する
 	std::string to_rtsp_url_from_rtmp(const std::string &rtmp_url);
 

@@ -43,7 +43,6 @@ namespace ods::ui {
 	namespace {
 		using ods::plugin::extract_host_from_url;
 		using ods::plugin::make_sub_memo_key;
-		using ods::plugin::to_rtsp_url_from_rtmp;
 
 		static constexpr int64_t REQUIRED_AUDIO_SYNC_OFFSET_NS =
 			static_cast<int64_t>(ods::core::REQUIRED_AUDIO_SYNC_OFFSET_MS) * 1000000LL;
@@ -55,27 +54,6 @@ namespace ods::ui {
 		// ============================================================
 		// namespace ローカル補助関数
 		// ============================================================
-
-		// 設定に基づいて RTMP URL から RTSP URL を同期する。
-		void sync_rtsp_url_from_rtmp_if_needed(obs_data_t *settings) {
-			if (!settings) return;
-			if (!obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey)) return;
-			const char *raw_rtmp = obs_data_get_string(settings, "rtmp_url");
-			std::string rtmp_url = raw_rtmp ? raw_rtmp : "";
-			std::string rtsp_url = to_rtsp_url_from_rtmp(rtmp_url);
-			if (!rtsp_url.empty()) {
-				obs_data_set_string(settings, ods::plugin::kRtspUrlKey, rtsp_url.c_str());
-			}
-		}
-
-		// RTSP URL 入力欄の有効/無効を同期する。
-		void sync_rtsp_url_enabled(obs_properties_t *props, obs_data_t *settings) {
-			if (!props || !settings) return;
-			const bool use_rtmp = obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey);
-			if (auto *rtsp_p = obs_properties_get(props, ods::plugin::kRtspUrlKey)) {
-				obs_property_set_enabled(rtsp_p, !use_rtmp);
-			}
-		}
 
 		// モード設定と入力値から実際に解決へ渡すパスヒント文字列を生成する。
 		std::string build_exe_path_hint(obs_data_t *settings,
@@ -102,44 +80,13 @@ namespace ods::ui {
 		// static コールバック（properties UI）
 		// ============================================================
 
-		// RTMP URL 自動設定トグルに合わせて入力有効状態を切り替える。
-		bool cb_rtmp_url_auto_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
-			auto *d = static_cast<DelayStreamData *>(priv);
-			if (!d || !settings) return false;
-			bool auto_new = obs_data_get_bool(settings, "rtmp_url_auto");
-			d->rtmp_url_auto.store(auto_new, std::memory_order_relaxed);
-			if (auto_new) {
-				ods::plugin::maybe_autofill_rtmp_url(settings, true);
-			}
-			sync_rtsp_url_from_rtmp_if_needed(settings);
-			if (props) {
-				if (auto *url_p = obs_properties_get(props, "rtmp_url")) {
-					obs_property_set_enabled(url_p, !auto_new);
-				}
-				sync_rtsp_url_enabled(props, settings);
-			}
-			return false;
-		}
-
-		// RTSP URL を RTMP URL から自動生成するかどうかを切り替える。
-		bool cb_rtsp_use_rtmp_changed(void *priv, obs_properties_t *props, obs_property_t *, obs_data_t *settings) {
+		// RTSP URL 自動設定トグルの変更時に OBS 配信設定値から URL を再導出する。
+		// 自動設定 ON のときは maybe_autofill_rtsp_url が受信 URL を書き込み、mode_text_row
+		// ウィジェットが return false 後にその値を読み戻して入力欄の表示・有効状態を更新する。
+		bool cb_rtsp_url_auto_changed(void *priv, obs_properties_t *, obs_property_t *, obs_data_t *settings) {
 			(void)priv;
 			if (!settings) return false;
-			if (obs_data_get_bool(settings, "rtmp_url_auto")) {
-				ods::plugin::maybe_autofill_rtmp_url(settings, true);
-			}
-			sync_rtsp_url_from_rtmp_if_needed(settings);
-			sync_rtsp_url_enabled(props, settings);
-			return false;
-		}
-
-		// RTMP URL 編集時に、必要なら RTSP URL へ自動同期する。
-		bool cb_rtmp_url_changed(void *priv, obs_properties_t *, obs_property_t *, obs_data_t *settings) {
-			(void)priv;
-			if (!settings) return false;
-			const bool use_rtmp_for_rtsp = obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey);
-			sync_rtsp_url_from_rtmp_if_needed(settings);
-			if (!use_rtmp_for_rtsp) return false;
+			ods::plugin::maybe_autofill_rtsp_url(settings, true);
 			return false;
 		}
 
@@ -388,22 +335,10 @@ namespace ods::ui {
 
 			obs_data_t *settings = obs_source_get_settings(d->context);
 			if (!settings) return false;
-			bool auto_mode = obs_data_get_bool(settings, "rtmp_url_auto");
-			if (auto_mode) {
-				ods::plugin::maybe_autofill_rtmp_url(settings, true);
-			}
-			const bool  use_rtmp_for_rtsp = obs_data_get_bool(settings, ods::plugin::kRtspUseRtmpUrlKey);
-			std::string rtsp_url;
-			if (use_rtmp_for_rtsp) {
-				const char *raw_rtmp_url = obs_data_get_string(settings, "rtmp_url");
-				rtsp_url                 = to_rtsp_url_from_rtmp(raw_rtmp_url ? raw_rtmp_url : "");
-				if (!rtsp_url.empty()) {
-					obs_data_set_string(settings, ods::plugin::kRtspUrlKey, rtsp_url.c_str());
-				}
-			} else {
-				const char *raw_rtsp_url = obs_data_get_string(settings, ods::plugin::kRtspUrlKey);
-				rtsp_url                 = raw_rtsp_url ? raw_rtsp_url : "";
-			}
+			// 自動設定 ON なら計測直前に OBS 配信設定値から RTSP URL を最新化する。
+			ods::plugin::maybe_autofill_rtsp_url(settings, true);
+			const char       *raw_rtsp_url = obs_data_get_string(settings, ods::plugin::kRtspUrlKey);
+			const std::string rtsp_url     = raw_rtsp_url ? raw_rtsp_url : "";
 			std::string ffmpeg_path = build_exe_path_hint(
 				settings,
 				ods::plugin::kFfmpegExePathModeKey,
@@ -1607,33 +1542,14 @@ namespace ods::ui {
 			{T_("UrlModeAuto"), 1},
 			{T_("UrlModeManual"), 0},
 		};
-		const ObsModeTextRowSpec rtmp_url_row_spec = {
-			"rtmp_url_auto",
-			"rtmp_url",
-			url_mode_options,
-			sizeof(url_mode_options) / sizeof(url_mode_options[0]),
-			0,
-			true,
-			cb_rtmp_url_auto_changed,
-			d,
-			cb_rtmp_url_changed,
-			d,
-			true,
-			0,
-		};
-		obs_properties_add_mode_text_row(
-			grp,
-			"rtmp_url_mode_row",
-			T_("RtmpUrl"),
-			rtmp_url_row_spec);
 		const ObsModeTextRowSpec rtsp_url_row_spec = {
-			ods::plugin::kRtspUseRtmpUrlKey,
+			ods::plugin::kRtspUrlAutoKey,
 			ods::plugin::kRtspUrlKey,
 			url_mode_options,
 			sizeof(url_mode_options) / sizeof(url_mode_options[0]),
 			0,
 			true,
-			cb_rtsp_use_rtmp_changed,
+			cb_rtsp_url_auto_changed,
 			d,
 			nullptr,
 			nullptr,

@@ -75,9 +75,7 @@ namespace ods::plugin {
 		obs_data_set_default_bool(settings, kRtspE2eMeasuredKey, false);
 		obs_data_set_default_int(settings, "delay_table_selected_ch", 0);
 		obs_data_set_default_int(settings, "active_tab", 0);
-		obs_data_set_default_bool(settings, "rtmp_url_auto", true);
-		obs_data_set_default_string(settings, "rtmp_url", "");
-		obs_data_set_default_bool(settings, kRtspUseRtmpUrlKey, true);
+		obs_data_set_default_bool(settings, kRtspUrlAutoKey, true);
 		obs_data_set_default_string(settings, kRtspUrlKey, "");
 		obs_data_set_default_int(settings, kRtspE2eProbeModeKey, 1);
 		obs_data_set_default_string(settings, kFfmpegExePathKey, "auto");

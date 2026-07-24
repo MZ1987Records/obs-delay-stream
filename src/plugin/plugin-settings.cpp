@@ -424,9 +424,7 @@ namespace ods::plugin {
 			fields.push_back({kRtspE2eMeasuredKey, JsonFieldType::Bool});
 			fields.push_back({"delay_table_selected_ch", JsonFieldType::Number});
 			fields.push_back({"active_tab", JsonFieldType::Number});
-			fields.push_back({"rtmp_url_auto", JsonFieldType::Bool});
-			fields.push_back({"rtmp_url", JsonFieldType::String});
-			fields.push_back({kRtspUseRtmpUrlKey, JsonFieldType::Bool});
+			fields.push_back({kRtspUrlAutoKey, JsonFieldType::Bool});
 			fields.push_back({kRtspUrlKey, JsonFieldType::String});
 			fields.push_back({kFfmpegExePathKey, JsonFieldType::String});
 			fields.push_back({kFfmpegExePathModeKey, JsonFieldType::Number});
@@ -453,7 +451,6 @@ namespace ods::plugin {
 			fields.push_back({"stream_id", JsonFieldType::String});
 			fields.push_back({kAvatarLatencyKey, JsonFieldType::Number});
 			fields.push_back({"active_tab", JsonFieldType::Number});
-			fields.push_back({"rtmp_url_auto", JsonFieldType::Bool});
 		}
 
 		bool validate_required_json_fields(
@@ -572,7 +569,6 @@ namespace ods::plugin {
 
 				apply_delay_settings();
 
-				data_->rtmp_url_auto.store(obs_data_get_bool(settings_, "rtmp_url_auto"), std::memory_order_relaxed);
 				apply_ping_count();
 				persist_settings_snapshot();
 				data_->prev_stream_id_has_user_value = obs_data_has_user_value(settings_, "stream_id");
@@ -727,15 +723,14 @@ namespace ods::plugin {
 				}
 				data_->set_stream_id(sid);
 				data_->router.set_stream_id(sid);
-				maybe_autofill_rtmp_url(settings_, true);
-				if (obs_data_get_bool(settings_, kRtspUseRtmpUrlKey)) {
-					const char *raw_rtmp = obs_data_get_string(settings_, "rtmp_url");
-					std::string rtmp_url = raw_rtmp ? raw_rtmp : "";
-					std::string rtsp_url = to_rtsp_url_from_rtmp(rtmp_url);
-					if (!rtsp_url.empty()) {
-						obs_data_set_string(settings_, kRtspUrlKey, rtsp_url.c_str());
-					}
+				// 旧キー rtsp_url_use_rtmp からの移行（ON=自動 / OFF=手動 の意味は 1:1）。
+				// 旧設定にユーザー値があり新キー未設定のときだけ引き継ぐ。
+				if (obs_data_has_user_value(settings_, kLegacyRtspUseRtmpUrlKey) &&
+					!obs_data_has_user_value(settings_, kRtspUrlAutoKey)) {
+					obs_data_set_bool(settings_, kRtspUrlAutoKey,
+									  obs_data_get_bool(settings_, kLegacyRtspUseRtmpUrlKey));
 				}
+				maybe_autofill_rtsp_url(settings_, true);
 				maybe_fill_cloudflared_path_from_auto(data_->context);
 
 				const char       *cloudflared_path     = obs_data_get_string(settings_, kCloudflaredExePathKey);
@@ -888,9 +883,7 @@ namespace ods::plugin {
 				obs_data_set_bool(settings_, kRtspE2eMeasuredKey, data_->delay.rtsp_e2e_measured);
 				obs_data_set_int(settings_, "delay_table_selected_ch", static_cast<int>(obs_data_get_int(settings_, "delay_table_selected_ch")));
 				obs_data_set_int(settings_, "active_tab", data_->get_active_tab());
-				obs_data_set_bool(settings_, "rtmp_url_auto", data_->rtmp_url_auto.load(std::memory_order_relaxed));
-				obs_data_set_string(settings_, "rtmp_url", obs_data_get_string(settings_, "rtmp_url"));
-				obs_data_set_bool(settings_, kRtspUseRtmpUrlKey, obs_data_get_bool(settings_, kRtspUseRtmpUrlKey));
+				obs_data_set_bool(settings_, kRtspUrlAutoKey, obs_data_get_bool(settings_, kRtspUrlAutoKey));
 				obs_data_set_string(settings_, kRtspUrlKey, obs_data_get_string(settings_, kRtspUrlKey));
 				obs_data_set_string(settings_, kFfmpegExePathKey, obs_data_get_string(settings_, kFfmpegExePathKey));
 				obs_data_set_int(settings_, kFfmpegExePathModeKey, static_cast<int>(obs_data_get_int(settings_, kFfmpegExePathModeKey)));

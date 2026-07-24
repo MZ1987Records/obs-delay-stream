@@ -550,8 +550,6 @@ void *DelayStreamFilter::create(obs_data_t *settings, obs_source_t *source) {
 		d->create_done.store(true);
 		return d;
 	}
-	ods::plugin::maybe_autofill_rtmp_url(settings, false);
-	d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
 	{
 		auto html = ods::plugin::load_receiver_index_html();
 		if (html.empty()) {

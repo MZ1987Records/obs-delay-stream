@@ -417,7 +417,6 @@ namespace ods::plugin {
 
 		UpdateCheckState   update_check;                          ///< 更新確認状態
 		std::atomic<bool>  sid_autofill_guard{false};             ///< stream_id 自動補完の二重実行防止フラグ
-		std::atomic<bool>  rtmp_url_auto{true};                   ///< RTMP URL 自動補完を有効にするフラグ
 		bool               prev_stream_id_has_user_value = false; ///< 直前の stream_id にユーザー設定値があったか（デフォルトリセット検出用）
 		std::vector<float> work_buf;                              ///< 音声処理用ワークバッファ
 

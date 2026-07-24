@@ -37,23 +37,6 @@ namespace ods::plugin {
 		return RtspTrackNote::None;
 	}
 
-	std::string resolve_rtmp_url_from_source(obs_source_t *source) {
-		if (!source) return "";
-		std::string url;
-		obs_data_t *s = obs_source_get_settings(source);
-		if (!s) return "";
-		bool auto_mode = obs_data_get_bool(s, "rtmp_url_auto");
-		if (auto_mode) {
-			url = get_obs_stream_url();
-		}
-		if (url.empty()) {
-			const char *configured = obs_data_get_string(s, "rtmp_url");
-			if (configured && *configured) url = configured;
-		}
-		obs_data_release(s);
-		return url;
-	}
-
 	std::string to_rtsp_url_from_rtmp(const std::string &rtmp_url) {
 		if (rtmp_url.rfind("rtmp://", 0) == 0) {
 			return "rtsp://" + rtmp_url.substr(7);
