@@ -56,6 +56,14 @@ namespace ods::network {
 			return escaped;
 		}
 
+		std::string normalize_rtsp_url_for_ffmpeg(const std::string &rtsp_url) {
+			constexpr char kRtsptScheme[] = "rtspt://";
+			if (_strnicmp(rtsp_url.c_str(), kRtsptScheme, sizeof(kRtsptScheme) - 1) == 0) {
+				return "rtsp://" + rtsp_url.substr(sizeof(kRtsptScheme) - 1);
+			}
+			return rtsp_url;
+		}
+
 		std::string get_local_appdata_dir() {
 			char base[MAX_PATH] = {};
 			if (SUCCEEDED(SHGetFolderPathA(
@@ -496,7 +504,7 @@ namespace ods::network {
 			std::lock_guard<std::mutex> lk(t0_mtx_);
 			t0_ = std::chrono::steady_clock::time_point{};
 		}
-		rtsp_url_         = rtsp_url;
+		rtsp_url_         = normalize_rtsp_url_for_ffmpeg(rtsp_url);
 		ffmpeg_path_hint_ = ffmpeg_path_hint.empty() ? "auto" : ffmpeg_path_hint;
 		measure_sets_     = RTSP_E2E_MEASURE_SETS_DEFAULT;
 		impulse_sent_.store(false, std::memory_order_release);
