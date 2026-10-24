@@ -245,6 +245,7 @@ namespace ods::network {
 								 uint32_t        channels,
 								 OpusPacketList &out);
 
+		bool on_validate(ConnectionHandle h);                           ///< Upgrade 承認前の照合。false で HTTP 応答のまま拒否する。
 		void on_open(ConnectionHandle h);                               ///< WebSocket 接続開始イベント。
 		void on_close(ConnectionHandle h);                              ///< WebSocket 接続終了イベント。
 		void on_message(ConnectionHandle h, WsServer::message_ptr msg); ///< WebSocket メッセージ受信イベント。

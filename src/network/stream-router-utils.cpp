@@ -102,6 +102,18 @@ namespace ods::network {
 		return PathParseResult::Ok;
 	}
 
+	bool is_same_origin(const std::string &origin, const std::string &host) {
+		if (origin.empty()) return true;
+		// "null"（sandbox iframe・file:// 等）や scheme の無い値は同一オリジンになり得ない。
+		const auto sep = origin.find("://");
+		if (sep == std::string::npos || host.empty()) return false;
+		const std::string authority = origin.substr(sep + 3);
+		if (authority.size() != host.size()) return false;
+		return std::equal(authority.begin(), authority.end(), host.begin(), [](char a, char b) {
+			return std::tolower((unsigned char)a) == std::tolower((unsigned char)b);
+		});
+	}
+
 	bool is_safe_rel_path(const std::string &rel) {
 		if (rel.empty()) return false;
 		if (rel.find("..") != std::string::npos) return false;

@@ -229,6 +229,16 @@ if(MSVC)
   target_compile_options(obs-delay-stream PRIVATE /utf-8 /wd4005 /wd4819)
 endif()
 
+# ---- 依存なしで検証できる照合関数の自己チェック（ALL には含めない） ----
+add_executable(stream-router-utils-check EXCLUDE_FROM_ALL
+  tests/stream-router-utils-check.cpp
+  src/network/stream-router-utils.cpp
+)
+target_include_directories(stream-router-utils-check PRIVATE src)
+if(MSVC)
+  target_compile_options(stream-router-utils-check PRIVATE /utf-8)
+endif()
+
 if(OBS_PLUGIN_LEGACY_INSTALL)
   set(OBS_PLUGIN_BIN_DIR "obs-plugins/64bit")
   set(OBS_PLUGIN_DATA_DIR "data/obs-plugins/obs-delay-stream")

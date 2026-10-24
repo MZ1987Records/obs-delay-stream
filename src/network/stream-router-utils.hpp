@@ -28,6 +28,13 @@ namespace ods::network {
 									std::string       &stream_id,
 									std::string       &code);
 
+	/// WebSocket の Origin が Host と同一オリジンかを判定する。
+	/// 受信ページは同じサーバーから配信されるため、別サイトのページからの接続を拒否できる。
+	/// Origin を送らない非ブラウザークライアントは true（Origin は偽装でき、ブラウザー対策に限られる）。
+	/// @param origin Origin ヘッダー（例: "https://xxx.trycloudflare.com"）
+	/// @param host   Host ヘッダー（例: "xxx.trycloudflare.com"）
+	bool is_same_origin(const std::string &origin, const std::string &host);
+
 	/// 相対パスとして扱ってよい形式かを判定する。
 	bool is_safe_rel_path(const std::string &rel);
 

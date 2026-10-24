@@ -38,6 +38,7 @@ namespace ods::network {
 					websocketpp::lib::asio::error_code ec;
 					s.set_option(websocketpp::lib::asio::ip::tcp::no_delay(true), ec);
 				});
+			srv->set_validate_handler([this](ConnectionHandle h) { return on_validate(h); });
 			srv->set_open_handler([this](ConnectionHandle h) { on_open(h); });
 			srv->set_close_handler([this](ConnectionHandle h) { on_close(h); });
 			srv->set_message_handler([this](ConnectionHandle h, WsServer::message_ptr m) {
@@ -685,6 +686,41 @@ namespace ods::network {
 	// ============================================================
 	// private: イベントハンドラ
 	// ============================================================
+
+	// 不正な接続は WebSocket を確立させず HTTP 応答で拒否する。確立後の on_open で閉じる方式では、
+	// 拒否される接続にも一時的に接続枠と音声送信先を与えてしまう。
+	// 拒否理由はブラウザーの WebSocket API から読めないため、受信ページは /memo で判定する。
+	bool StreamRouter::on_validate(ConnectionHandle h) {
+		std::shared_ptr<WsServer> srv;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			srv = server_ptr_;
+		}
+		if (!srv) return false;
+		auto con = srv->get_con_from_hdl(h);
+
+		if (!is_same_origin(con->get_request_header("Origin"), con->get_request_header("Host"))) {
+			con->set_status(websocketpp::http::status_code::forbidden);
+			return false;
+		}
+
+		std::string sid;
+		std::string code;
+		if (parse_path_code(con->get_resource(), sid, code) != PathParseResult::Ok) {
+			con->set_status(websocketpp::http::status_code::bad_request);
+			return false;
+		}
+		std::string current_sid;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			current_sid = stream_id_;
+		}
+		if (current_sid.empty() || sid != current_sid || resolve_code(code) < 0) {
+			con->set_status(websocketpp::http::status_code::not_found);
+			return false;
+		}
+		return true;
+	}
 
 	void StreamRouter::on_open(ConnectionHandle h) {
 		std::shared_ptr<WsServer> srv;
