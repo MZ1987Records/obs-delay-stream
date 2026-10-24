@@ -75,7 +75,7 @@ namespace ods::network {
 		/// 稼働中サーバーを停止して破棄する。
 		~StreamRouter() { stop(); }
 
-		bool start(uint16_t port);                          ///< サーバーを起動する
+		bool start(uint16_t port);                          ///< 127.0.0.1 で待ち受けてサーバーを起動する
 		void stop();                                        ///< サーバーを停止する
 		void set_stream_id(const std::string &id);          ///< 配信 ID を設定する
 		std::string stream_id() const;                      ///< 現在の配信 ID を返す

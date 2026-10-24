@@ -197,7 +197,6 @@ target_link_libraries(obs-delay-stream
   ws2_32
   wininet
   mswsock
-  iphlpapi
   psapi
 )
 

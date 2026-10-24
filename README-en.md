@@ -91,7 +91,9 @@ C:\Program Files\obs-studio\data\obs-plugins\
 2. Enter each performer's name under the **Performer Names** tab.
 3. Go to the **WS Streaming** tab and click **Start WebSocket Server**.
 
-### Using the Tunnel (IP Hiding — Recommended)
+### Starting the Tunnel (Required for Sharing with Performers)
+
+The WebSocket server listens only on this PC (127.0.0.1). Performers can connect only through the URL issued by the tunnel; direct connections by LAN IP address are not available.
 
 1. Leave `cloudflared.exe path` as `auto` (only enter the exe path if you want to specify a custom location).
 2. Click the **Start Tunnel** button (the exe will be downloaded automatically on first use by default).

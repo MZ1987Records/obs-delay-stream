@@ -1174,26 +1174,14 @@ namespace ods::ui {
 
 		obs_data_t *settings = obs_source_get_settings(d->context);
 
-		// auto_ip の値を設定に書き込み、編集不可テキストボックスで表示する
-		if (settings)
-			obs_data_set_string(settings, "auto_ip_info", d->auto_ip.c_str());
-
 		obs_properties_t *grp = obs_properties_create();
-		{
-			obs_property_t *auto_ip_p =
-				obs_properties_add_text(grp, "auto_ip_info", T_("AutoIpLabel"), OBS_TEXT_DEFAULT);
-			obs_property_set_enabled(auto_ip_p, false);
-		}
-		obs_property_t *ip_p =
-			obs_properties_add_text(grp, "host_ip_manual", T_("IpOverride"), OBS_TEXT_DEFAULT);
-		obs_property_t *port_p =
+		obs_property_t   *port_p =
 			obs_properties_add_int(grp, "ws_port", T_("WsPort"), 1, 65535, 1);
 		obs_property_t *sid_p =
 			obs_properties_add_text(grp, "stream_id", T_("StreamId"), OBS_TEXT_DEFAULT);
 		obs_property_set_modified_callback2(sid_p, cb_stream_id_changed, d);
 		obs_property_set_enabled(sid_p, false);
 		if (d->router_running.load()) {
-			obs_property_set_enabled(ip_p, false);
 			obs_property_set_enabled(port_p, false);
 		}
 		obs_property_t *grp_p =
@@ -1208,9 +1196,6 @@ namespace ods::ui {
 	void add_ws_group(obs_properties_t *props, DelayStreamData *d, bool has_sid) {
 		if (!props || !d) return;
 		bool ws_running = d->router_running.load();
-		int  ws_port    = ws_running
-							  ? (int)d->router.port()
-							  : d->ws_port.load(std::memory_order_relaxed);
 
 		obs_properties_t *grp     = obs_properties_create();
 		obs_property_t   *codec_p = obs_properties_add_list(
@@ -1377,9 +1362,6 @@ namespace ods::ui {
 			sizeof(ws_buttons) / sizeof(ws_buttons[0]),
 			ws_running ? UI_COLOR_STATUS_DOT_OK : UI_COLOR_STATUS_DOT_OFF,
 			ws_running ? T_("StatusRunning") : T_("StatusStopped"));
-		const std::string ws_firewall_note =
-			string_printf(T_("WsFirewallNoteFmt"), ws_port);
-		obs_properties_add_help_callout(grp, "ws_firewall_note", ws_firewall_note.c_str());
 
 		obs_property_t *send_p = obs_properties_add_bool(grp, "ws_send_paused", T_("WsSendPause"));
 		if (!ws_running) {

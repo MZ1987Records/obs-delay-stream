@@ -41,7 +41,10 @@ namespace ods::network {
 				on_message(h, m);
 			});
 			srv->set_http_handler([this](ConnectionHandle h) { on_http(h); });
-			srv->listen(port_);
+			// cloudflared の転送先と同じ 127.0.0.1 だけで待ち受ける。外部の受信者はトンネル経由
+			// でのみ届き、LAN やインターネットから平文の HTTP/WebSocket で直接は接続できない。
+			namespace ip = websocketpp::lib::asio::ip;
+			srv->listen(ip::tcp::endpoint(ip::address_v4::loopback(), port_));
 			srv->start_accept();
 			{
 				std::lock_guard<std::mutex> lk(mtx_);

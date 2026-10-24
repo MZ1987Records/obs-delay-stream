@@ -9,7 +9,6 @@
 
 #include <winsock2.h>
 #include <windows.h>
-#include <iphlpapi.h>
 
 #include <algorithm>
 #include <cctype>
@@ -101,26 +100,6 @@ namespace ods::plugin {
 
 		if (!base.empty() && base.back() != '/') base.push_back('/');
 		return base + key;
-	}
-
-	std::string get_local_ip() {
-		ULONG             buf_size = 15000;
-		std::vector<BYTE> buf(buf_size);
-		auto             *adapters = reinterpret_cast<IP_ADAPTER_INFO *>(buf.data());
-		if (GetAdaptersInfo(adapters, &buf_size) != NO_ERROR) return "127.0.0.1";
-		std::string fallback;
-		for (auto *a = adapters; a; a = a->Next) {
-			for (auto *ip = &a->IpAddressList; ip; ip = ip->Next) {
-				std::string addr = ip->IpAddress.String;
-				if (addr == "0.0.0.0" || addr.empty()) continue;
-				if (addr.rfind("192.168.", 0) == 0 || addr.rfind("10.", 0) == 0) return addr;
-				unsigned a0, a1, a2, a3;
-				if (sscanf(addr.c_str(), "%u.%u.%u.%u", &a0, &a1, &a2, &a3) == 4 &&
-					a0 == 172 && a1 >= 16 && a1 <= 31) return addr;
-				if (fallback.empty()) fallback = addr;
-			}
-		}
-		return fallback.empty() ? "127.0.0.1" : fallback;
 	}
 
 	void copy_to_clipboard(const std::string &text) {

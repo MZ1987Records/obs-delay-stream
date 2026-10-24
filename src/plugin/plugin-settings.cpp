@@ -416,7 +416,6 @@ namespace ods::plugin {
 			fields.push_back({"show_advanced", JsonFieldType::Bool});
 			fields.push_back({"url_share_show_list", JsonFieldType::Bool});
 			fields.push_back({"stream_id", JsonFieldType::String});
-			fields.push_back({"host_ip_manual", JsonFieldType::String});
 			fields.push_back({kAvatarLatencyKey, JsonFieldType::Number});
 			fields.push_back({kLivePerfEnabledKey, JsonFieldType::Bool});
 			fields.push_back({kLivePerfLeadKey, JsonFieldType::Number});
@@ -710,6 +709,11 @@ namespace ods::plugin {
 
 			// 配信先識別子や接続先情報を更新する。
 			void apply_stream_endpoint_settings() {
+				// LAN 直接配信の撤去で使われなくなった接続先 IP の手動指定と表示用の自動 IP は、
+				// 保存データに残さず消す（読み込み時の検証は未知のキーを無視するため互換性は保たれる）。
+				obs_data_erase(settings_, "host_ip_manual");
+				obs_data_erase(settings_, "auto_ip_info");
+
 				const char *raw = obs_data_get_string(settings_, "stream_id");
 				std::string sid = raw ? sanitize_stream_id(raw) : "";
 				if (sid.empty()) {
@@ -755,9 +759,6 @@ namespace ods::plugin {
 					}
 					data_->ws_port.store(ws_port, std::memory_order_relaxed);
 				}
-
-				const char *hip = obs_data_get_string(settings_, "host_ip_manual");
-				data_->set_host_ip(hip);
 			}
 
 			// アバター遅延・計測結果・オフセットを反映し、全チャンネルディレイを再計算する。
@@ -874,7 +875,6 @@ namespace ods::plugin {
 
 				const std::string sid = data_->get_stream_id();
 				obs_data_set_string(settings_, "stream_id", sid.c_str());
-				obs_data_set_string(settings_, "host_ip_manual", obs_data_get_string(settings_, "host_ip_manual"));
 
 				obs_data_set_int(settings_, kAvatarLatencyKey, data_->delay.avatar_latency_ms);
 				obs_data_set_bool(settings_, kLivePerfEnabledKey, data_->delay.live_perf_enabled);

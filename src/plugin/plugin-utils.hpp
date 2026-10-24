@@ -18,9 +18,6 @@ namespace ods::plugin {
 	std::string join_rtmp_url_and_stream_key(const std::string &base_url,
 											 const std::string &raw_key);
 
-	/// ローカル IP アドレスを取得する
-	std::string get_local_ip();
-
 	/// テキストをクリップボードにコピーする
 	void copy_to_clipboard(const std::string &text);
 
