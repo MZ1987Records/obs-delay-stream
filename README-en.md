@@ -19,7 +19,7 @@ Supports up to 20 simultaneous performer connections.
 
 Each performer's individual delay is automatically measured, and a time-corrected audio stream is delivered to their Google Chrome browser for perfectly synchronized playback.
 Also supports OBS broadcast (RTSP E2E) latency measurement for synchronization with audio streamed to the VRChat world.
-Built-in IP-hiding tunnel support.
+A built-in cloudflared tunnel issues the receiver URL that performers use over the internet.
 
 - No SYNCROOM or DAW required.
 - Performers simply open the receiver URL (provided by the streamer) in Google Chrome to receive low-latency, synchronized audio.
@@ -33,7 +33,7 @@ Built-in IP-hiding tunnel support.
 | Tab | Description |
 |------|------|
 | Performer Names | Manage each performer's name. Add, remove, and reorder channels. |
-| Tunnel | Generate a public URL via cloudflared. Share externally without exposing your IP directly. |
+| Tunnel | Generate a public URL via cloudflared. Performers connect through this URL, so starting it is required. |
 | WS Streaming | Configure audio codec (Opus / PCM), start/stop the WebSocket server, and control transmission. |
 | URL Sharing | View and copy all performer URLs at once. Reduces the hassle and risk of distribution errors. |
 | WS Measurement | Auto-measure WebSocket delivery latency for all connected performers. Also supports auto-measurement on performer connect. |
