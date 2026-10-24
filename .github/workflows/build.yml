@@ -31,7 +31,7 @@ jobs:
           Add-Content $env:GITHUB_ENV "OBS_STUDIO_REF=$ref"
           Write-Host "Target OBS ref (from OBS_STUDIO_REF file): $ref"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
