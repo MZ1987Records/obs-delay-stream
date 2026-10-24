@@ -200,6 +200,7 @@ target_link_libraries(obs-delay-stream
   wininet
   mswsock
   psapi
+  bcrypt
 )
 
 target_include_directories(obs-delay-stream PRIVATE
@@ -237,6 +238,17 @@ add_executable(stream-router-utils-check EXCLUDE_FROM_ALL
 target_include_directories(stream-router-utils-check PRIVATE src)
 if(MSVC)
   target_compile_options(stream-router-utils-check PRIVATE /utf-8)
+endif()
+
+add_executable(plugin-utils-check EXCLUDE_FROM_ALL
+  tests/plugin-utils-check.cpp
+  src/plugin/plugin-utils.cpp
+)
+target_include_directories(plugin-utils-check PRIVATE src)
+target_compile_definitions(plugin-utils-check PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(plugin-utils-check bcrypt user32)
+if(MSVC)
+  target_compile_options(plugin-utils-check PRIVATE /utf-8)
 endif()
 
 if(OBS_PLUGIN_LEGACY_INSTALL)

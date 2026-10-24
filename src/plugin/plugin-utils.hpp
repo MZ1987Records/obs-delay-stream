@@ -24,7 +24,8 @@ namespace ods::plugin {
 	/// 配信 ID として使用できない文字を除去・置換する
 	std::string sanitize_stream_id(const char *raw);
 
-	/// ランダムな配信 ID を生成する
+	/// 英数字のランダムな ID（配信 ID・チャンネルコード）を OS の暗号学的乱数で生成する。
+	/// 乱数を得られなければ空文字を返す（空の配信 ID・コードはどの接続とも照合しない）。
 	std::string generate_stream_id(std::size_t len = 12);
 
 	/// 0-indexed インデックスをアルファベットラベル（A, B, ...）に変換する

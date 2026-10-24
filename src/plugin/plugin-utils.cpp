@@ -9,14 +9,15 @@
 
 #include <winsock2.h>
 #include <windows.h>
+#include <bcrypt.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iterator>
-#include <random>
 #include <vector>
 
 #include "core/constants.hpp"
@@ -139,13 +140,24 @@ namespace ods::plugin {
 	std::string generate_stream_id(std::size_t len) {
 		static const char kChars[] =
 			"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-		std::random_device                    rd;
-		std::mt19937                          rng(rd());
-		std::uniform_int_distribution<size_t> dist(0, sizeof(kChars) - 2);
-		std::string                           out;
+		constexpr unsigned kCount = sizeof(kChars) - 1;
+		// 62 の倍数（248）以上のバイトは捨て、剰余による文字の偏りを避ける。
+		constexpr unsigned kLimit = 256 - 256 % kCount;
+		std::array<unsigned char, 64> buf{};
+		std::string                   out;
 		out.reserve(len);
-		for (size_t i = 0; i < len; ++i)
-			out.push_back(kChars[dist(rng)]);
+		while (out.size() < len) {
+			// mt19937 は出力から内部状態を復元でき、接続コードの推測を許すため OS の CSPRNG を使う。
+			if (!BCRYPT_SUCCESS(BCryptGenRandom(
+					nullptr, buf.data(), static_cast<ULONG>(buf.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+				return "";
+			}
+			for (unsigned char b : buf) {
+				if (b >= kLimit) continue;
+				out.push_back(kChars[b % kCount]);
+				if (out.size() == len) break;
+			}
+		}
 		return out;
 	}
 

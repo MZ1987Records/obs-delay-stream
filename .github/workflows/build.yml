@@ -324,6 +324,13 @@ jobs:
           & "$env:GITHUB_WORKSPACE/build/RelWithDebInfo/stream-router-utils-check.exe"
           if ($LASTEXITCODE -ne 0) { throw "stream-router-utils-check failed" }
 
+      - name: Run plugin-utils self-check
+        shell: pwsh
+        run: |
+          cmake --build build --config RelWithDebInfo --target plugin-utils-check
+          & "$env:GITHUB_WORKSPACE/build/RelWithDebInfo/plugin-utils-check.exe"
+          if ($LASTEXITCODE -ne 0) { throw "plugin-utils-check failed" }
+
       - name: Guard against FFmpeg imports
         shell: pwsh
         run: |
