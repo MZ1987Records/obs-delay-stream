@@ -2,14 +2,24 @@ name: build
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
+  pull_request:
+
+# 同じブランチ／PR への連続 push は古い実行を取り消す。タグのリリースビルドは取り消さない。
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build:
     runs-on: windows-latest
+    # ビルド中は npm 依存物などの外部コードが走るため書き込み権限を渡さない。
+    # リリース作成は release ジョブだけが contents: write で行う。
     permissions:
-      contents: write
+      contents: read
     env:
       # 実値はリポジトリ直下 OBS_STUDIO_REF ファイルから次ステップで上書きする。
       # ここでの宣言は env コンテキストの静的解析を満たすためのプレースホルダ。
@@ -264,25 +274,37 @@ jobs:
             third_party/obs-studio/.deps
           key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
 
-      - name: Clone websocketpp
+      - name: Fetch pinned websocketpp / opus
         shell: pwsh
         run: |
-          if (-Not (Test-Path "third_party/websocketpp")) {
-            git clone https://github.com/zaphoyd/websocketpp.git third_party/websocketpp
+          # 取得先コミットはリポジトリ直下 THIRD_PARTY_REFS で一元管理する（build.bat と共通）。
+          $refs = @{}
+          Get-Content "$env:GITHUB_WORKSPACE/THIRD_PARTY_REFS" |
+            Where-Object { $_ -match '^([A-Z0-9_]+)=(\S+)$' } |
+            ForEach-Object { $refs[$Matches[1]] = $Matches[2] }
+          function Get-PinnedRepo([string]$dir, [string]$url, [string]$commit) {
+            if (-Not $commit) { throw "Pinned commit is empty for $url" }
+            git init --quiet $dir
+            git -C $dir fetch --quiet --depth 1 $url $commit
+            if ($LASTEXITCODE -ne 0) { throw "fetch failed: $url $commit" }
+            git -C $dir -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
+            if ($LASTEXITCODE -ne 0) { throw "checkout failed: $dir" }
+            $head = (git -C $dir rev-parse HEAD).Trim()
+            if ($head -ne $commit) { throw "$dir is at $head, expected $commit" }
+            Write-Host "$dir pinned at $head"
           }
+          Get-PinnedRepo third_party/websocketpp https://github.com/zaphoyd/websocketpp.git $refs['WEBSOCKETPP_COMMIT']
+          Get-PinnedRepo third_party/opus https://github.com/xiph/opus.git $refs['OPUS_COMMIT']
+          # opus は git describe からバージョンを得るため、コミット指定の取得ではタグを付け直す。
+          if (-Not $refs['OPUS_VERSION']) { throw "OPUS_VERSION is empty" }
+          git -C third_party/opus tag -f "v$($refs['OPUS_VERSION'])" $refs['OPUS_COMMIT']
+          if ($LASTEXITCODE -ne 0) { throw "tag failed: third_party/opus" }
 
       - name: Clone asio
         shell: pwsh
         run: |
           if (-Not (Test-Path "third_party/asio")) {
             git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git third_party/asio
-          }
-
-      - name: Clone opus
-        shell: pwsh
-        run: |
-          if (-Not (Test-Path "third_party/opus/include/opus.h")) {
-            git clone --branch v1.5.2 --depth 1 https://github.com/xiph/opus.git third_party/opus
           }
 
       - name: Configure plugin (ProgramData layout)
@@ -294,6 +316,20 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Run stream-router-utils self-check
+        shell: pwsh
+        run: |
+          cmake --build build --config RelWithDebInfo --target stream-router-utils-check
+          & "$env:GITHUB_WORKSPACE/build/RelWithDebInfo/stream-router-utils-check.exe"
+          if ($LASTEXITCODE -ne 0) { throw "stream-router-utils-check failed" }
+
+      - name: Run plugin-utils self-check
+        shell: pwsh
+        run: |
+          cmake --build build --config RelWithDebInfo --target plugin-utils-check
+          & "$env:GITHUB_WORKSPACE/build/RelWithDebInfo/plugin-utils-check.exe"
+          if ($LASTEXITCODE -ne 0) { throw "plugin-utils-check failed" }
 
       - name: Guard against FFmpeg imports
         shell: pwsh
@@ -358,8 +394,10 @@ jobs:
       - name: Pack artifact
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          $zip = "obs-delay-stream-$tag.zip"
+          # タグ以外（main への push・PR）は ref_name に "/" を含み得るため、コミットで命名する。
+          $label = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "dev-$("${{ github.sha }}".Substring(0, 7))" }
+          $zip = "obs-delay-stream-$label.zip"
+          Add-Content $env:GITHUB_ENV "ARTIFACT_ZIP=$zip"
           $dist = "$env:GITHUB_WORKSPACE/dist"
           $extraFiles = @("LICENSE", "THIRD_PARTY_NOTICES", "CHANGELOG.md")
           New-Item -ItemType Directory -Force $dist | Out-Null
@@ -377,7 +415,21 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: obs-delay-stream
-          path: obs-delay-stream-${{ github.ref_name }}.zip
+          path: ${{ env.ARTIFACT_ZIP }}
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download workflow artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: obs-delay-stream
 
       - name: Extract changelog section
         id: changelog

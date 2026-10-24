@@ -36,4 +36,30 @@ namespace ods::core {
 		return out;
 	}
 
+	/// CreateProcess のコマンドラインへ渡す 1 引数を、Windows CRT の解析規則どおりに引用符で囲む。
+	/// 引用符の直前のバックスラッシュは 2 倍に、引用符自体は \" にし、末尾のバックスラッシュも
+	/// 2 倍にする。これを怠ると、入力中の \" で引用が閉じて別の引数を挿入される。
+	inline std::string quote_windows_arg(const std::string &text) {
+		std::string quoted;
+		quoted.reserve(text.size() + 4);
+		quoted += '"';
+		size_t backslashes = 0;
+		for (char c : text) {
+			if (c == '\\') {
+				++backslashes;
+				continue;
+			}
+			if (c == '"') {
+				quoted.append(backslashes * 2 + 1, '\\');
+			} else {
+				quoted.append(backslashes, '\\');
+			}
+			quoted += c;
+			backslashes = 0;
+		}
+		quoted.append(backslashes * 2, '\\');
+		quoted += '"';
+		return quoted;
+	}
+
 } // namespace ods::core

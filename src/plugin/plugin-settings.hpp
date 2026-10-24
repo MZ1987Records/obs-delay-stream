@@ -14,7 +14,8 @@ namespace ods::plugin {
 	inline constexpr char kMeasuredRtspE2eKey[]        = "measured_rtsp_e2e_ms";
 	inline constexpr char kRtspE2eMeasuredKey[]        = "rtsp_e2e_measured";
 	inline constexpr char kRtspUrlKey[]                = "rtsp_url";
-	inline constexpr char kRtspUseRtmpUrlKey[]         = "rtsp_url_use_rtmp";
+	inline constexpr char kRtspUrlAutoKey[]            = "rtsp_url_auto";
+	inline constexpr char kLegacyRtspUseRtmpUrlKey[]   = "rtsp_url_use_rtmp"; ///< 移行元の旧キー
 	inline constexpr char kFfmpegExePathKey[]          = "ffmpeg_exe_path";
 	inline constexpr char kFfmpegExePathModeKey[]      = "ffmpeg_exe_path_mode";
 	inline constexpr char kCloudflaredExePathKey[]     = "cloudflared_exe_path";

@@ -353,10 +353,8 @@ namespace ods::plugin {
 		std::shared_ptr<std::atomic<bool>> life_token =
 			std::make_shared<std::atomic<bool>>(true);
 
-		mutable std::mutex                        stream_id_mtx;                                   ///< stream_id / host_ip / auto_ip を保護する mutex
+		mutable std::mutex                        stream_id_mtx;                                   ///< stream_id を保護する mutex
 		std::string                               stream_id;                                       ///< 配信 ID（例: "myshow2024"）
-		std::string                               host_ip;                                         ///< 接続先ホスト IP（手動設定 or auto_ip から解決）
-		std::string                               auto_ip;                                         ///< 自動取得したローカル IP
 		std::atomic<int>                          ws_port{WS_PORT};                                ///< WebSocket ポート番号
 		std::atomic<int>                          ping_count_setting{DEFAULT_PING_COUNT};          ///< WebSocket 計測の ping 送信回数
 		int                                       playback_buffer_ms = PLAYBACK_BUFFER_DEFAULT_MS; ///< 受信側再生バッファ量 (ms)
@@ -417,7 +415,6 @@ namespace ods::plugin {
 
 		UpdateCheckState   update_check;                          ///< 更新確認状態
 		std::atomic<bool>  sid_autofill_guard{false};             ///< stream_id 自動補完の二重実行防止フラグ
-		std::atomic<bool>  rtmp_url_auto{true};                   ///< RTMP URL 自動補完を有効にするフラグ
 		bool               prev_stream_id_has_user_value = false; ///< 直前の stream_id にユーザー設定値があったか（デフォルトリセット検出用）
 		std::vector<float> work_buf;                              ///< 音声処理用ワークバッファ
 
@@ -436,18 +433,6 @@ namespace ods::plugin {
 		void set_stream_id(const std::string &id) {
 			std::lock_guard<std::mutex> lk(stream_id_mtx);
 			stream_id = id;
-		}
-
-		/// host_ip をスレッドセーフに取得する。
-		std::string get_host_ip() const {
-			std::lock_guard<std::mutex> lk(stream_id_mtx);
-			return host_ip;
-		}
-
-		/// manual_override が空なら auto_ip を使う。スレッドセーフ。
-		void set_host_ip(const char *manual_override) {
-			std::lock_guard<std::mutex> lk(stream_id_mtx);
-			host_ip = (manual_override && *manual_override) ? manual_override : auto_ip;
 		}
 
 		/// create_done / destroying / get_props_depth を参照してプロパティ再描画を要求する。

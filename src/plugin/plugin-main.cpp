@@ -64,7 +64,6 @@ static std::mutex    g_singleton_mtx;
 static obs_source_t *g_singleton_owner      = nullptr;
 static uint64_t      g_singleton_generation = 0;
 
-using ods::plugin::get_local_ip;
 using ods::plugin::make_sub_measured_key;
 using ods::plugin::DelayStreamData;
 using ods::plugin::UpdateCheckStatus;
@@ -550,8 +549,6 @@ void *DelayStreamFilter::create(obs_data_t *settings, obs_source_t *source) {
 		d->create_done.store(true);
 		return d;
 	}
-	ods::plugin::maybe_autofill_rtmp_url(settings, false);
-	d->rtmp_url_auto.store(obs_data_get_bool(settings, "rtmp_url_auto"), std::memory_order_relaxed);
 	{
 		auto html = ods::plugin::load_receiver_index_html();
 		if (html.empty()) {
@@ -563,8 +560,6 @@ void *DelayStreamFilter::create(obs_data_t *settings, obs_source_t *source) {
 		auto root = ods::plugin::get_receiver_root_dir();
 		if (!root.empty()) d->router.set_http_root_dir(std::move(root));
 	}
-	d->auto_ip = get_local_ip();
-	d->host_ip = d->auto_ip;
 	for (int i = 0; i < MAX_SUB_CH; ++i) {
 		d->sub_btn_ctx[i] = {d, i};
 	}

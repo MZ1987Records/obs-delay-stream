@@ -33,6 +33,20 @@ set "OBS_LEGACY_INSTALL="
 set "OBS_CI="
 set "RECEIVER_ONLY=0"
 set "CLEAN_BUILD=0"
+set "OBS_STUDIO_REF=unknown"
+if exist "%PLUGIN_DIR%\OBS_STUDIO_REF" (
+    for /f "usebackq" %%R in ("%PLUGIN_DIR%\OBS_STUDIO_REF") do set "OBS_STUDIO_REF=%%R"
+)
+set "WEBSOCKETPP_COMMIT="
+set "OPUS_VERSION="
+set "OPUS_COMMIT="
+if exist "%PLUGIN_DIR%\THIRD_PARTY_REFS" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%PLUGIN_DIR%\THIRD_PARTY_REFS") do (
+        if /I "%%A"=="WEBSOCKETPP_COMMIT" set "WEBSOCKETPP_COMMIT=%%B"
+        if /I "%%A"=="OPUS_VERSION" set "OPUS_VERSION=%%B"
+        if /I "%%A"=="OPUS_COMMIT" set "OPUS_COMMIT=%%B"
+    )
+)
 set "ENV_FILE=%PLUGIN_DIR%\build.env"
 if exist "%ENV_FILE%" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
@@ -151,19 +165,30 @@ goto :step1_libs
 
 :build_obs
 if not exist "%PLUGIN_DIR%\third_party" mkdir "%PLUGIN_DIR%\third_party"
-if not exist "%OBS_SOURCE_DIR%\CMakeLists.txt" (
-    echo   Cloning OBS Studio...
-    git clone --recursive https://github.com/obsproject/obs-studio.git "%OBS_SOURCE_DIR%"
-    if errorlevel 1 goto :error
+if not exist "%OBS_SOURCE_DIR%\.git" (
+    echo   Cloning OBS Studio %OBS_STUDIO_REF%. This may take a few minutes...
+    git clone --depth 1 --branch %OBS_STUDIO_REF% --recurse-submodules https://github.com/obsproject/obs-studio.git "%OBS_SOURCE_DIR%"
+    if errorlevel 1 (
+        echo [ERROR] Failed to clone OBS Studio.
+        goto :error
+    )
 )
-cd /d "%OBS_SOURCE_DIR%"
-cmake --list-presets
+echo   OBS library not found. Building OBS Studio (this may take 30+ minutes)...
+pushd "%OBS_SOURCE_DIR%"
 cmake --preset windows-x64
-if errorlevel 1 goto :error
-cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
-if errorlevel 1 goto :error
+if errorlevel 1 (
+    popd
+    echo [ERROR] OBS Studio CMake configure failed.
+    goto :error
+)
+cmake --build build_x64 --config RelWithDebInfo --parallel
+if errorlevel 1 (
+    popd
+    echo [ERROR] OBS Studio build failed.
+    goto :error
+)
+popd
 echo   OBS build complete.
-cd /d "%PLUGIN_DIR%"
 
 :step1_libs
 echo.
@@ -174,18 +199,12 @@ cd /d "%PLUGIN_DIR%"
 
 if not exist "%PLUGIN_DIR%\third_party" mkdir "%PLUGIN_DIR%\third_party"
 
-if exist "%PLUGIN_DIR%\third_party\websocketpp\websocketpp\server.hpp" goto :websocketpp_ok
-if exist "%PLUGIN_DIR%\third_party\websocketpp" rmdir /s /q "%PLUGIN_DIR%\third_party\websocketpp"
-echo   Cloning websocketpp...
-git clone https://github.com/zaphoyd/websocketpp.git "%PLUGIN_DIR%\third_party\websocketpp"
+if "%WEBSOCKETPP_COMMIT%"=="" goto :refs_missing
+if "%OPUS_COMMIT%"=="" goto :refs_missing
+if "%OPUS_VERSION%"=="" goto :refs_missing
+call :ensure_git_pin websocketpp "%PLUGIN_DIR%\third_party\websocketpp" https://github.com/zaphoyd/websocketpp.git %WEBSOCKETPP_COMMIT%
 if errorlevel 1 goto :error
-echo   websocketpp: OK
-goto :asio_check
 
-:websocketpp_ok
-echo   websocketpp: already exists
-
-:asio_check
 if exist "%PLUGIN_DIR%\third_party\asio\asio\include\asio.hpp" goto :asio_ok
 if exist "%PLUGIN_DIR%\third_party\asio\include\asio.hpp" goto :asio_ok
 if exist "%PLUGIN_DIR%\third_party\asio" rmdir /s /q "%PLUGIN_DIR%\third_party\asio"
@@ -199,16 +218,11 @@ goto :opus_check
 echo   asio: already exists
 
 :opus_check
-if exist "%PLUGIN_DIR%\third_party\opus\include\opus.h" goto :opus_ok
-if exist "%PLUGIN_DIR%\third_party\opus" rmdir /s /q "%PLUGIN_DIR%\third_party\opus"
-echo   Cloning opus v1.5.2...
-git clone --branch v1.5.2 --depth 1 https://github.com/xiph/opus.git "%PLUGIN_DIR%\third_party\opus"
+call :ensure_git_pin "opus v%OPUS_VERSION%" "%PLUGIN_DIR%\third_party\opus" https://github.com/xiph/opus.git %OPUS_COMMIT%
 if errorlevel 1 goto :error
-echo   opus: OK
-goto :step2
-
-:opus_ok
-echo   opus: already exists
+rem opus derives its version from "git describe"; a commit-only fetch has no tag.
+git -C "%PLUGIN_DIR%\third_party\opus" tag -f v%OPUS_VERSION% %OPUS_COMMIT% >nul
+if errorlevel 1 goto :error
 
 :step2
 echo.
@@ -425,6 +439,48 @@ echo.
 if "%CI_MODE%"=="1" exit /b 0
 pause
 exit /b 0
+
+:refs_missing
+echo [ERROR] WEBSOCKETPP_COMMIT / OPUS_VERSION / OPUS_COMMIT not found in THIRD_PARTY_REFS.
+goto :error
+
+rem ensure_git_pin <name> <dir> <url> <commit>
+rem   Pin a third_party git checkout to the exact commit in THIRD_PARTY_REFS.
+rem   An existing checkout is fetched and switched in place; local changes make the
+rem   checkout fail instead of being discarded. A non-git directory is replaced.
+:ensure_git_pin
+setlocal
+set "PIN_NAME=%~1"
+set "PIN_DIR=%~2"
+set "PIN_URL=%~3"
+set "PIN_COMMIT=%~4"
+if "%PIN_COMMIT%"=="" goto :ensure_git_pin_fail
+set "CUR_COMMIT="
+if exist "%PIN_DIR%\.git" for /f %%C in ('git -C "%PIN_DIR%" rev-parse HEAD 2^>nul') do set "CUR_COMMIT=%%C"
+if /I "%CUR_COMMIT%"=="%PIN_COMMIT%" goto :ensure_git_pin_ok
+if exist "%PIN_DIR%\.git" goto :ensure_git_pin_fetch
+if exist "%PIN_DIR%" rmdir /s /q "%PIN_DIR%"
+git init --quiet "%PIN_DIR%" || goto :ensure_git_pin_fail
+:ensure_git_pin_fetch
+echo   Fetching %PIN_NAME% %PIN_COMMIT%...
+git -C "%PIN_DIR%" fetch --quiet --depth 1 "%PIN_URL%" %PIN_COMMIT% || goto :ensure_git_pin_fail
+git -C "%PIN_DIR%" -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD || goto :ensure_git_pin_fail
+set "CUR_COMMIT="
+for /f %%C in ('git -C "%PIN_DIR%" rev-parse HEAD') do set "CUR_COMMIT=%%C"
+if /I not "%CUR_COMMIT%"=="%PIN_COMMIT%" goto :ensure_git_pin_fail
+:ensure_git_pin_ok
+set "PIN_DIRTY="
+for /f "delims=" %%S in ('git -C "%PIN_DIR%" status --porcelain --untracked-files^=all 2^>nul') do set "PIN_DIRTY=1"
+if defined PIN_DIRTY goto :ensure_git_pin_dirty
+echo   %PIN_NAME%: OK (%PIN_COMMIT%)
+endlocal & exit /b 0
+:ensure_git_pin_dirty
+echo [ERROR] %PIN_NAME% has local changes: %PIN_DIR%
+echo         Preserve or remove them before building; no files were changed.
+endlocal & exit /b 1
+:ensure_git_pin_fail
+echo [ERROR] %PIN_NAME% could not be pinned to %PIN_COMMIT%
+endlocal & exit /b 1
 
 :error
 echo.

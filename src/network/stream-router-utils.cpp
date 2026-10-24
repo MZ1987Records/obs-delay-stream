@@ -1,4 +1,13 @@
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "network/stream-router-utils.hpp"
+
+#include <windows.h>
 
 #include <algorithm>
 #include <cctype>
@@ -92,14 +101,44 @@ namespace ods::network {
 		auto slash = p.find('/');
 		if (slash == std::string::npos || slash == 0) return PathParseResult::Invalid;
 
-		stream_id            = sanitize_id(p.substr(0, slash));
+		stream_id            = p.substr(0, slash);
 		std::string raw_code = p.substr(slash + 1);
 		auto        q        = raw_code.find_first_of("?#");
 		if (q != std::string::npos) raw_code = raw_code.substr(0, q);
 
-		code = sanitize_id(raw_code);
-		if (stream_id.empty() || code.empty()) return PathParseResult::Invalid;
+		code = raw_code;
+		if (!is_valid_id(stream_id) || !is_valid_id(code)) return PathParseResult::Invalid;
 		return PathParseResult::Ok;
+	}
+
+	bool MessageRateLimiter::allow(std::chrono::steady_clock::time_point now) {
+		if (started_) {
+			const double elapsed_s = std::chrono::duration<double>(now - last_).count();
+			if (elapsed_s > 0.0) tokens_ = std::min(burst_, tokens_ + elapsed_s * rate_);
+		}
+		started_ = true;
+		last_    = now;
+		if (tokens_ < 1.0) return false;
+		tokens_ -= 1.0;
+		return true;
+	}
+
+	bool is_valid_id(const std::string &id) {
+		constexpr std::size_t kMaxIdLength = 64;
+		if (id.empty() || id.size() > kMaxIdLength) return false;
+		return std::all_of(id.begin(), id.end(), [](char c) { return std::isalnum((unsigned char)c) != 0; });
+	}
+
+	bool is_same_origin(const std::string &origin, const std::string &host) {
+		if (origin.empty()) return true;
+		// "null"（sandbox iframe・file:// 等）や scheme の無い値は同一オリジンになり得ない。
+		const auto sep = origin.find("://");
+		if (sep == std::string::npos || host.empty()) return false;
+		const std::string authority = origin.substr(sep + 3);
+		if (authority.size() != host.size()) return false;
+		return std::equal(authority.begin(), authority.end(), host.begin(), [](char a, char b) {
+			return std::tolower((unsigned char)a) == std::tolower((unsigned char)b);
+		});
 	}
 
 	bool is_safe_rel_path(const std::string &rel) {
@@ -119,9 +158,30 @@ namespace ods::network {
 		return out;
 	}
 
-	bool read_file_to_string(const std::string &path, std::string &out) {
-		std::ifstream ifs(path, std::ios::binary);
+	bool is_free_of_reparse_points(const std::string &root, const std::string &rel) {
+		// ifstream と同じく ANSI API で解釈し、読み込み時と同じ実体を調べる。
+		std::string path = root;
+		size_t      pos  = 0;
+		while (pos <= rel.size()) {
+			size_t      next = rel.find('/', pos);
+			std::string seg  = rel.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+			if (!seg.empty()) {
+				path              = join_path(path, seg);
+				const DWORD attrs = GetFileAttributesA(path.c_str());
+				if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+			}
+			if (next == std::string::npos) break;
+			pos = next + 1;
+		}
+		return true;
+	}
+
+	bool read_file_to_string(const std::string &path, std::string &out, std::size_t max_bytes) {
+		std::ifstream ifs(path, std::ios::binary | std::ios::ate);
 		if (!ifs) return false;
+		const auto size = ifs.tellg();
+		if (size < 0 || static_cast<unsigned long long>(size) > max_bytes) return false;
+		ifs.seekg(0);
 		out.assign(std::istreambuf_iterator<char>(ifs),
 				   std::istreambuf_iterator<char>());
 		return true;

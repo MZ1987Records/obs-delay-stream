@@ -128,7 +128,9 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory "${RECEIVER_BUILD_DIR}"
   COMMAND ${CMAKE_COMMAND} -E echo "Building receiver assets -> ${RECEIVER_BUILD_DIR}"
   COMMAND ${CMAKE_COMMAND} -E echo "Using npm command: ${NPM_EXECUTABLE}"
-  COMMAND "${NPM_EXECUTABLE}" install
+  # npm install は package-lock.json を書き換え、範囲内の新しい版を取り込み得る。
+  # ci は lockfile どおりに入れ、package.json と食い違えば失敗する。
+  COMMAND "${NPM_EXECUTABLE}" ci
   COMMAND ${CMAKE_COMMAND} -E env
     "RECEIVER_BUILD_OUT_DIR=${RECEIVER_BUILD_DIR}"
     "RECEIVER_PROJECT_VERSION=${PROJECT_VERSION}"
@@ -197,8 +199,8 @@ target_link_libraries(obs-delay-stream
   ws2_32
   wininet
   mswsock
-  iphlpapi
   psapi
+  bcrypt
 )
 
 target_include_directories(obs-delay-stream PRIVATE
@@ -226,6 +228,28 @@ endif()
 # Force MSVC to treat source as UTF-8
 if(MSVC)
   target_compile_options(obs-delay-stream PRIVATE /utf-8 /wd4005 /wd4819)
+endif()
+
+# ---- 依存なしで検証できる照合関数の自己チェック（ALL には含めない） ----
+add_executable(stream-router-utils-check EXCLUDE_FROM_ALL
+  tests/stream-router-utils-check.cpp
+  src/network/stream-router-utils.cpp
+)
+target_include_directories(stream-router-utils-check PRIVATE src)
+target_link_libraries(stream-router-utils-check shell32)
+if(MSVC)
+  target_compile_options(stream-router-utils-check PRIVATE /utf-8)
+endif()
+
+add_executable(plugin-utils-check EXCLUDE_FROM_ALL
+  tests/plugin-utils-check.cpp
+  src/plugin/plugin-utils.cpp
+)
+target_include_directories(plugin-utils-check PRIVATE src)
+target_compile_definitions(plugin-utils-check PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(plugin-utils-check bcrypt user32)
+if(MSVC)
+  target_compile_options(plugin-utils-check PRIVATE /utf-8)
 endif()
 
 if(OBS_PLUGIN_LEGACY_INSTALL)

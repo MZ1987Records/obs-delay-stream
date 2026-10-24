@@ -1,14 +1,43 @@
 #pragma once
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace ods::network {
+
+	/**
+	 * 接続ごとの制御メッセージの頻度制限（トークンバケット）。
+	 * 毎秒 rate_per_sec 件ずつ補充し、最大 burst 件まで貯められる。
+	 */
+	class MessageRateLimiter {
+	public:
+
+		MessageRateLimiter(double rate_per_sec, double burst)
+			: rate_(rate_per_sec), burst_(burst), tokens_(burst) {}
+
+		/// 1 件を受け付けてよいかを返す。false なら上限超過。
+		bool allow(std::chrono::steady_clock::time_point now);
+
+	private:
+
+		double                                rate_;
+		double                                burst_;
+		double                                tokens_;
+		std::chrono::steady_clock::time_point last_{};
+		bool                                  started_ = false;
+	};
 
 	/// 配信 ID とチャンネルから内部キー `"sid/ch"` を生成する。
 	std::string make_key(const std::string &sid, int ch);
 
 	/// 英数字のみを残して ID として安全な文字列にする。
 	std::string sanitize_id(const std::string &raw);
+
+	/// 受信者が送った配信 ID・チャンネルコードが英数字 1〜64 文字かを判定する。
+	/// 不正な文字を除去して照合すると別の値へ読み替えてしまうため、除去せずに拒否する。
+	bool is_valid_id(const std::string &id);
 
 	/// JSON 文字列へ埋め込めるようにエスケープする。
 	std::string json_escape(const std::string &s);
@@ -28,14 +57,26 @@ namespace ods::network {
 									std::string       &stream_id,
 									std::string       &code);
 
+	/// WebSocket の Origin が Host と同一オリジンかを判定する。
+	/// 受信ページは同じサーバーから配信されるため、別サイトのページからの接続を拒否できる。
+	/// Origin を送らない非ブラウザークライアントは true（Origin は偽装でき、ブラウザー対策に限られる）。
+	/// @param origin Origin ヘッダー（例: "https://xxx.trycloudflare.com"）
+	/// @param host   Host ヘッダー（例: "xxx.trycloudflare.com"）
+	bool is_same_origin(const std::string &origin, const std::string &host);
+
 	/// 相対パスとして扱ってよい形式かを判定する。
 	bool is_safe_rel_path(const std::string &rel);
 
 	/// ベースパスと相対パスを結合する。
 	std::string join_path(const std::string &base, const std::string &rel);
 
-	/// ファイル全体を文字列として読み込む。
-	bool read_file_to_string(const std::string &path, std::string &out);
+	/// root 配下の rel までの経路（途中のディレクトリとファイル）に reparse point
+	/// （シンボリックリンク・ジャンクション）が無いかを判定する。存在しない経路も false。
+	/// 配信ルートの中にリンクを置かれても、ルート外のファイルを公開しないために使う。
+	bool is_free_of_reparse_points(const std::string &root, const std::string &rel);
+
+	/// ファイル全体を文字列として読み込む。max_bytes を超えるファイルは読まずに false を返す。
+	bool read_file_to_string(const std::string &path, std::string &out, std::size_t max_bytes = SIZE_MAX);
 
 	/// 拡張子から HTTP Content-Type を推定する。
 	const char *guess_content_type(const std::string &path);

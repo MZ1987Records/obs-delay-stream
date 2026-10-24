@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <numeric>
 #include <obs-module.h>
 
@@ -27,6 +29,9 @@ namespace ods::network {
 			srv->set_access_channels(websocketpp::log::alevel::none);
 			srv->init_asio();
 			srv->set_reuse_addr(true);
+			// 既定は各 32,000,000 bytes。超過した WebSocket は 1009 で閉じ、HTTP は 413 を返す。
+			srv->set_max_message_size(WS_MAX_MESSAGE_BYTES);
+			srv->set_max_http_body_size(HTTP_MAX_BODY_BYTES);
 			// TCP_NODELAY（Nagle 無効化）。小さな Opus パケットが TCP に溜め込まれて
 			// まとめて送られる（ストール→バースト）と、受信側バッファが膨張し、
 			// 自動再同期がその余剰を切り詰めて音飛びになる。リアルタイム配信では必須。
@@ -35,13 +40,17 @@ namespace ods::network {
 					websocketpp::lib::asio::error_code ec;
 					s.set_option(websocketpp::lib::asio::ip::tcp::no_delay(true), ec);
 				});
+			srv->set_validate_handler([this](ConnectionHandle h) { return on_validate(h); });
 			srv->set_open_handler([this](ConnectionHandle h) { on_open(h); });
 			srv->set_close_handler([this](ConnectionHandle h) { on_close(h); });
 			srv->set_message_handler([this](ConnectionHandle h, WsServer::message_ptr m) {
 				on_message(h, m);
 			});
 			srv->set_http_handler([this](ConnectionHandle h) { on_http(h); });
-			srv->listen(port_);
+			// cloudflared の転送先と同じ 127.0.0.1 だけで待ち受ける。外部の受信者はトンネル経由
+			// でのみ届き、LAN やインターネットから平文の HTTP/WebSocket で直接は接続できない。
+			namespace ip = websocketpp::lib::asio::ip;
+			srv->listen(ip::tcp::endpoint(ip::address_v4::loopback(), port_));
 			srv->start_accept();
 			{
 				std::lock_guard<std::mutex> lk(mtx_);
@@ -161,8 +170,27 @@ namespace ods::network {
 
 	void StreamRouter::set_sub_code(int ch, const std::string &code) {
 		if (ch < 0 || ch >= MAX_SUB_CH) return;
-		std::lock_guard<std::mutex> lk(mtx_);
-		sub_code_[ch] = code;
+		// コードが変わったら、旧コードで接続済みの受信者も切断する。新しい接続は Upgrade 前の
+		// 照合で旧コードを拒否するが、確立済みの接続は次回の再接続まで音声を受け続けてしまう。
+		std::shared_ptr<WsServer>     srv;
+		std::vector<ConnectionHandle> to_close;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			if (sub_code_[ch] == code) return;
+			sub_code_[ch] = code;
+			srv           = server_ptr_;
+			for (auto &kv : conn_map_) {
+				if (kv.second.ch == ch) to_close.push_back(kv.first);
+			}
+		}
+		if (srv) {
+			for (auto &h : to_close) {
+				try {
+					srv->close(h, websocketpp::close::status::policy_violation, "code_changed");
+				} catch (...) {
+				}
+			}
+		}
 	}
 
 	std::string StreamRouter::sub_code(int ch) const {
@@ -680,6 +708,45 @@ namespace ods::network {
 	// private: イベントハンドラ
 	// ============================================================
 
+	// 不正な接続は WebSocket を確立させず HTTP 応答で拒否する。確立後の on_open で閉じる方式では、
+	// 拒否される接続にも一時的に接続枠と音声送信先を与えてしまう。
+	// 拒否理由はブラウザーの WebSocket API から読めないため、受信ページは /memo で判定する。
+	bool StreamRouter::on_validate(ConnectionHandle h) {
+		std::shared_ptr<WsServer> srv;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			srv = server_ptr_;
+		}
+		if (!srv) return false;
+		auto con = srv->get_con_from_hdl(h);
+
+		if (con->get_resource().size() > HTTP_MAX_URL_BYTES) {
+			con->set_status(websocketpp::http::status_code::request_uri_too_long);
+			return false;
+		}
+		if (!is_same_origin(con->get_request_header("Origin"), con->get_request_header("Host"))) {
+			con->set_status(websocketpp::http::status_code::forbidden);
+			return false;
+		}
+
+		std::string sid;
+		std::string code;
+		if (parse_path_code(con->get_resource(), sid, code) != PathParseResult::Ok) {
+			con->set_status(websocketpp::http::status_code::bad_request);
+			return false;
+		}
+		std::string current_sid;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			current_sid = stream_id_;
+		}
+		if (current_sid.empty() || sid != current_sid || resolve_code(code) < 0) {
+			con->set_status(websocketpp::http::status_code::not_found);
+			return false;
+		}
+		return true;
+	}
+
 	void StreamRouter::on_open(ConnectionHandle h) {
 		std::shared_ptr<WsServer> srv;
 		{
@@ -724,44 +791,54 @@ namespace ods::network {
 		bool                          has_cached_timing_diagram = false;
 		std::string                   memo;
 		std::vector<ConnectionHandle> to_evict;
+		bool                          authorization_changed = false;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
-			auto                        key = make_key(sid, ch);
-			auto                       &cs  = ch_map_[key];
+			if (stream_id_.empty() || stream_id_ != sid || ch < 0 || ch >= MAX_SUB_CH ||
+				!active_slots_.test(ch) || sub_code_[ch] != code) {
+				authorization_changed = true;
+			} else {
+				auto  key = make_key(sid, ch);
+				auto &cs  = ch_map_[key];
 
-			// 同一チャンネルの既存接続を退去させる（単一クライアント制限）
-			if (!cs.conns.empty()) {
-				to_evict.assign(cs.conns.begin(), cs.conns.end());
-				for (auto &old_h : to_evict)
-					conn_map_.erase(old_h);
-				cs.conns.clear();
-				if (cs.measuring) {
-					cs.measuring = false;
-					cs.ping_times.clear();
-					cs.rtt_samples.clear();
+				// 同一チャンネルの既存接続を退去させる（単一クライアント制限）
+				if (!cs.conns.empty()) {
+					to_evict.assign(cs.conns.begin(), cs.conns.end());
+					for (auto &old_h : to_evict)
+						conn_map_.erase(old_h);
+					cs.conns.clear();
+					if (cs.measuring) {
+						cs.measuring = false;
+						cs.ping_times.clear();
+						cs.rtt_samples.clear();
+					}
 				}
-			}
 
-			if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
-				auto it = ch_cache_.find(key);
-				if (it != ch_cache_.end()) {
-					cs.last_result         = it->second.last_result;
-					cs.last_applied_delay  = it->second.last_applied_delay;
-					cs.last_applied_reason = it->second.last_applied_reason;
-					cs.last_timing_diagram = it->second.last_timing_diagram;
-					cs.has_timing_diagram  = it->second.has_timing_diagram;
+				if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
+					auto it = ch_cache_.find(key);
+					if (it != ch_cache_.end()) {
+						cs.last_result         = it->second.last_result;
+						cs.last_applied_delay  = it->second.last_applied_delay;
+						cs.last_applied_reason = it->second.last_applied_reason;
+						cs.last_timing_diagram = it->second.last_timing_diagram;
+						cs.has_timing_diagram  = it->second.has_timing_diagram;
+					}
 				}
+				conn_map_[h] = {sid, ch};
+				cs.conns.insert(h);
+				count                     = cs.conns.size();
+				cb                        = on_conn_change;
+				cached_result             = cs.last_result;
+				cached_delay              = cs.last_applied_delay;
+				cached_delay_reason       = cs.last_applied_reason;
+				cached_timing_diagram     = cs.last_timing_diagram;
+				has_cached_timing_diagram = cs.has_timing_diagram;
+				memo                       = sub_memo_[ch];
 			}
-			conn_map_[h] = {sid, ch};
-			cs.conns.insert(h);
-			count                     = cs.conns.size();
-			cb                        = on_conn_change;
-			cached_result             = cs.last_result;
-			cached_delay              = cs.last_applied_delay;
-			cached_delay_reason       = cs.last_applied_reason;
-			cached_timing_diagram     = cs.last_timing_diagram;
-			has_cached_timing_diagram = cs.has_timing_diagram;
-			if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
+		}
+		if (authorization_changed) {
+			con->close(websocketpp::close::status::policy_violation, "authorization_changed");
+			return;
 		}
 		// ロック外で古い接続を切断（on_close は conn_map_ に不在のため no-op）
 		for (auto &old_h : to_evict) {
@@ -837,14 +914,49 @@ namespace ods::network {
 
 	void StreamRouter::on_message(ConnectionHandle h, WsServer::message_ptr msg) {
 		if (msg->get_opcode() != websocketpp::frame::opcode::text) return;
-		const std::string &p = msg->get_payload();
-		if (p.find("\"pong\"") != std::string::npos) {
-			int  seq = -1;
-			auto pos = p.find("\"seq\":");
-			if (pos != std::string::npos) seq = std::atoi(p.c_str() + pos + 6);
-			if (seq < 0) return;
+		const auto now = Clock::now();
 
-			auto                        now = Clock::now();
+		// 認可済み接続だけを処理し、頻度制限を超えた接続は閉じる。
+		std::shared_ptr<WsServer> srv;
+		bool                      over_limit = false;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			auto                        it = conn_map_.find(h);
+			if (it == conn_map_.end()) return;
+			over_limit = !it->second.ctrl_rate.allow(now);
+			srv        = server_ptr_;
+		}
+		auto close_conn = [&](const char *reason) {
+			if (!srv) return;
+			try {
+				srv->close(h, websocketpp::close::status::policy_violation, reason);
+			} catch (...) {
+			}
+		};
+		if (over_limit) {
+			close_conn("rate_limited");
+			return;
+		}
+
+		// 受信ページが送るのは {"type":"pong","seq":N} と {"type":"audio_codec","mode":"pcm"|"opus"} だけ。
+		// JSON として解析できないものは正規の受信ページから来ないため閉じる（解析失敗ごとに
+		// libobs がログを書くので、受け流すとログを溢れさせられる）。
+		std::unique_ptr<obs_data_t, decltype(&obs_data_release)> j(
+			obs_data_create_from_json(msg->get_payload().c_str()), obs_data_release);
+		if (!j) {
+			close_conn("invalid_json");
+			return;
+		}
+		const std::string type = obs_data_get_string(j.get(), "type");
+
+		if (type == "pong") {
+			obs_data_item_t *seq_item = obs_data_item_byname(j.get(), "seq");
+			const bool       is_num   = seq_item && obs_data_item_gettype(seq_item) == OBS_DATA_NUMBER;
+			const long long  seq_ll   = is_num ? obs_data_item_get_int(seq_item) : -1;
+			obs_data_item_release(&seq_item);
+			if (seq_ll < 0 || seq_ll > INT_MAX) return;
+			const int seq = static_cast<int>(seq_ll);
+
 			std::lock_guard<std::mutex> lk(mtx_);
 			auto                        it = conn_map_.find(h);
 			if (it == conn_map_.end()) return;
@@ -858,54 +970,21 @@ namespace ods::network {
 			return;
 		}
 
-		if (p.find("\"audio_codec\"") != std::string::npos) {
-			int mode = -1;
-			if (p.find("\"mode\":\"pcm\"") != std::string::npos)
+		if (type == "audio_codec") {
+			const std::string mode_str = obs_data_get_string(j.get(), "mode");
+			int               mode     = -1;
+			if (mode_str == "pcm")
 				mode = 1;
-			else if (p.find("\"mode\":\"opus\"") != std::string::npos)
+			else if (mode_str == "opus")
 				mode = 0;
 			if (mode < 0) return;
 
-			auto parse_json_int = [&p](const char *key, int &out) -> bool {
-				std::string token = std::string("\"") + key + "\":";
-				auto        pos   = p.find(token);
-				if (pos == std::string::npos) return false;
-				pos += token.size();
-				while (pos < p.size() && std::isspace((unsigned char)p[pos]))
-					++pos;
-				const char *begin = p.c_str() + pos;
-				char       *end   = nullptr;
-				long        v     = std::strtol(begin, &end, 10);
-				if (begin == end) return false;
-				out = (int)v;
-				return true;
-			};
-
-			int  req_bitrate     = 0;
-			int  req_sample_rate = 0;
-			bool has_bitrate     = parse_json_int("bitrate_kbps", req_bitrate);
-			bool has_sample_rate = parse_json_int("sample_rate", req_sample_rate);
-
-			{
-				std::lock_guard<std::mutex> lk(mtx_);
-				auto                        it = conn_map_.find(h);
-				if (it == conn_map_.end()) return;
-				it->second.force_pcm = (mode == 1);
-			}
-
-			if (has_bitrate || has_sample_rate) {
-				AudioConfig cfg{};
-				cfg.codec                   = audio_codec_.load(std::memory_order_relaxed);
-				cfg.opus_bitrate_kbps       = opus_bitrate_kbps_.load(std::memory_order_relaxed);
-				cfg.opus_target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
-				cfg.quantization_bits       = audio_quantization_bits_.load(std::memory_order_relaxed);
-				cfg.mono                    = audio_mono_.load(std::memory_order_relaxed);
-				cfg.pcm_downsample_ratio    = pcm_downsample_ratio_.load(std::memory_order_relaxed);
-				cfg.playback_buffer_ms      = playback_buffer_ms_.load(std::memory_order_relaxed);
-				if (has_bitrate) cfg.opus_bitrate_kbps = req_bitrate;
-				if (has_sample_rate) cfg.opus_target_sample_rate = req_sample_rate;
-				set_audio_config(cfg);
-			}
+			// 受信者が変えられるのは自分の接続のコーデックだけ。ビットレート・サンプルレートは
+			// 全出演者に共通の配信設定のため、受信者からの変更は受け付けない。
+			std::lock_guard<std::mutex> lk(mtx_);
+			auto                        it = conn_map_.find(h);
+			if (it == conn_map_.end()) return;
+			it->second.force_pcm = (mode == 1);
 		}
 	}
 
@@ -927,8 +1006,16 @@ namespace ods::network {
 			// COEP require-corp 下でも読み込める。
 			con->replace_header("Cross-Origin-Opener-Policy", "same-origin");
 			con->replace_header("Cross-Origin-Embedder-Policy", "require-corp");
+			// /memo のクエリなど、ページ外へ送る Referer にコードを含めない。
+			con->replace_header("Referrer-Policy", "no-referrer");
 			con->replace_header("Cross-Origin-Resource-Policy", "same-origin");
-			std::string raw  = con->get_resource();
+			std::string raw = con->get_resource();
+			if (raw.size() > HTTP_MAX_URL_BYTES) {
+				con->set_status(websocketpp::http::status_code::request_uri_too_long);
+				con->replace_header("Content-Type", "text/plain; charset=utf-8");
+				con->set_body("URI Too Long");
+				return;
+			}
 			std::string path = raw;
 			std::string query;
 			auto        qpos = path.find('?');
@@ -972,9 +1059,9 @@ namespace ods::network {
 					pos = amp + 1;
 				}
 
-				std::string sid  = sanitize_id(sid_param);
-				std::string code = sanitize_id(code_param);
-				if (sid.empty() || code.empty()) {
+				const std::string &sid  = sid_param;
+				const std::string &code = code_param;
+				if (!is_valid_id(sid) || !is_valid_id(code)) {
 					con->set_status(websocketpp::http::status_code::bad_request);
 					con->replace_header("Content-Type", "text/plain; charset=utf-8");
 					con->set_body("Bad Request");
@@ -1023,7 +1110,8 @@ namespace ods::network {
 				if (!root.empty()) {
 					std::string full = join_path(root, "index.html");
 					std::string file;
-					if (read_file_to_string(full, file)) {
+					if (is_free_of_reparse_points(root, "index.html") &&
+						read_file_to_string(full, file, HTTP_MAX_STATIC_FILE_BYTES)) {
 						con->set_status(websocketpp::http::status_code::ok);
 						con->replace_header("Content-Type", "text/html; charset=utf-8");
 						con->replace_header("Cache-Control", "no-store");
@@ -1036,10 +1124,10 @@ namespace ods::network {
 			if (!root.empty()) {
 				std::string rel = path;
 				if (!rel.empty() && rel[0] == '/') rel = rel.substr(1);
-				if (is_safe_rel_path(rel)) {
+				if (is_safe_rel_path(rel) && is_free_of_reparse_points(root, rel)) {
 					std::string full = join_path(root, rel);
 					std::string file;
-					if (read_file_to_string(full, file)) {
+					if (read_file_to_string(full, file, HTTP_MAX_STATIC_FILE_BYTES)) {
 						con->set_status(websocketpp::http::status_code::ok);
 						con->replace_header("Content-Type", guess_content_type(full));
 						con->replace_header("Cache-Control", "no-store");

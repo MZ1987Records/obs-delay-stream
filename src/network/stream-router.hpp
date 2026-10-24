@@ -75,7 +75,7 @@ namespace ods::network {
 		/// 稼働中サーバーを停止して破棄する。
 		~StreamRouter() { stop(); }
 
-		bool start(uint16_t port);                          ///< サーバーを起動する
+		bool start(uint16_t port);                          ///< 127.0.0.1 で待ち受けてサーバーを起動する
 		void stop();                                        ///< サーバーを停止する
 		void set_stream_id(const std::string &id);          ///< 配信 ID を設定する
 		std::string stream_id() const;                      ///< 現在の配信 ID を返す
@@ -83,7 +83,7 @@ namespace ods::network {
 		void deactivate_slot(int slot);                     ///< スロットを無効化し対応する全接続を閉じる
 		bool is_slot_active(int slot) const;                ///< スロットが有効か返す
 		void set_sub_memo(int ch, const std::string &memo); ///< チャンネルメモを設定する
-		void set_sub_code(int ch, const std::string &code); ///< チャンネル識別コードを設定する
+		void set_sub_code(int ch, const std::string &code); ///< チャンネル識別コードを設定し、変更時は旧コードの接続を切断する
 		std::string sub_code(int ch) const;                 ///< チャンネル識別コードを取得する
 
 		/// 識別コードからチャンネル (0-indexed) を解決する。見つからなければ -1
@@ -245,6 +245,7 @@ namespace ods::network {
 								 uint32_t        channels,
 								 OpusPacketList &out);
 
+		bool on_validate(ConnectionHandle h);                           ///< Upgrade 承認前の照合。false で HTTP 応答のまま拒否する。
 		void on_open(ConnectionHandle h);                               ///< WebSocket 接続開始イベント。
 		void on_close(ConnectionHandle h);                              ///< WebSocket 接続終了イベント。
 		void on_message(ConnectionHandle h, WsServer::message_ptr msg); ///< WebSocket メッセージ受信イベント。

@@ -1,0 +1,11 @@
+# Pinned commits for third_party dependencies fetched with git (read by build.bat and CI).
+# Keep this file ASCII-only: cmd.exe may misparse multibyte text under a legacy code page.
+# To update, check the release tag and set the commit it points to, e.g.
+#   git ls-remote https://github.com/xiph/opus.git "refs/tags/v1.6.1^{}"
+
+# WebSocket++: master after 0.8.2 (2020). Releases have stopped, so pin by commit.
+WEBSOCKETPP_COMMIT=4dfe1be74e684acca19ac1cf96cce0df9eac2a2d
+
+# libopus v1.6.1
+OPUS_VERSION=1.6.1
+OPUS_COMMIT=22244de5a79bd1d6d623c32e72bf1954b56235be

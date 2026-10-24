@@ -14,6 +14,8 @@
 #include <obs-module.h>
 
 #include "plugin/plugin-utils.hpp"
+#include "plugin/plugin-helpers.hpp"
+#include "plugin/plugin-settings.hpp"
 
 namespace ods::plugin {
 
@@ -194,24 +196,17 @@ namespace ods::plugin {
 		return url;
 	}
 
-	void maybe_autofill_rtmp_url(obs_data_t *settings, bool force_refresh) {
+	void maybe_autofill_rtsp_url(obs_data_t *settings, bool force_refresh) {
 		if (!settings) return;
-		if (!obs_data_get_bool(settings, "rtmp_url_auto")) return;
+		if (!obs_data_get_bool(settings, kRtspUrlAutoKey)) return;
 		std::string configured =
-			trim_copy(obs_data_get_string(settings, "rtmp_url"));
+			trim_copy(obs_data_get_string(settings, kRtspUrlKey));
 		if (!force_refresh && !configured.empty()) return;
-		std::string auto_url = get_obs_stream_url();
+		// OBS 配信設定値 (rtmp://…) をそのまま RTSP スキームへ読み替えて受信 URL とする。
+		std::string auto_url = to_rtsp_url_from_rtmp(get_obs_stream_url());
 		if (auto_url.empty()) return;
 		if (configured == auto_url) return;
-		obs_data_set_string(settings, "rtmp_url", auto_url.c_str());
-	}
-
-	void maybe_autofill_rtmp_url_from_source(obs_source_t *source, bool force_refresh) {
-		if (!source) return;
-		obs_data_t *s = obs_source_get_settings(source);
-		if (!s) return;
-		maybe_autofill_rtmp_url(s, force_refresh);
-		obs_data_release(s);
+		obs_data_set_string(settings, kRtspUrlKey, auto_url.c_str());
 	}
 
 } // namespace ods::plugin

@@ -32,22 +32,14 @@ namespace ods::ui::url_share {
 			if (sid.empty()) return "";
 			std::string code = d->router.sub_code(ch0);
 			if (code.empty()) return "";
-			std::string base;
-			std::string turl = d->tunnel.url();
-			if (!turl.empty()) {
-				base = turl;
-				if (base.rfind("wss://", 0) == 0)
-					base.replace(0, 6, "https://");
-				else if (base.rfind("ws://", 0) == 0)
-					base.replace(0, 5, "http://");
-			} else {
-				std::string ip = d->get_host_ip();
-				if (ip.empty()) ip = d->auto_ip;
-				if (ip.empty()) return "";
-				int ws_port = d->ws_port.load(std::memory_order_relaxed);
-				base        = "http://" + ip + ":" + std::to_string(ws_port);
-			}
-			if (!base.empty() && base.back() == '/') base.pop_back();
+			// サーバーは 127.0.0.1 だけで待ち受けるため、出演者が開けるのはトンネル URL だけ。
+			std::string base = d->tunnel.url();
+			if (base.empty()) return "";
+			if (base.rfind("wss://", 0) == 0)
+				base.replace(0, 6, "https://");
+			else if (base.rfind("ws://", 0) == 0)
+				base.replace(0, 5, "http://");
+			if (base.back() == '/') base.pop_back();
 			return base + "/#!/" + sid + "/" + code;
 		}
 
@@ -112,7 +104,7 @@ namespace ods::ui::url_share {
 		bool              via_tunnel = !d->tunnel.url().empty();
 		const char       *suffix     = (ts == TunnelState::Starting)
 										   ? T_("UrlShareStartingSuffix")
-										   : (via_tunnel ? T_("UrlShareTunnelSuffix") : T_("UrlShareDirectSuffix"));
+										   : (via_tunnel ? T_("UrlShareTunnelSuffix") : T_("UrlShareNeedTunnelSuffix"));
 		const std::string copy_label = std::string(T_("UrlShareCopyAll")) + suffix;
 		obs_property_t   *copy_p =
 			obs_properties_add_button2(grp, "url_share_copy_all", copy_label.c_str(), cb_sub_copy_all, d);
