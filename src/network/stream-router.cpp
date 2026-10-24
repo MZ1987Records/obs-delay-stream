@@ -908,46 +908,12 @@ namespace ods::network {
 				mode = 0;
 			if (mode < 0) return;
 
-			auto parse_json_int = [&p](const char *key, int &out) -> bool {
-				std::string token = std::string("\"") + key + "\":";
-				auto        pos   = p.find(token);
-				if (pos == std::string::npos) return false;
-				pos += token.size();
-				while (pos < p.size() && std::isspace((unsigned char)p[pos]))
-					++pos;
-				const char *begin = p.c_str() + pos;
-				char       *end   = nullptr;
-				long        v     = std::strtol(begin, &end, 10);
-				if (begin == end) return false;
-				out = (int)v;
-				return true;
-			};
-
-			int  req_bitrate     = 0;
-			int  req_sample_rate = 0;
-			bool has_bitrate     = parse_json_int("bitrate_kbps", req_bitrate);
-			bool has_sample_rate = parse_json_int("sample_rate", req_sample_rate);
-
-			{
-				std::lock_guard<std::mutex> lk(mtx_);
-				auto                        it = conn_map_.find(h);
-				if (it == conn_map_.end()) return;
-				it->second.force_pcm = (mode == 1);
-			}
-
-			if (has_bitrate || has_sample_rate) {
-				AudioConfig cfg{};
-				cfg.codec                   = audio_codec_.load(std::memory_order_relaxed);
-				cfg.opus_bitrate_kbps       = opus_bitrate_kbps_.load(std::memory_order_relaxed);
-				cfg.opus_target_sample_rate = opus_target_sample_rate_.load(std::memory_order_relaxed);
-				cfg.quantization_bits       = audio_quantization_bits_.load(std::memory_order_relaxed);
-				cfg.mono                    = audio_mono_.load(std::memory_order_relaxed);
-				cfg.pcm_downsample_ratio    = pcm_downsample_ratio_.load(std::memory_order_relaxed);
-				cfg.playback_buffer_ms      = playback_buffer_ms_.load(std::memory_order_relaxed);
-				if (has_bitrate) cfg.opus_bitrate_kbps = req_bitrate;
-				if (has_sample_rate) cfg.opus_target_sample_rate = req_sample_rate;
-				set_audio_config(cfg);
-			}
+			// 受信者が変えられるのは自分の接続のコーデックだけ。ビットレート・サンプルレートは
+			// 全出演者に共通の配信設定のため、受信者からの変更は受け付けない。
+			std::lock_guard<std::mutex> lk(mtx_);
+			auto                        it = conn_map_.find(h);
+			if (it == conn_map_.end()) return;
+			it->second.force_pcm = (mode == 1);
 		}
 	}
 
