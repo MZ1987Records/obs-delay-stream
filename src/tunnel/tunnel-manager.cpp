@@ -31,6 +31,8 @@
 #include <obs-module.h>
 #include <vector>
 
+#include "core/approved-binaries.hpp"
+#include "core/binary-verify.hpp"
 #include "core/string-format.hpp"
 #include "tunnel/tunnel-manager.hpp"
 
@@ -70,14 +72,9 @@ namespace ods::tunnel {
 			exe_path_ = resolved;
 			set_cloudflared_downloading(false);
 		} else {
-			std::string auto_path = get_default_cloudflared_path();
-			if (file_exists(auto_path)) {
-				exe_path_ = auto_path;
-				set_cloudflared_downloading(false);
-			} else {
-				exe_path_.clear();
-				set_cloudflared_downloading(true);
-			}
+			// 自動取得版は起動のたびにワーカーで承認版との一致を検証してから使う。
+			exe_path_.clear();
+			set_cloudflared_downloading(!file_exists(get_default_cloudflared_path()));
 		}
 
 		state_ = TunnelState::Starting;
@@ -187,18 +184,25 @@ namespace ods::tunnel {
 		return (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 	}
 
-	std::string TunnelManager::get_default_cloudflared_path() {
+	std::string TunnelManager::get_bin_dir() {
 		std::string base = get_local_appdata_dir();
-		if (!base.empty()) {
-			std::string dir = base + "\\obs-delay-stream\\bin";
-			SHCreateDirectoryExA(nullptr, dir.c_str(), nullptr);
-			return dir + "\\cloudflared.exe";
-		}
+		if (!base.empty()) return base + "\\obs-delay-stream\\bin";
 		std::string tmp_path = get_temp_dir();
 		if (tmp_path.empty()) tmp_path = "C:\\Temp\\";
-		std::string dir = tmp_path + "obs-delay-stream\\bin";
-		SHCreateDirectoryExA(nullptr, dir.c_str(), nullptr);
-		return dir + "\\cloudflared.exe";
+		if (tmp_path.back() != '\\') tmp_path.push_back('\\');
+		return tmp_path + "obs-delay-stream\\bin";
+	}
+
+	std::string TunnelManager::get_default_cloudflared_path() {
+		// 版ごとのディレクトリに置き、更新時も実行中・既存の exe を上書きしない。
+		return get_bin_dir() + "\\cloudflared\\" + kApprovedCloudflared.version + "\\cloudflared.exe";
+	}
+
+	bool TunnelManager::is_legacy_auto_cloudflared_path(const std::string &path) {
+		// 承認版の導入前に latest を自動取得していた配置先。
+		const std::string legacy = get_bin_dir() + "\\cloudflared.exe";
+		const std::string p      = expand_allowed_env_vars(path);
+		return _stricmp(p.c_str(), legacy.c_str()) == 0;
 	}
 
 	bool TunnelManager::get_auto_cloudflared_path_if_exists(std::string &out) {
@@ -208,7 +212,10 @@ namespace ods::tunnel {
 
 	bool TunnelManager::ensure_auto_cloudflared_path(std::string &out, std::string &err) {
 		out = get_default_cloudflared_path();
-		if (file_exists(out)) return true;
+		if (verify_file(out, kApprovedCloudflared.exe_size, kApprovedCloudflared.exe_sha256) == VerifyResult::Ok) {
+			return true;
+		}
+		blog(LOG_INFO, "[obs-delay-stream] cloudflared auto-download: %s", kApprovedCloudflared.version);
 		return download_cloudflared(out, err);
 	}
 
@@ -227,17 +234,10 @@ namespace ods::tunnel {
 	}
 
 	bool TunnelManager::download_cloudflared(const std::string &path, std::string &err) {
-		static const char *kUrl =
-			"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
-		HRESULT hr = URLDownloadToFileA(nullptr, kUrl, path.c_str(), 0, nullptr);
-		if (FAILED(hr)) {
-			const std::string hr_hex = string_printf("0x%08lx", (unsigned long)hr);
-			err                      = std::string("cloudflared の自動ダウンロードに失敗しました (") + hr_hex +
-									   ")。ネットワーク接続を確認するか、手動でパスを指定してください。";
-			return false;
-		}
-		if (!file_exists(path)) {
-			err = "cloudflared のダウンロード後にファイルが見つかりませんでした。";
+		const auto &a = kApprovedCloudflared;
+		std::string reason;
+		if (!download_verified(a.url, path, a.download_size, a.download_sha256, reason)) {
+			err = std::string("cloudflared ") + a.version + " の自動取得: " + reason;
 			return false;
 		}
 		return true;
@@ -263,11 +263,7 @@ namespace ods::tunnel {
 			return false;
 		}
 
-		out = get_default_cloudflared_path();
-		if (file_exists(out)) return true;
-
-		blog(LOG_INFO, "[obs-delay-stream] cloudflared auto-download: %s", out.c_str());
-		return download_cloudflared(out, err);
+		return ensure_auto_cloudflared_path(out, err);
 	}
 
 	bool TunnelManager::search_path_cloudflared(std::string &out) {
@@ -379,7 +375,7 @@ namespace ods::tunnel {
 		if (exe_path_.empty()) {
 			std::string resolved;
 			std::string err;
-			set_cloudflared_downloading(true);
+			set_cloudflared_downloading(!file_exists(get_default_cloudflared_path()));
 			if (!resolve_cloudflared_path(requested_exe_path_, resolved, err)) {
 				set_cloudflared_downloading(false);
 				set_error(err);

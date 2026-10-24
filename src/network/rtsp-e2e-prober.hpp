@@ -41,10 +41,13 @@ namespace ods::network {
 		RtspE2eProber();  ///< 既定状態で構築する
 		~RtspE2eProber(); ///< 実行中の計測を停止して破棄する
 
-		/// 自動配置先の ffmpeg.exe が存在する場合に絶対パスを返す。
+		/// 自動配置先の ffmpeg.exe が存在する場合に絶対パスを返す（検証はしない）。
 		static bool get_auto_ffmpeg_path_if_exists(std::string &out);
-		/// 自動配置先へ ffmpeg.exe を配置し、利用可能な絶対パスを返す。
+		/// 自動配置先の ffmpeg.exe を承認版と照合し、無いか一致しなければ承認版を取得・展開する。
+		/// 起動前の検証を兼ねるため、ハッシュ計算を伴う。UI スレッドから呼ばない。
 		static bool ensure_auto_ffmpeg_path(std::string &out, std::string &err);
+		/// 承認版の導入前に master-latest を自動展開していた配置先（%LocalAppData% 表記も可）かを返す。
+		static bool is_legacy_auto_ffmpeg_path(const std::string &path);
 
 		/// RTSP E2E 計測を開始する。
 		bool start(const std::string &rtsp_url, const std::string &ffmpeg_path_hint);

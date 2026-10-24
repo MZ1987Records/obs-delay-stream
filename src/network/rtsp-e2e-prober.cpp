@@ -12,6 +12,8 @@
 
 #include "network/rtsp-e2e-prober.hpp"
 
+#include "core/approved-binaries.hpp"
+#include "core/binary-verify.hpp"
 #include "core/constants.hpp"
 #include "core/string-format.hpp"
 
@@ -41,10 +43,8 @@ namespace ods::network {
 			h = INVALID_HANDLE_VALUE;
 		}
 
-		constexpr char kFfmpegBtbnZipUrl[] =
-			"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
-		constexpr char kFfmpegZipName[]         = "ffmpeg-master-latest-win64-gpl.zip";
-		constexpr char kFfmpegExpandedDirName[] = "ffmpeg-master-latest-win64-gpl";
+		// 承認版の導入前に master-latest を自動取得・展開していたディレクトリ名。
+		constexpr char kLegacyFfmpegExpandedDirName[] = "ffmpeg-master-latest-win64-gpl";
 
 		std::string normalize_rtsp_url_for_ffmpeg(const std::string &rtsp_url) {
 			constexpr char kRtsptScheme[] = "rtspt://";
@@ -94,12 +94,6 @@ namespace ods::network {
 				   (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
 		}
 
-		bool dir_exists(const std::string &path) {
-			const DWORD attr = GetFileAttributesA(path.c_str());
-			return attr != INVALID_FILE_ATTRIBUTES &&
-				   (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
-		}
-
 		std::string get_default_ffmpeg_base_dir() {
 			std::string base = get_local_appdata_dir();
 			if (!base.empty()) {
@@ -120,49 +114,9 @@ namespace ods::network {
 		}
 
 		std::string get_default_ffmpeg_auto_path() {
-			return get_default_ffmpeg_base_dir() +
-				   "\\" + kFfmpegExpandedDirName + "\\bin\\ffmpeg.exe";
-		}
-
-		bool find_ffmpeg_recursive(const std::string &dir, int depth, std::string &out);
-
-		bool find_auto_ffmpeg_in_default_dir(std::string &out) {
-			const std::string base_dir     = get_default_ffmpeg_base_dir();
-			const std::string expected_exe = get_default_ffmpeg_auto_path();
-			if (file_exists(expected_exe)) {
-				out = expected_exe;
-				return true;
-			}
-			return find_ffmpeg_recursive(base_dir, 6, out);
-		}
-
-		bool find_ffmpeg_recursive(const std::string &dir, int depth, std::string &out) {
-			if (depth < 0 || !dir_exists(dir)) return false;
-			WIN32_FIND_DATAA  fd{};
-			const std::string pattern = dir + "\\*";
-			HANDLE            h       = FindFirstFileA(pattern.c_str(), &fd);
-			if (h == INVALID_HANDLE_VALUE) return false;
-
-			do {
-				const char *name = fd.cFileName;
-				if (std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0) continue;
-
-				const std::string full = dir + "\\" + name;
-				if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-					if (find_ffmpeg_recursive(full, depth - 1, out)) {
-						FindClose(h);
-						return true;
-					}
-					continue;
-				}
-				if (_stricmp(name, "ffmpeg.exe") == 0) {
-					out = full;
-					FindClose(h);
-					return true;
-				}
-			} while (FindNextFileA(h, &fd) == TRUE);
-			FindClose(h);
-			return false;
+			// 承認版 ZIP の展開先は版名入りのディレクトリになる。ディレクトリを再帰探索して
+			// 別の ffmpeg.exe を拾わないよう、実行パスは承認一覧の値に固定する。
+			return get_default_ffmpeg_base_dir() + "\\" + kApprovedFfmpeg.exe_in_archive;
 		}
 
 		bool search_path_ffmpeg(std::string &out) {
@@ -215,97 +169,28 @@ namespace ods::network {
 			return out;
 		}
 
-		std::string ps_single_quote(const std::string &s) {
-			std::string out;
-			out.reserve(s.size() + 8);
-			out.push_back('\'');
-			for (char c : s) {
-				if (c == '\'')
-					out += "''";
-				else
-					out.push_back(c);
-			}
-			out.push_back('\'');
-			return out;
-		}
+		bool ensure_auto_ffmpeg_binary(std::string &out, std::string &err) {
+			const auto &a = kApprovedFfmpeg;
+			out           = get_default_ffmpeg_auto_path();
+			if (verify_file(out, a.exe_size, a.exe_sha256) == VerifyResult::Ok) return true;
 
-		bool expand_zip_powershell(const std::string &zip_path,
-								   const std::string &dest_dir,
-								   std::string       &err) {
-			const std::string command =
-				"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \""
-				"try { Expand-Archive -LiteralPath " +
-				ps_single_quote(zip_path) +
-				" -DestinationPath " + ps_single_quote(dest_dir) +
-				" -Force; exit 0 } catch { exit 1 }\"";
-			std::vector<char> cmd(command.begin(), command.end());
-			cmd.push_back('\0');
-
-			STARTUPINFOA        si{};
-			PROCESS_INFORMATION pi{};
-			si.cb         = sizeof(si);
-			const BOOL ok = CreateProcessA(
-				nullptr,
-				cmd.data(),
-				nullptr,
-				nullptr,
-				FALSE,
-				CREATE_NO_WINDOW,
-				nullptr,
-				nullptr,
-				&si,
-				&pi);
-			if (!ok) {
-				err = "ZIP 展開のための PowerShell 起動に失敗しました。";
+			const std::string base_dir = get_default_ffmpeg_base_dir();
+			const std::string zip_path = base_dir + "\\ffmpeg-" + a.version + ".zip";
+			blog(LOG_INFO, "[obs-delay-stream] ffmpeg auto-download: %s", a.version);
+			std::string reason;
+			if (!download_verified(a.url, zip_path, a.download_size, a.download_sha256, reason)) {
+				err = std::string("FFmpeg ") + a.version + " の自動取得: " + reason;
 				return false;
 			}
-
-			const DWORD wait = WaitForSingleObject(pi.hProcess, 120000);
-			if (wait != WAIT_OBJECT_0) {
-				TerminateProcess(pi.hProcess, 1);
-				err = "ffmpeg ZIP 展開がタイムアウトしました。";
-				close_handle(pi.hThread);
-				close_handle(pi.hProcess);
-				return false;
-			}
-			DWORD code = 1;
-			GetExitCodeProcess(pi.hProcess, &code);
-			close_handle(pi.hThread);
-			close_handle(pi.hProcess);
-
-			if (code != 0) {
-				err = "ffmpeg ZIP の展開に失敗しました。";
+			// ZIP は承認値と一致したものだけから、ffmpeg.exe 1 つだけを取り出し、最後に exe を検証する。
+			const bool expanded = extract_zip_entry(zip_path, base_dir, a.exe_in_archive, err);
+			DeleteFileA(zip_path.c_str());
+			if (!expanded) return false;
+			if (verify_file(out, a.exe_size, a.exe_sha256) != VerifyResult::Ok) {
+				err = "展開した ffmpeg.exe が承認版と一致しません（改変または破損の可能性があります）。";
 				return false;
 			}
 			return true;
-		}
-
-		bool ensure_auto_ffmpeg_binary(std::string &out, std::string &err) {
-			if (find_auto_ffmpeg_in_default_dir(out)) return true;
-
-			const std::string base_dir = get_default_ffmpeg_base_dir();
-			const std::string zip_path = base_dir + "\\" + kFfmpegZipName;
-			blog(LOG_INFO, "[obs-delay-stream] ffmpeg auto-download: %s", zip_path.c_str());
-			const HRESULT hr = URLDownloadToFileA(nullptr, kFfmpegBtbnZipUrl, zip_path.c_str(), 0, nullptr);
-			if (FAILED(hr)) {
-				char hr_hex[32] = {};
-				std::snprintf(hr_hex, sizeof(hr_hex), "0x%08lx", (unsigned long)hr);
-				err = std::string("ffmpeg の自動ダウンロードに失敗しました (") + hr_hex +
-					  ")。ネットワーク接続を確認するか、%PATH% から解決を使用してください。";
-				return false;
-			}
-			if (!file_exists(zip_path)) {
-				err = "ffmpeg のダウンロード後に ZIP ファイルが見つかりませんでした。";
-				return false;
-			}
-			if (!expand_zip_powershell(zip_path, base_dir, err)) {
-				return false;
-			}
-			DeleteFileA(zip_path.c_str());
-
-			if (find_auto_ffmpeg_in_default_dir(out)) return true;
-			err = "ffmpeg の自動展開後に ffmpeg.exe が見つかりませんでした。";
-			return false;
 		}
 
 		bool resolve_ffmpeg_path(const std::string &requested, std::string &out, std::string &err) {
@@ -358,10 +243,19 @@ namespace ods::network {
 			//   probesize 32 / analyzeduration 0 … RTSP は SDP で codec 既知のため最小解析でよい
 			//   max_delay 0 / reorder_queue_size 0 … TCP 伝送では並べ替え不要
 			//   flush_packets 1                 … パイプ出力を都度フラッシュし検出遅れを抑える
+			// 入力の制限: 受信するのは配信者自身の OBS が配信サーバーへ送った音声（RTMP 用の AAC、
+			// 構成によって Opus）だけ。配信サーバーや暗号化されていない rtsp/rtspt 経路から細工した
+			// ストリームを送られても、FFmpeg の他の機能を使わせない。
+			//   f rtsp                          … 入力形式を RTSP に固定する
+			//   allowed_media_types audio       … SETUP を音声だけにし、映像は受信も解析もしない
+			//   protocol_whitelist tcp,tls      … RTSP over TCP が開くのは tcp、rtsps は tls（その下で tcp）だけ
+			//   codec_whitelist aac,opus        … ストリーム解析と復号に使うデコーダーを限る
 			return exe + " -nostdin -v error"
 								" -fflags nobuffer -flags low_delay"
 								" -probesize 32 -analyzeduration 0"
 								" -max_delay 0 -reorder_queue_size 0"
+								" -f rtsp -allowed_media_types audio"
+								" -protocol_whitelist tcp,tls -codec_whitelist aac,opus"
 								" -rtsp_transport tcp -timeout " +
 				   std::to_string(timeout_us) + " -i " + url +
 				   " -map 0:a:0 -vn -f s16le -ar 48000 -ac 1 -flush_packets 1 -";
@@ -482,7 +376,14 @@ namespace ods::network {
 	}
 
 	bool RtspE2eProber::get_auto_ffmpeg_path_if_exists(std::string &out) {
-		return find_auto_ffmpeg_in_default_dir(out);
+		out = get_default_ffmpeg_auto_path();
+		return file_exists(out);
+	}
+
+	bool RtspE2eProber::is_legacy_auto_ffmpeg_path(const std::string &path) {
+		const std::string legacy =
+			get_default_ffmpeg_base_dir() + "\\" + kLegacyFfmpegExpandedDirName + "\\bin\\ffmpeg.exe";
+		return _stricmp(expand_allowed_env_vars(path).c_str(), legacy.c_str()) == 0;
 	}
 
 	bool RtspE2eProber::ensure_auto_ffmpeg_path(std::string &out, std::string &err) {

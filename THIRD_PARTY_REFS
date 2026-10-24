@@ -6,6 +6,9 @@
 # WebSocket++: master after 0.8.2 (2020). Releases have stopped, so pin by commit.
 WEBSOCKETPP_COMMIT=4dfe1be74e684acca19ac1cf96cce0df9eac2a2d
 
+# Asio (standalone) 1.18.2, tag asio-1-18-2. Newer releases drop APIs that WebSocket++ uses.
+ASIO_COMMIT=a4d820dd69b37fb8daee275d20eb162054453414
+
 # libopus v1.6.1
 OPUS_VERSION=1.6.1
 OPUS_COMMIT=22244de5a79bd1d6d623c32e72bf1954b56235be

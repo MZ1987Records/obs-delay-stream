@@ -64,6 +64,7 @@ add_subdirectory(third_party/opus EXCLUDE_FROM_ALL)
 
 # ---- Plugin target ----
 add_library(obs-delay-stream MODULE
+  src/core/binary-verify.cpp
   src/plugin/plugin-main.cpp
   src/plugin/plugin-utils.cpp
   src/plugin/plugin-services.cpp
@@ -243,11 +244,12 @@ endif()
 
 add_executable(plugin-utils-check EXCLUDE_FROM_ALL
   tests/plugin-utils-check.cpp
+  src/core/binary-verify.cpp
   src/plugin/plugin-utils.cpp
 )
 target_include_directories(plugin-utils-check PRIVATE src)
 target_compile_definitions(plugin-utils-check PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(plugin-utils-check bcrypt user32)
+target_link_libraries(plugin-utils-check bcrypt user32 shell32 urlmon)
 if(MSVC)
   target_compile_options(plugin-utils-check PRIVATE /utf-8)
 endif()

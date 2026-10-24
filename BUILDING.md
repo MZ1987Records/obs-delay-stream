@@ -68,7 +68,7 @@ cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
 
 ### 2. 依存ライブラリを取得
 
-websocketpp と libopus の取得先コミットは、リポジトリ直下の `THIRD_PARTY_REFS` で固定しています。下記のコミット SHA は `THIRD_PARTY_REFS` の値に読み替えてください。
+websocketpp・Asio・libopus の取得先コミットは、リポジトリ直下の `THIRD_PARTY_REFS` で固定しています。下記のコミット SHA は `THIRD_PARTY_REFS` の値に読み替えてください。
 
 ```powershell
 cd C:\obs-delay-stream
@@ -77,7 +77,9 @@ cd third_party
 git init websocketpp
 git -C websocketpp fetch --depth 1 https://github.com/zaphoyd/websocketpp.git <WEBSOCKETPP_COMMIT>
 git -C websocketpp checkout --detach FETCH_HEAD
-git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git
+git init asio
+git -C asio fetch --depth 1 https://github.com/chriskohlhoff/asio.git <ASIO_COMMIT>
+git -C asio checkout --detach FETCH_HEAD
 git init opus
 git -C opus fetch --depth 1 https://github.com/xiph/opus.git <OPUS_COMMIT>
 git -C opus checkout --detach FETCH_HEAD

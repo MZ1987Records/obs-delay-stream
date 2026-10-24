@@ -102,8 +102,10 @@ WebSocket サーバーはこのPC（127.0.0.1）だけで待ち受けます。�
 > **注意:** セキュリティソフトが `*.trycloudflare.com` をブロックしてトンネル接続に失敗することがあります。
 > その場合は `*.trycloudflare.com` を例外（許可）に追加してください。
 
-※ 自動ダウンロードされた exe の保存先:
-`%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared.exe`
+※ 自動では、プラグインが承認した版の cloudflared を取得し、ファイルが改変されていないか起動のたびに検証します。保存先は版ごとのフォルダーです:
+`%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared\<版>\cloudflared.exe`
+
+以前の版が自動取得した `%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared.exe` は使われなくなるため、削除してかまいません。PATHや手動で指定した exe は検証しません。
 
 ### 出演者への接続案内
 
