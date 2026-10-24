@@ -1,4 +1,13 @@
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "network/stream-router-utils.hpp"
+
+#include <windows.h>
 
 #include <algorithm>
 #include <cctype>
@@ -149,9 +158,30 @@ namespace ods::network {
 		return out;
 	}
 
-	bool read_file_to_string(const std::string &path, std::string &out) {
-		std::ifstream ifs(path, std::ios::binary);
+	bool is_free_of_reparse_points(const std::string &root, const std::string &rel) {
+		// ifstream と同じく ANSI API で解釈し、読み込み時と同じ実体を調べる。
+		std::string path = root;
+		size_t      pos  = 0;
+		while (pos <= rel.size()) {
+			size_t      next = rel.find('/', pos);
+			std::string seg  = rel.substr(pos, next == std::string::npos ? std::string::npos : next - pos);
+			if (!seg.empty()) {
+				path              = join_path(path, seg);
+				const DWORD attrs = GetFileAttributesA(path.c_str());
+				if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+			}
+			if (next == std::string::npos) break;
+			pos = next + 1;
+		}
+		return true;
+	}
+
+	bool read_file_to_string(const std::string &path, std::string &out, std::size_t max_bytes) {
+		std::ifstream ifs(path, std::ios::binary | std::ios::ate);
 		if (!ifs) return false;
+		const auto size = ifs.tellg();
+		if (size < 0 || static_cast<unsigned long long>(size) > max_bytes) return false;
+		ifs.seekg(0);
 		out.assign(std::istreambuf_iterator<char>(ifs),
 				   std::istreambuf_iterator<char>());
 		return true;

@@ -37,6 +37,7 @@ namespace ods::core {
 	static constexpr std::size_t WS_MAX_MESSAGE_BYTES = 4 * 1024; ///< WebSocket 受信メッセージ上限（フラグメント結合後）
 	static constexpr std::size_t HTTP_MAX_BODY_BYTES  = 1024;     ///< HTTP リクエスト本文の上限（配信用 GET は本文不要）
 	static constexpr std::size_t HTTP_MAX_URL_BYTES   = 2048;     ///< リクエスト URL（パス＋クエリ）の上限
+	static constexpr std::size_t HTTP_MAX_STATIC_FILE_BYTES = 8 * 1024 * 1024; ///< 配信する静的ファイル 1 件の上限（受信ページの最大アセットは 1 MB 未満）
 	// 受信ページの制御メッセージは ping への pong（PING_INTV_MS 間隔、約 7 件/秒）と audio_codec だけ
 	static constexpr double CTRL_MSG_RATE_PER_SEC = 20.0; ///< 接続ごとの制御メッセージの補充レート (件/秒)
 	static constexpr double CTRL_MSG_BURST        = 40.0; ///< 接続ごとの制御メッセージの一時的な上限 (件)

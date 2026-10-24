@@ -977,6 +977,8 @@ namespace ods::network {
 			// COEP require-corp 下でも読み込める。
 			con->replace_header("Cross-Origin-Opener-Policy", "same-origin");
 			con->replace_header("Cross-Origin-Embedder-Policy", "require-corp");
+			// /memo のクエリなど、ページ外へ送る Referer にコードを含めない。
+			con->replace_header("Referrer-Policy", "no-referrer");
 			con->replace_header("Cross-Origin-Resource-Policy", "same-origin");
 			std::string raw = con->get_resource();
 			if (raw.size() > HTTP_MAX_URL_BYTES) {
@@ -1079,7 +1081,8 @@ namespace ods::network {
 				if (!root.empty()) {
 					std::string full = join_path(root, "index.html");
 					std::string file;
-					if (read_file_to_string(full, file)) {
+					if (is_free_of_reparse_points(root, "index.html") &&
+						read_file_to_string(full, file, HTTP_MAX_STATIC_FILE_BYTES)) {
 						con->set_status(websocketpp::http::status_code::ok);
 						con->replace_header("Content-Type", "text/html; charset=utf-8");
 						con->replace_header("Cache-Control", "no-store");
@@ -1092,10 +1095,10 @@ namespace ods::network {
 			if (!root.empty()) {
 				std::string rel = path;
 				if (!rel.empty() && rel[0] == '/') rel = rel.substr(1);
-				if (is_safe_rel_path(rel)) {
+				if (is_safe_rel_path(rel) && is_free_of_reparse_points(root, rel)) {
 					std::string full = join_path(root, rel);
 					std::string file;
-					if (read_file_to_string(full, file)) {
+					if (read_file_to_string(full, file, HTTP_MAX_STATIC_FILE_BYTES)) {
 						con->set_status(websocketpp::http::status_code::ok);
 						con->replace_header("Content-Type", guess_content_type(full));
 						con->replace_header("Cache-Control", "no-store");

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace ods::network {
@@ -68,8 +70,13 @@ namespace ods::network {
 	/// ベースパスと相対パスを結合する。
 	std::string join_path(const std::string &base, const std::string &rel);
 
-	/// ファイル全体を文字列として読み込む。
-	bool read_file_to_string(const std::string &path, std::string &out);
+	/// root 配下の rel までの経路（途中のディレクトリとファイル）に reparse point
+	/// （シンボリックリンク・ジャンクション）が無いかを判定する。存在しない経路も false。
+	/// 配信ルートの中にリンクを置かれても、ルート外のファイルを公開しないために使う。
+	bool is_free_of_reparse_points(const std::string &root, const std::string &rel);
+
+	/// ファイル全体を文字列として読み込む。max_bytes を超えるファイルは読まずに false を返す。
+	bool read_file_to_string(const std::string &path, std::string &out, std::size_t max_bytes = SIZE_MAX);
 
 	/// 拡張子から HTTP Content-Type を推定する。
 	const char *guess_content_type(const std::string &path);

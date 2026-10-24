@@ -4,6 +4,8 @@
 #include "network/stream-router-utils.hpp"
 
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 
 using namespace ods::network;
 
@@ -72,6 +74,22 @@ int main() {
 		for (int i = 0; i < 400; ++i)
 			all_ok = all_ok && steady.allow(t0 + milliseconds(150 * i));
 		check(all_ok, "pong every 150 ms is allowed");
+	}
+
+	// 静的配信: 経路の reparse point 判定とサイズ上限（ジャンクションの拒否は手作業で確認する）
+	{
+		const auto root = std::filesystem::temp_directory_path() / "ods-stream-router-utils-check";
+		std::filesystem::remove_all(root);
+		std::filesystem::create_directories(root / "assets");
+		std::ofstream(root / "assets" / "a.js", std::ios::binary) << "0123456789";
+		const std::string r = root.string();
+		check(is_free_of_reparse_points(r, "assets/a.js"), "plain file path");
+		check(!is_free_of_reparse_points(r, "assets/missing.js"), "missing file");
+		std::string body;
+		check(read_file_to_string((root / "assets" / "a.js").string(), body, 10) && body == "0123456789",
+			  "file at size limit");
+		check(!read_file_to_string((root / "assets" / "a.js").string(), body, 9), "file over size limit");
+		std::filesystem::remove_all(root);
 	}
 
 	if (failures == 0) std::printf("stream-router-utils-check: OK\n");
