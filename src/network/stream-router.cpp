@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <numeric>
 #include <obs-module.h>
 
@@ -883,14 +885,49 @@ namespace ods::network {
 
 	void StreamRouter::on_message(ConnectionHandle h, WsServer::message_ptr msg) {
 		if (msg->get_opcode() != websocketpp::frame::opcode::text) return;
-		const std::string &p = msg->get_payload();
-		if (p.find("\"pong\"") != std::string::npos) {
-			int  seq = -1;
-			auto pos = p.find("\"seq\":");
-			if (pos != std::string::npos) seq = std::atoi(p.c_str() + pos + 6);
-			if (seq < 0) return;
+		const auto now = Clock::now();
 
-			auto                        now = Clock::now();
+		// 認可済み接続だけを処理し、頻度制限を超えた接続は閉じる。
+		std::shared_ptr<WsServer> srv;
+		bool                      over_limit = false;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			auto                        it = conn_map_.find(h);
+			if (it == conn_map_.end()) return;
+			over_limit = !it->second.ctrl_rate.allow(now);
+			srv        = server_ptr_;
+		}
+		auto close_conn = [&](const char *reason) {
+			if (!srv) return;
+			try {
+				srv->close(h, websocketpp::close::status::policy_violation, reason);
+			} catch (...) {
+			}
+		};
+		if (over_limit) {
+			close_conn("rate_limited");
+			return;
+		}
+
+		// 受信ページが送るのは {"type":"pong","seq":N} と {"type":"audio_codec","mode":"pcm"|"opus"} だけ。
+		// JSON として解析できないものは正規の受信ページから来ないため閉じる（解析失敗ごとに
+		// libobs がログを書くので、受け流すとログを溢れさせられる）。
+		std::unique_ptr<obs_data_t, decltype(&obs_data_release)> j(
+			obs_data_create_from_json(msg->get_payload().c_str()), obs_data_release);
+		if (!j) {
+			close_conn("invalid_json");
+			return;
+		}
+		const std::string type = obs_data_get_string(j.get(), "type");
+
+		if (type == "pong") {
+			obs_data_item_t *seq_item = obs_data_item_byname(j.get(), "seq");
+			const bool       is_num   = seq_item && obs_data_item_gettype(seq_item) == OBS_DATA_NUMBER;
+			const long long  seq_ll   = is_num ? obs_data_item_get_int(seq_item) : -1;
+			obs_data_item_release(&seq_item);
+			if (seq_ll < 0 || seq_ll > INT_MAX) return;
+			const int seq = static_cast<int>(seq_ll);
+
 			std::lock_guard<std::mutex> lk(mtx_);
 			auto                        it = conn_map_.find(h);
 			if (it == conn_map_.end()) return;
@@ -904,11 +941,12 @@ namespace ods::network {
 			return;
 		}
 
-		if (p.find("\"audio_codec\"") != std::string::npos) {
-			int mode = -1;
-			if (p.find("\"mode\":\"pcm\"") != std::string::npos)
+		if (type == "audio_codec") {
+			const std::string mode_str = obs_data_get_string(j.get(), "mode");
+			int               mode     = -1;
+			if (mode_str == "pcm")
 				mode = 1;
-			else if (p.find("\"mode\":\"opus\"") != std::string::npos)
+			else if (mode_str == "opus")
 				mode = 0;
 			if (mode < 0) return;
 

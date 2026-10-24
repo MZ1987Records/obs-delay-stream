@@ -1,8 +1,31 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 
 namespace ods::network {
+
+	/**
+	 * 接続ごとの制御メッセージの頻度制限（トークンバケット）。
+	 * 毎秒 rate_per_sec 件ずつ補充し、最大 burst 件まで貯められる。
+	 */
+	class MessageRateLimiter {
+	public:
+
+		MessageRateLimiter(double rate_per_sec, double burst)
+			: rate_(rate_per_sec), burst_(burst), tokens_(burst) {}
+
+		/// 1 件を受け付けてよいかを返す。false なら上限超過。
+		bool allow(std::chrono::steady_clock::time_point now);
+
+	private:
+
+		double                                rate_;
+		double                                burst_;
+		double                                tokens_;
+		std::chrono::steady_clock::time_point last_{};
+		bool                                  started_ = false;
+	};
 
 	/// 配信 ID とチャンネルから内部キー `"sid/ch"` を生成する。
 	std::string make_key(const std::string &sid, int ch);

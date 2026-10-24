@@ -54,6 +54,26 @@ int main() {
 	check(!is_valid_id(""), "empty id");
 	check(!is_valid_id("ab cd"), "space in id");
 
+	// 頻度制限: 20 件/秒・最大 40 件
+	{
+		using std::chrono::milliseconds;
+		const auto         t0 = std::chrono::steady_clock::time_point{} + std::chrono::hours(1);
+		MessageRateLimiter rl(20.0, 40.0);
+		int                accepted = 0;
+		for (int i = 0; i < 50; ++i)
+			accepted += rl.allow(t0) ? 1 : 0;
+		check(accepted == 40, "burst capped at 40");
+		check(!rl.allow(t0 + milliseconds(10)), "no refill within 10 ms");
+		check(rl.allow(t0 + milliseconds(60)), "refilled after 60 ms");
+
+		// 正規の受信ページの pong（150 ms 間隔）は 1 分間続けても拒否されない
+		MessageRateLimiter steady(20.0, 40.0);
+		bool               all_ok = true;
+		for (int i = 0; i < 400; ++i)
+			all_ok = all_ok && steady.allow(t0 + milliseconds(150 * i));
+		check(all_ok, "pong every 150 ms is allowed");
+	}
+
 	if (failures == 0) std::printf("stream-router-utils-check: OK\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -11,6 +11,9 @@
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
 
+#include "core/constants.hpp"
+#include "network/stream-router-utils.hpp"
+
 namespace ods::network {
 
 	/// websocketpp のサーバー型
@@ -58,6 +61,7 @@ namespace ods::network {
 		std::string stream_id;         ///< 接続が属する配信 ID
 		int         ch        = -1;    ///< 接続先チャンネル (0-indexed)
 		bool        force_pcm = false; ///< この接続のみ PCM 強制配信するか
+		MessageRateLimiter ctrl_rate{ods::core::CTRL_MSG_RATE_PER_SEC, ods::core::CTRL_MSG_BURST}; ///< 制御メッセージの頻度制限
 	};
 
 	/// ハンドルをキーとする接続情報マップ

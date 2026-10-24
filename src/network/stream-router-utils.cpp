@@ -102,6 +102,18 @@ namespace ods::network {
 		return PathParseResult::Ok;
 	}
 
+	bool MessageRateLimiter::allow(std::chrono::steady_clock::time_point now) {
+		if (started_) {
+			const double elapsed_s = std::chrono::duration<double>(now - last_).count();
+			if (elapsed_s > 0.0) tokens_ = std::min(burst_, tokens_ + elapsed_s * rate_);
+		}
+		started_ = true;
+		last_    = now;
+		if (tokens_ < 1.0) return false;
+		tokens_ -= 1.0;
+		return true;
+	}
+
 	bool is_valid_id(const std::string &id) {
 		constexpr std::size_t kMaxIdLength = 64;
 		if (id.empty() || id.size() > kMaxIdLength) return false;
