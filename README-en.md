@@ -111,6 +111,19 @@ In Auto mode, the plugin downloads the cloudflared version it has approved and v
 
 In the **URL Sharing** tab, click **Copy performer URL list** and paste into Discord or similar. Have each performer open their corresponding URL in Google Chrome.
 
+### Stopping and Resuming Public Access
+
+To stop sharing with performers, stop in this order:
+
+1. On the **Tunnel** tab, click **Stop**. The issued URL stops working and nobody can connect from the internet.
+2. On the **WS Streaming** tab, click **Stop** for the WebSocket server. All connected performers are disconnected.
+
+Quitting OBS also stops both. Even if OBS crashes, the cloudflared process started by the plugin is terminated.
+
+To resume, start the tunnel again. Each time the tunnel starts, the URL domain changes, so share the URL list with performers again from the **URL Sharing** tab.
+
+If a URL leaks to someone outside the performers, restarting the tunnel also makes the previous URLs stop working.
+
 ### Latency Measurement (Recommended Procedure)
 
 1. Confirm that all performers are connected to the receiver page.
