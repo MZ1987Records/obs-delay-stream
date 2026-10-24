@@ -169,71 +169,6 @@ namespace ods::network {
 			return out;
 		}
 
-		std::string ps_single_quote(const std::string &s) {
-			std::string out;
-			out.reserve(s.size() + 8);
-			out.push_back('\'');
-			for (char c : s) {
-				if (c == '\'')
-					out += "''";
-				else
-					out.push_back(c);
-			}
-			out.push_back('\'');
-			return out;
-		}
-
-		bool expand_zip_powershell(const std::string &zip_path,
-								   const std::string &dest_dir,
-								   std::string       &err) {
-			const std::string command =
-				"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \""
-				"try { Expand-Archive -LiteralPath " +
-				ps_single_quote(zip_path) +
-				" -DestinationPath " + ps_single_quote(dest_dir) +
-				" -Force; exit 0 } catch { exit 1 }\"";
-			std::vector<char> cmd(command.begin(), command.end());
-			cmd.push_back('\0');
-
-			STARTUPINFOA        si{};
-			PROCESS_INFORMATION pi{};
-			si.cb         = sizeof(si);
-			const BOOL ok = CreateProcessA(
-				nullptr,
-				cmd.data(),
-				nullptr,
-				nullptr,
-				FALSE,
-				CREATE_NO_WINDOW,
-				nullptr,
-				nullptr,
-				&si,
-				&pi);
-			if (!ok) {
-				err = "ZIP 展開のための PowerShell 起動に失敗しました。";
-				return false;
-			}
-
-			const DWORD wait = WaitForSingleObject(pi.hProcess, 120000);
-			if (wait != WAIT_OBJECT_0) {
-				TerminateProcess(pi.hProcess, 1);
-				err = "ffmpeg ZIP 展開がタイムアウトしました。";
-				close_handle(pi.hThread);
-				close_handle(pi.hProcess);
-				return false;
-			}
-			DWORD code = 1;
-			GetExitCodeProcess(pi.hProcess, &code);
-			close_handle(pi.hThread);
-			close_handle(pi.hProcess);
-
-			if (code != 0) {
-				err = "ffmpeg ZIP の展開に失敗しました。";
-				return false;
-			}
-			return true;
-		}
-
 		bool ensure_auto_ffmpeg_binary(std::string &out, std::string &err) {
 			const auto &a = kApprovedFfmpeg;
 			out           = get_default_ffmpeg_auto_path();
@@ -247,8 +182,8 @@ namespace ods::network {
 				err = std::string("FFmpeg ") + a.version + " の自動取得: " + reason;
 				return false;
 			}
-			// ZIP は承認値と一致したものだけを展開する。展開物は -Force で上書きし、最後に exe を検証する。
-			const bool expanded = expand_zip_powershell(zip_path, base_dir, err);
+			// ZIP は承認値と一致したものだけから、ffmpeg.exe 1 つだけを取り出し、最後に exe を検証する。
+			const bool expanded = extract_zip_entry(zip_path, base_dir, a.exe_in_archive, err);
 			DeleteFileA(zip_path.c_str());
 			if (!expanded) return false;
 			if (verify_file(out, a.exe_size, a.exe_sha256) != VerifyResult::Ok) {

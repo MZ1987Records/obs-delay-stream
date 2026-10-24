@@ -28,4 +28,13 @@ namespace ods::core {
 						   const char        *sha256,
 						   std::string       &err);
 
+	/// ZIP から 1 エントリだけを Windows 標準の tar.exe（System32）で dest_dir 配下へ取り出す。
+	/// PowerShell は使わない。取り出し先は dest_dir\entry（区切りは \ でも / でもよい）。
+	/// 呼び出し側は ZIP を検証済みにしておき、取り出した後のファイルも検証する。
+	/// @param err 失敗理由（利用者向けの日本語）
+	bool extract_zip_entry(const std::string &zip_path,
+						   const std::string &dest_dir,
+						   const std::string &entry,
+						   std::string       &err);
+
 } // namespace ods::core

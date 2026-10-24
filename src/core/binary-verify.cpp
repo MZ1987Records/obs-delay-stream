@@ -7,11 +7,14 @@
 
 #include "core/binary-verify.hpp"
 
+#include "core/string-format.hpp"
+
 #include <windows.h>
 #include <bcrypt.h>
 #include <ShlObj.h>
 #include <urlmon.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <fstream>
@@ -36,6 +39,11 @@ namespace ods::core {
 		bool equals_hex(const std::string &actual, const char *expected) {
 			if (!expected) return false;
 			return _stricmp(actual.c_str(), expected) == 0;
+		}
+
+		void close_handle(HANDLE &h) {
+			if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h);
+			h = nullptr;
 		}
 
 	} // namespace
@@ -107,6 +115,56 @@ namespace ods::core {
 		if (!MoveFileExA(partial.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 			DeleteFileA(partial.c_str());
 			err = "検証済みファイルの配置に失敗しました。実行中のプロセスが使用していないか確認してください。";
+			return false;
+		}
+		return true;
+	}
+
+	bool extract_zip_entry(const std::string &zip_path,
+						   const std::string &dest_dir,
+						   const std::string &entry,
+						   std::string       &err) {
+		// PATH 上の別の tar.exe を拾わないよう、System32 の絶対パスで起動する。
+		char sys_dir[MAX_PATH] = {};
+		const UINT n           = GetSystemDirectoryA(sys_dir, MAX_PATH);
+		if (n == 0 || n >= MAX_PATH) {
+			err = "システムディレクトリの取得に失敗しました。";
+			return false;
+		}
+		const std::string tar = std::string(sys_dir) + "\\tar.exe";
+
+		// ZIP 内のパス区切りは / のため、エントリ名を合わせる。
+		std::string zip_entry = entry;
+		std::replace(zip_entry.begin(), zip_entry.end(), '\\', '/');
+
+		SHCreateDirectoryExA(nullptr, dest_dir.c_str(), nullptr);
+		const std::string command = quote_windows_arg(tar) + " -xf " + quote_windows_arg(zip_path) +
+									" -C " + quote_windows_arg(dest_dir) + " " + quote_windows_arg(zip_entry);
+		std::vector<char> cmd(command.begin(), command.end());
+		cmd.push_back('\0');
+
+		STARTUPINFOA        si{};
+		PROCESS_INFORMATION pi{};
+		si.cb = sizeof(si);
+		if (!CreateProcessA(tar.c_str(), cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+							&si, &pi)) {
+			err = "ZIP を展開するための tar.exe の起動に失敗しました。";
+			return false;
+		}
+		close_handle(pi.hThread);
+		const DWORD wait = WaitForSingleObject(pi.hProcess, 120000);
+		DWORD       code = 1;
+		if (wait != WAIT_OBJECT_0) {
+			TerminateProcess(pi.hProcess, 1);
+			WaitForSingleObject(pi.hProcess, 5000);
+			close_handle(pi.hProcess);
+			err = "ZIP の展開がタイムアウトしました。";
+			return false;
+		}
+		GetExitCodeProcess(pi.hProcess, &code);
+		close_handle(pi.hProcess);
+		if (code != 0) {
+			err = "ZIP の展開に失敗しました。";
 			return false;
 		}
 		return true;
