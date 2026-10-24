@@ -974,22 +974,14 @@ namespace ods::ui {
 		if (tunnel_running) {
 			add_next_tab_button_bar(props, d, TAB_AUDIO_STREAMING);
 		} else {
-			// 右寄せ: 「スキップ」「起動して次へ」
-			const ObsButtonBarSpec right_btns[] = {
-				{
-					"tunnel_skip_act",
-					T_("BtnSkipTab"),
-					cb_select_tab,
-					&d->tab_btn_ctx[TAB_AUDIO_STREAMING],
-					true,
-				},
-				{
-					"tunnel_start_next_act",
-					T_("BtnStartTunnelAndNext"),
-					cb_tunnel_start_and_goto_tab,
-					&d->tab_btn_ctx[TAB_AUDIO_STREAMING],
-					!tunnel_busy,
-				},
+			// 受信サーバーは 127.0.0.1 だけで待ち受け、出演者はトンネル経由でしか接続できないため
+			// トンネルの起動を省く「スキップ」は置かず、「起動して次へ」だけにする。
+			const ObsButtonBarSpec start_next_btn = {
+				"tunnel_start_next_act",
+				T_("BtnStartTunnelAndNext"),
+				cb_tunnel_start_and_goto_tab,
+				&d->tab_btn_ctx[TAB_AUDIO_STREAMING],
+				!tunnel_busy,
 			};
 			obs_properties_add_button_bar(
 				props,
@@ -997,8 +989,8 @@ namespace ods::ui {
 				"",
 				nullptr,
 				0,
-				right_btns,
-				2);
+				&start_next_btn,
+				1);
 		}
 	}
 
