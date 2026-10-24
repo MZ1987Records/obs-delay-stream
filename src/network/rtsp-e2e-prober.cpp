@@ -308,10 +308,19 @@ namespace ods::network {
 			//   probesize 32 / analyzeduration 0 … RTSP は SDP で codec 既知のため最小解析でよい
 			//   max_delay 0 / reorder_queue_size 0 … TCP 伝送では並べ替え不要
 			//   flush_packets 1                 … パイプ出力を都度フラッシュし検出遅れを抑える
+			// 入力の制限: 受信するのは配信者自身の OBS が配信サーバーへ送った音声（RTMP 用の AAC、
+			// 構成によって Opus）だけ。配信サーバーや暗号化されていない rtsp/rtspt 経路から細工した
+			// ストリームを送られても、FFmpeg の他の機能を使わせない。
+			//   f rtsp                          … 入力形式を RTSP に固定する
+			//   allowed_media_types audio       … SETUP を音声だけにし、映像は受信も解析もしない
+			//   protocol_whitelist tcp,tls      … RTSP over TCP が開くのは tcp、rtsps は tls（その下で tcp）だけ
+			//   codec_whitelist aac,opus        … ストリーム解析と復号に使うデコーダーを限る
 			return exe + " -nostdin -v error"
 								" -fflags nobuffer -flags low_delay"
 								" -probesize 32 -analyzeduration 0"
 								" -max_delay 0 -reorder_queue_size 0"
+								" -f rtsp -allowed_media_types audio"
+								" -protocol_whitelist tcp,tls -codec_whitelist aac,opus"
 								" -rtsp_transport tcp -timeout " +
 				   std::to_string(timeout_us) + " -i " + url +
 				   " -map 0:a:0 -vn -f s16le -ar 48000 -ac 1 -flush_packets 1 -";
