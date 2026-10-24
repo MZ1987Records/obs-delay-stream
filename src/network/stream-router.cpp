@@ -27,6 +27,9 @@ namespace ods::network {
 			srv->set_access_channels(websocketpp::log::alevel::none);
 			srv->init_asio();
 			srv->set_reuse_addr(true);
+			// 既定は各 32,000,000 bytes。超過した WebSocket は 1009 で閉じ、HTTP は 413 を返す。
+			srv->set_max_message_size(WS_MAX_MESSAGE_BYTES);
+			srv->set_max_http_body_size(HTTP_MAX_BODY_BYTES);
 			// TCP_NODELAY（Nagle 無効化）。小さな Opus パケットが TCP に溜め込まれて
 			// まとめて送られる（ストール→バースト）と、受信側バッファが膨張し、
 			// 自動再同期がその余剰を切り詰めて音飛びになる。リアルタイム配信では必須。
