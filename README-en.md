@@ -102,8 +102,10 @@ The WebSocket server listens only on this PC (127.0.0.1). Performers can connect
 > **Note:** Security software may block `*.trycloudflare.com` and cause tunnel connection failures.
 > If this happens, add `*.trycloudflare.com` as an exception (allowed).
 
-The auto-downloaded exe is saved to:
-`%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared.exe`
+In Auto mode, the plugin downloads the cloudflared version it has approved and verifies the file has not been modified before each launch. It is saved in a per-version folder:
+`%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared\<version>\cloudflared.exe`
+
+`%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared.exe`, downloaded by earlier versions, is no longer used and can be deleted. Executables from PATH or a manual path are not verified.
 
 ### Sharing Connection Info with Performers
 

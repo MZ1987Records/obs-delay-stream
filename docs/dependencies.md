@@ -6,14 +6,16 @@
 
 ## プラグインが実行時に取得する実行ファイル
 
-いずれも取得物を検証しておらず、承認版の固定は P1 で行う。
+自動（Auto）モードでは、承認一覧 `src/core/approved-binaries.hpp` の版だけを取得し、サイズと SHA-256 が一致したものだけを配置・起動する。起動のたびに配置済みの exe も照合する。PATH・手動指定の exe は検証しない。
 
-| 依存物 | 取得元 | 現状 | 追跡 |
-|---|---|---|---|
-| cloudflared | `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe` | `latest` を取得。既存の exe があれば再利用し、取得後は存在だけを確認する | 手動。Cloudflare の告知とリリースを確認する |
-| FFmpeg | `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip` | `master-latest` の ZIP を取得・展開。既存の exe があれば再利用する | 手動。BtbN の日付付きビルドは保持期間が保証されない |
+| 依存物 | 承認版 | 取得元 | SHA-256 | 追跡 |
+|---|---|---|---|---|
+| cloudflared | 2026.10.3（2026-10-21 公開） | `cloudflare/cloudflared` の Release `2026.10.3` の `cloudflared-windows-amd64.exe`（55,329,336 bytes） | `76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2`（リリースノートと GitHub API の digest で照合） | 手動。Cloudflare の告知とリリースを確認する |
+| FFmpeg | n9.0.2-17-g2a571b6068（9.0 系、LGPL、静的ビルド） | `BtbN/FFmpeg-Builds` の Release `autobuild-2026-09-30-13-08` の `ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-9.0.zip`（171,535,354 bytes） | ZIP `6b264b9e6019103f601d98c292bd332fd87acf1c5e941ddff4fb71760fe63432`、`ffmpeg.exe`（134,497,280 bytes）`0e482b853f2fd4821055d20cdce510f0eea6027037c04b994f454a2136e8868e` | 手動。BtbN の月末ビルドは約 2 年保持される。取得できなくなったら新しい月末ビルドを承認し直す（自前では再配布しない） |
 
-取得処理: `src/tunnel/tunnel-manager.cpp`（cloudflared）、`src/network/rtsp-e2e-prober.cpp`（FFmpeg）。
+配置先: `%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared\<版>\cloudflared.exe`、`%LOCALAPPDATA%\obs-delay-stream\bin\ffmpeg\<展開ディレクトリ>\bin\ffmpeg.exe`。以前の版が `latest` を自動取得した `bin\cloudflared.exe` と `bin\ffmpeg\ffmpeg-master-latest-win64-gpl\` は使わない。設定がこれらを指していれば、読込時に自動へ戻す。
+
+取得・検証処理: `src/core/binary-verify.cpp`、`src/tunnel/tunnel-manager.cpp`（cloudflared）、`src/network/rtsp-e2e-prober.cpp`（FFmpeg）。
 
 ## ビルド時に取得してリンクするライブラリ
 
@@ -57,4 +59,4 @@
 ## 追跡の分担
 
 - Dependabot: GitHub Actions と `receiver/` の npm 依存物。
-- 手動: cloudflared、FFmpeg、WebSocket++、libopus、Asio、OBS、opus-decoder、md-to-pdf。リリース前と定期確認（計画書の 9 章）で公式の告知を確認する。
+- 手動: cloudflared、FFmpeg、WebSocket++、libopus、Asio、OBS、opus-decoder、md-to-pdf。リリース前と定期確認（計画書の 10 章）で公式の告知を確認する。
