@@ -13,6 +13,7 @@
 #include "network/rtsp-e2e-prober.hpp"
 
 #include "core/constants.hpp"
+#include "core/string-format.hpp"
 
 #include <algorithm>
 #include <array>
@@ -44,29 +45,6 @@ namespace ods::network {
 			"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
 		constexpr char kFfmpegZipName[]         = "ffmpeg-master-latest-win64-gpl.zip";
 		constexpr char kFfmpegExpandedDirName[] = "ffmpeg-master-latest-win64-gpl";
-
-		std::string quote_windows_arg(const std::string &text) {
-			std::string quoted;
-			quoted.reserve(text.size() + 4);
-			quoted += '"';
-			size_t backslashes = 0;
-			for (char c : text) {
-				if (c == '\\') {
-					++backslashes;
-					continue;
-				}
-				if (c == '"') {
-					quoted.append(backslashes * 2 + 1, '\\');
-				} else {
-					quoted.append(backslashes, '\\');
-				}
-				quoted += c;
-				backslashes = 0;
-			}
-			quoted.append(backslashes * 2, '\\');
-			quoted += '"';
-			return quoted;
-		}
 
 		std::string normalize_rtsp_url_for_ffmpeg(const std::string &rtsp_url) {
 			constexpr char kRtsptScheme[] = "rtspt://";

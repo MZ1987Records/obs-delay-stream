@@ -1,13 +1,28 @@
-// stream-router-utils の照合関数の自己チェック。失敗すると非 0 で終了する。
+// 受信サーバーの照合関数と、外部入力を子プロセスへ渡す引数クォートの自己チェック。
+// 失敗すると非 0 で終了する。
 //   cmake --build build --config RelWithDebInfo --target stream-router-utils-check
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#include "core/string-format.hpp"
 #include "network/stream-router-utils.hpp"
+
+#include <windows.h>
+#include <shellapi.h>
 
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <utility>
+#include <vector>
 
 using namespace ods::network;
+using ods::core::quote_windows_arg;
 
 namespace {
 
@@ -20,9 +35,41 @@ namespace {
 		}
 	}
 
+	// Windows 自身の規則（CommandLineToArgvW）でコマンドラインを分割する。入力は ASCII のみ。
+	std::vector<std::string> split_windows_cmdline(const std::string &cmdline) {
+		const std::wstring       wide(cmdline.begin(), cmdline.end());
+		int                      argc = 0;
+		LPWSTR                  *argv = CommandLineToArgvW(wide.c_str(), &argc);
+		std::vector<std::string> out;
+		for (int i = 0; argv && i < argc; ++i) {
+			std::string arg;
+			for (const wchar_t *p = argv[i]; *p; ++p)
+				arg.push_back(static_cast<char>(*p));
+			out.push_back(std::move(arg));
+		}
+		LocalFree(argv);
+		return out;
+	}
+
+	// 引数 1 個として渡り、前後の引数がずれないこと。
+	bool round_trips(const std::string &arg) {
+		const auto argv = split_windows_cmdline("ffmpeg.exe -i " + quote_windows_arg(arg) + " -map 0:a:0");
+		return argv.size() == 5 && argv[2] == arg && argv[3] == "-map";
+	}
+
 } // namespace
 
 int main() {
+	// 子プロセスへの引数クォート（RTSP URL の FFmpeg 引数注入の回帰テスト）
+	check(round_trips("rtsp://host:8554/live"), "plain url");
+	check(round_trips("rtsp://host/a b"), "space");
+	check(round_trips("rtsp://host/\\\" -i file:secret.txt"), "backslash + quote injection");
+	check(round_trips("rtsp://host/\" -y out.wav"), "quote injection");
+	check(round_trips("rtsp://host/dir\\"), "trailing backslash");
+	check(round_trips("rtsp://host/a\\\\\\\"b"), "many backslashes before quote");
+	check(round_trips("C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe"), "exe path");
+	check(round_trips(""), "empty");
+
 	// トンネル経由・LAN・ループバックの正規の受信ページ
 	check(is_same_origin("https://abc.trycloudflare.com", "abc.trycloudflare.com"), "tunnel");
 	check(is_same_origin("http://192.168.1.5:19000", "192.168.1.5:19000"), "lan");

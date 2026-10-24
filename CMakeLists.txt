@@ -236,6 +236,7 @@ add_executable(stream-router-utils-check EXCLUDE_FROM_ALL
   src/network/stream-router-utils.cpp
 )
 target_include_directories(stream-router-utils-check PRIVATE src)
+target_link_libraries(stream-router-utils-check shell32)
 if(MSVC)
   target_compile_options(stream-router-utils-check PRIVATE /utf-8)
 endif()
