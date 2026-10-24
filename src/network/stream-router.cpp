@@ -170,8 +170,27 @@ namespace ods::network {
 
 	void StreamRouter::set_sub_code(int ch, const std::string &code) {
 		if (ch < 0 || ch >= MAX_SUB_CH) return;
-		std::lock_guard<std::mutex> lk(mtx_);
-		sub_code_[ch] = code;
+		// コードが変わったら、旧コードで接続済みの受信者も切断する。新しい接続は Upgrade 前の
+		// 照合で旧コードを拒否するが、確立済みの接続は次回の再接続まで音声を受け続けてしまう。
+		std::shared_ptr<WsServer>     srv;
+		std::vector<ConnectionHandle> to_close;
+		{
+			std::lock_guard<std::mutex> lk(mtx_);
+			if (sub_code_[ch] == code) return;
+			sub_code_[ch] = code;
+			srv           = server_ptr_;
+			for (auto &kv : conn_map_) {
+				if (kv.second.ch == ch) to_close.push_back(kv.first);
+			}
+		}
+		if (srv) {
+			for (auto &h : to_close) {
+				try {
+					srv->close(h, websocketpp::close::status::policy_violation, "code_changed");
+				} catch (...) {
+				}
+			}
+		}
 	}
 
 	std::string StreamRouter::sub_code(int ch) const {

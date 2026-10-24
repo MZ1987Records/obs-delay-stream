@@ -83,7 +83,7 @@ namespace ods::network {
 		void deactivate_slot(int slot);                     ///< スロットを無効化し対応する全接続を閉じる
 		bool is_slot_active(int slot) const;                ///< スロットが有効か返す
 		void set_sub_memo(int ch, const std::string &memo); ///< チャンネルメモを設定する
-		void set_sub_code(int ch, const std::string &code); ///< チャンネル識別コードを設定する
+		void set_sub_code(int ch, const std::string &code); ///< チャンネル識別コードを設定し、変更時は旧コードの接続を切断する
 		std::string sub_code(int ch) const;                 ///< チャンネル識別コードを取得する
 
 		/// 識別コードからチャンネル (0-indexed) を解決する。見つからなければ -1
