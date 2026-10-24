@@ -737,6 +737,19 @@ namespace ods::plugin {
 				maybe_autofill_rtsp_url(settings_, true);
 				maybe_fill_cloudflared_path_from_auto(data_->context);
 
+				// 承認版の導入前に自動取得した latest の exe（旧配置先）を指す指定は、未検証の古い版を
+				// 使い続けないよう自動（承認版）へ戻す。利用者が別の場所を指定している場合は変えない。
+				if (ods::tunnel::TunnelManager::is_legacy_auto_cloudflared_path(
+						obs_data_get_string(settings_, kCloudflaredExePathKey))) {
+					obs_data_set_string(settings_, kCloudflaredExePathKey, "auto");
+					obs_data_set_int(settings_, kCloudflaredExePathModeKey, static_cast<int>(ExePathMode::Auto));
+				}
+				if (ods::network::RtspE2eProber::is_legacy_auto_ffmpeg_path(
+						obs_data_get_string(settings_, kFfmpegExePathKey))) {
+					obs_data_set_string(settings_, kFfmpegExePathKey, "auto");
+					obs_data_set_int(settings_, kFfmpegExePathModeKey, static_cast<int>(ExePathMode::Auto));
+				}
+
 				const char       *cloudflared_path     = obs_data_get_string(settings_, kCloudflaredExePathKey);
 				const int         cloudflared_mode_raw = obs_data_has_user_value(settings_, kCloudflaredExePathModeKey)
 															 ? static_cast<int>(obs_data_get_int(settings_, kCloudflaredExePathModeKey))

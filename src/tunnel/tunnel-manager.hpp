@@ -58,8 +58,11 @@ namespace ods::tunnel {
 
 		/// 自動配置先に cloudflared.exe が存在する場合のみパスを返す。
 		static bool get_auto_cloudflared_path_if_exists(std::string &out);
-		/// 自動配置先へ cloudflared.exe を配置し、利用可能な絶対パスを返す。
+		/// 自動配置先の cloudflared.exe を承認版と照合し、無いか一致しなければ承認版を取得する。
+		/// 起動前の検証を兼ねるため、ハッシュ計算を伴う。UI スレッドから呼ばない。
 		static bool ensure_auto_cloudflared_path(std::string &out, std::string &err);
+		/// 承認版の導入前に latest を自動取得していた配置先（%LocalAppData% 表記も可）かを返す。
+		static bool is_legacy_auto_cloudflared_path(const std::string &path);
 		/// パスを `%LOCALAPPDATA%` 基準の環境変数表現へ正規化する。
 		static std::string to_localappdata_env_path(const std::string &path);
 		/// cloudflared の自動ダウンロード処理が進行中かを返す。
@@ -126,7 +129,9 @@ namespace ods::tunnel {
 		static std::string expand_allowed_env_vars(const std::string &path);
 		/// ファイル存在確認。
 		static bool file_exists(const std::string &path);
-		/// 既定の cloudflared 配置先パスを返す。
+		/// 自動取得した外部実行ファイルを置くディレクトリを返す。
+		static std::string get_bin_dir();
+		/// 既定の cloudflared 配置先パス（承認版の版ごとのディレクトリ）を返す。
 		static std::string get_default_cloudflared_path();
 		/// cloudflared を指定パスへダウンロードする。
 		static bool download_cloudflared(const std::string &path, std::string &err);
