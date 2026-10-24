@@ -1,5 +1,6 @@
 #include "ui/properties-builder.hpp"
 
+#include "core/approved-binaries.hpp"
 #include "core/string-format.hpp"
 #include "core/constants.hpp"
 #include "model/settings-repo.hpp"
@@ -1403,6 +1404,9 @@ namespace ods::ui {
 			"cloudflared_exe_path_row",
 			T_("CloudflaredExePath"),
 			cloudflared_path_spec);
+		const std::string cloudflared_verify_note =
+			string_printf(T_("CloudflaredVerifyNoteFmt"), ods::core::kApprovedCloudflared.version);
+		obs_properties_add_help_callout(grp, "cloudflared_verify_note", cloudflared_verify_note.c_str());
 
 		const ObsColorButtonSpec tunnel_buttons[] = {
 			{
@@ -1560,6 +1564,9 @@ namespace ods::ui {
 			"ffmpeg_exe_path_row",
 			T_("FfmpegExePath"),
 			ffmpeg_path_spec);
+		const std::string ffmpeg_verify_note =
+			string_printf(T_("FfmpegVerifyNoteFmt"), ods::core::kApprovedFfmpeg.version);
+		obs_properties_add_help_callout(grp, "ffmpeg_verify_note", ffmpeg_verify_note.c_str());
 		add_flow_rtsp_e2e_measure_section(grp, d);
 		obs_properties_add_group(props, "grp_master", T_("GroupMasterRtmp"), OBS_GROUP_NORMAL, grp);
 	}
