@@ -110,13 +110,16 @@ function handleControl(text: string): void {
 // ============================================================
 
 const hostDomain = location.hostname || 'localhost';
+let connectionAttempt = 0;
 
 // 本文はサーバーの StreamRouter::on_http（/memo）の 404 応答と対応する。
 async function diagnoseRejection(sid: string, code: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
   try {
     const r = await fetch(
       `/memo?sid=${encodeURIComponent(sid)}&code=${encodeURIComponent(code)}`,
-      { cache: 'no-store' },
+      { cache: 'no-store', signal: controller.signal },
     );
     if (r.status !== 404) return null;
     const body = await r.text();
@@ -124,12 +127,15 @@ async function diagnoseRejection(sid: string, code: string): Promise<string | nu
     if (body === 'Not Found') return 'stream_id_mismatch';
   } catch {
     /* 判定できなければ通常の接続エラーとして扱う */
+  } finally {
+    clearTimeout(timer);
   }
   return null;
 }
 
 export function connect(): void {
   if (state.connecting) return;
+  const attempt = ++connectionAttempt;
   if (state.ws) state.ws.close();
 
   if (!ensureAudioContext()) {
@@ -208,7 +214,7 @@ export function connect(): void {
       // サーバーは不正な接続を Upgrade 前に HTTP 応答で拒否するため、ブラウザーには理由が
       // 届かない。/memo で理由を判定し、従来の close reason と同じ形で通知する。
       void diagnoseRejection(sid, code).then((reason) => {
-        if (state.ws || state.connecting) return; // 判定中に再接続した
+        if (attempt !== connectionAttempt || state.ws || state.connecting) return;
         bus.emit(
           'ws:close',
           reason ? { code: 1008, reason, cause: 'server' } : { code: ev?.code, reason: ev?.reason, cause },
@@ -226,6 +232,7 @@ export function connect(): void {
 }
 
 export function disconnect(): void {
+  ++connectionAttempt;
   clearConnectTimer();
   state.connecting = false;
   state.closeReason = null;

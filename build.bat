@@ -469,8 +469,15 @@ set "CUR_COMMIT="
 for /f %%C in ('git -C "%PIN_DIR%" rev-parse HEAD') do set "CUR_COMMIT=%%C"
 if /I not "%CUR_COMMIT%"=="%PIN_COMMIT%" goto :ensure_git_pin_fail
 :ensure_git_pin_ok
+set "PIN_DIRTY="
+for /f "delims=" %%S in ('git -C "%PIN_DIR%" status --porcelain --untracked-files^=all 2^>nul') do set "PIN_DIRTY=1"
+if defined PIN_DIRTY goto :ensure_git_pin_dirty
 echo   %PIN_NAME%: OK (%PIN_COMMIT%)
 endlocal & exit /b 0
+:ensure_git_pin_dirty
+echo [ERROR] %PIN_NAME% has local changes: %PIN_DIR%
+echo         Preserve or remove them before building; no files were changed.
+endlocal & exit /b 1
 :ensure_git_pin_fail
 echo [ERROR] %PIN_NAME% could not be pinned to %PIN_COMMIT%
 endlocal & exit /b 1

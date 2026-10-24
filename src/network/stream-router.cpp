@@ -791,44 +791,54 @@ namespace ods::network {
 		bool                          has_cached_timing_diagram = false;
 		std::string                   memo;
 		std::vector<ConnectionHandle> to_evict;
+		bool                          authorization_changed = false;
 		{
 			std::lock_guard<std::mutex> lk(mtx_);
-			auto                        key = make_key(sid, ch);
-			auto                       &cs  = ch_map_[key];
+			if (stream_id_.empty() || stream_id_ != sid || ch < 0 || ch >= MAX_SUB_CH ||
+				!active_slots_.test(ch) || sub_code_[ch] != code) {
+				authorization_changed = true;
+			} else {
+				auto  key = make_key(sid, ch);
+				auto &cs  = ch_map_[key];
 
-			// 同一チャンネルの既存接続を退去させる（単一クライアント制限）
-			if (!cs.conns.empty()) {
-				to_evict.assign(cs.conns.begin(), cs.conns.end());
-				for (auto &old_h : to_evict)
-					conn_map_.erase(old_h);
-				cs.conns.clear();
-				if (cs.measuring) {
-					cs.measuring = false;
-					cs.ping_times.clear();
-					cs.rtt_samples.clear();
+				// 同一チャンネルの既存接続を退去させる（単一クライアント制限）
+				if (!cs.conns.empty()) {
+					to_evict.assign(cs.conns.begin(), cs.conns.end());
+					for (auto &old_h : to_evict)
+						conn_map_.erase(old_h);
+					cs.conns.clear();
+					if (cs.measuring) {
+						cs.measuring = false;
+						cs.ping_times.clear();
+						cs.rtt_samples.clear();
+					}
 				}
-			}
 
-			if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
-				auto it = ch_cache_.find(key);
-				if (it != ch_cache_.end()) {
-					cs.last_result         = it->second.last_result;
-					cs.last_applied_delay  = it->second.last_applied_delay;
-					cs.last_applied_reason = it->second.last_applied_reason;
-					cs.last_timing_diagram = it->second.last_timing_diagram;
-					cs.has_timing_diagram  = it->second.has_timing_diagram;
+				if (!cs.last_result.valid && cs.last_applied_delay < 0.0) {
+					auto it = ch_cache_.find(key);
+					if (it != ch_cache_.end()) {
+						cs.last_result         = it->second.last_result;
+						cs.last_applied_delay  = it->second.last_applied_delay;
+						cs.last_applied_reason = it->second.last_applied_reason;
+						cs.last_timing_diagram = it->second.last_timing_diagram;
+						cs.has_timing_diagram  = it->second.has_timing_diagram;
+					}
 				}
+				conn_map_[h] = {sid, ch};
+				cs.conns.insert(h);
+				count                     = cs.conns.size();
+				cb                        = on_conn_change;
+				cached_result             = cs.last_result;
+				cached_delay              = cs.last_applied_delay;
+				cached_delay_reason       = cs.last_applied_reason;
+				cached_timing_diagram     = cs.last_timing_diagram;
+				has_cached_timing_diagram = cs.has_timing_diagram;
+				memo                       = sub_memo_[ch];
 			}
-			conn_map_[h] = {sid, ch};
-			cs.conns.insert(h);
-			count                     = cs.conns.size();
-			cb                        = on_conn_change;
-			cached_result             = cs.last_result;
-			cached_delay              = cs.last_applied_delay;
-			cached_delay_reason       = cs.last_applied_reason;
-			cached_timing_diagram     = cs.last_timing_diagram;
-			has_cached_timing_diagram = cs.has_timing_diagram;
-			if (ch >= 0 && ch < MAX_SUB_CH) memo = sub_memo_[ch];
+		}
+		if (authorization_changed) {
+			con->close(websocketpp::close::status::policy_violation, "authorization_changed");
+			return;
 		}
 		// ロック外で古い接続を切断（on_close は conn_map_ に不在のため no-op）
 		for (auto &old_h : to_evict) {

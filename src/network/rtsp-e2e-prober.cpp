@@ -45,16 +45,27 @@ namespace ods::network {
 		constexpr char kFfmpegZipName[]         = "ffmpeg-master-latest-win64-gpl.zip";
 		constexpr char kFfmpegExpandedDirName[] = "ffmpeg-master-latest-win64-gpl";
 
-		std::string escape_cmd_arg(const std::string &text) {
-			std::string escaped;
-			escaped.reserve(text.size() + 4);
+		std::string quote_windows_arg(const std::string &text) {
+			std::string quoted;
+			quoted.reserve(text.size() + 4);
+			quoted += '"';
+			size_t backslashes = 0;
 			for (char c : text) {
-				if (c == '"')
-					escaped += "\\\"";
-				else
-					escaped += c;
+				if (c == '\\') {
+					++backslashes;
+					continue;
+				}
+				if (c == '"') {
+					quoted.append(backslashes * 2 + 1, '\\');
+				} else {
+					quoted.append(backslashes, '\\');
+				}
+				quoted += c;
+				backslashes = 0;
 			}
-			return escaped;
+			quoted.append(backslashes * 2, '\\');
+			quoted += '"';
+			return quoted;
 		}
 
 		std::string normalize_rtsp_url_for_ffmpeg(const std::string &rtsp_url) {
@@ -361,21 +372,21 @@ namespace ods::network {
 
 		std::string build_ffmpeg_cmdline(const std::string &ffmpeg_exe_path, const std::string &rtsp_url) {
 			const int         timeout_us = RTSP_E2E_READY_TIMEOUT_S * 1000 * 1000;
-			const std::string url        = escape_cmd_arg(rtsp_url);
-			const std::string exe        = escape_cmd_arg(ffmpeg_exe_path);
+			const std::string url        = quote_windows_arg(rtsp_url);
+			const std::string exe        = quote_windows_arg(ffmpeg_exe_path);
 			// 低遅延受信フラグ: 既定の解析バッファ (analyzeduration 5s / probesize 5MB) や
 			// デマックス・RTP リオーダーバッファが E2E 計測値に数秒乗るのを防ぐ。
 			//   nobuffer / low_delay            … デマックス・デコードのバッファリングを無効化
 			//   probesize 32 / analyzeduration 0 … RTSP は SDP で codec 既知のため最小解析でよい
 			//   max_delay 0 / reorder_queue_size 0 … TCP 伝送では並べ替え不要
 			//   flush_packets 1                 … パイプ出力を都度フラッシュし検出遅れを抑える
-			return "\"" + exe + "\" -nostdin -v error"
+			return exe + " -nostdin -v error"
 								" -fflags nobuffer -flags low_delay"
 								" -probesize 32 -analyzeduration 0"
 								" -max_delay 0 -reorder_queue_size 0"
 								" -rtsp_transport tcp -timeout " +
-				   std::to_string(timeout_us) + " -i \"" + url +
-				   "\" -map 0:a:0 -vn -f s16le -ar 48000 -ac 1 -flush_packets 1 -";
+				   std::to_string(timeout_us) + " -i " + url +
+				   " -map 0:a:0 -vn -f s16le -ar 48000 -ac 1 -flush_packets 1 -";
 		}
 
 		bool launch_ffmpeg_process(const std::string   &ffmpeg_exe_path,
