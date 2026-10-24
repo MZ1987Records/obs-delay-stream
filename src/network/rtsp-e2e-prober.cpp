@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <obs-module.h>
 #include <string>
 #include <thread>
@@ -62,6 +63,14 @@ namespace ods::network {
 				return "rtsp://" + rtsp_url.substr(sizeof(kRtsptScheme) - 1);
 			}
 			return rtsp_url;
+		}
+
+		// FFmpeg の -i は file: や http: など任意の入力を開けるため、RTSP の scheme だけを渡す。
+		bool is_allowed_rtsp_url(const std::string &rtsp_url) {
+			for (const char *scheme : {"rtsp://", "rtsps://", "rtspt://"}) {
+				if (_strnicmp(rtsp_url.c_str(), scheme, std::strlen(scheme)) == 0) return true;
+			}
+			return false;
 		}
 
 		std::string get_local_appdata_dir() {
@@ -493,7 +502,7 @@ namespace ods::network {
 
 	bool RtspE2eProber::start(const std::string &rtsp_url, const std::string &ffmpeg_path_hint) {
 		if (running_.load(std::memory_order_acquire)) return false;
-		if (rtsp_url.empty()) return false;
+		if (!is_allowed_rtsp_url(rtsp_url)) return false;
 
 		cancel();
 		{
