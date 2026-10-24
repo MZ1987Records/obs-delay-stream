@@ -264,25 +264,37 @@ jobs:
             third_party/obs-studio/.deps
           key: ${{ runner.os }}-obs-build-ref-${{ env.OBS_STUDIO_REF }}-sha-${{ steps.obs.outputs.sha }}-sdk-${{ steps.sdk.outputs.version }}
 
-      - name: Clone websocketpp
+      - name: Fetch pinned websocketpp / opus
         shell: pwsh
         run: |
-          if (-Not (Test-Path "third_party/websocketpp")) {
-            git clone https://github.com/zaphoyd/websocketpp.git third_party/websocketpp
+          # 取得先コミットはリポジトリ直下 THIRD_PARTY_REFS で一元管理する（build.bat と共通）。
+          $refs = @{}
+          Get-Content "$env:GITHUB_WORKSPACE/THIRD_PARTY_REFS" |
+            Where-Object { $_ -match '^([A-Z0-9_]+)=(\S+)$' } |
+            ForEach-Object { $refs[$Matches[1]] = $Matches[2] }
+          function Get-PinnedRepo([string]$dir, [string]$url, [string]$commit) {
+            if (-Not $commit) { throw "Pinned commit is empty for $url" }
+            git init --quiet $dir
+            git -C $dir fetch --quiet --depth 1 $url $commit
+            if ($LASTEXITCODE -ne 0) { throw "fetch failed: $url $commit" }
+            git -C $dir -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
+            if ($LASTEXITCODE -ne 0) { throw "checkout failed: $dir" }
+            $head = (git -C $dir rev-parse HEAD).Trim()
+            if ($head -ne $commit) { throw "$dir is at $head, expected $commit" }
+            Write-Host "$dir pinned at $head"
           }
+          Get-PinnedRepo third_party/websocketpp https://github.com/zaphoyd/websocketpp.git $refs['WEBSOCKETPP_COMMIT']
+          Get-PinnedRepo third_party/opus https://github.com/xiph/opus.git $refs['OPUS_COMMIT']
+          # opus は git describe からバージョンを得るため、コミット指定の取得ではタグを付け直す。
+          if (-Not $refs['OPUS_VERSION']) { throw "OPUS_VERSION is empty" }
+          git -C third_party/opus tag -f "v$($refs['OPUS_VERSION'])" $refs['OPUS_COMMIT']
+          if ($LASTEXITCODE -ne 0) { throw "tag failed: third_party/opus" }
 
       - name: Clone asio
         shell: pwsh
         run: |
           if (-Not (Test-Path "third_party/asio")) {
             git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git third_party/asio
-          }
-
-      - name: Clone opus
-        shell: pwsh
-        run: |
-          if (-Not (Test-Path "third_party/opus/include/opus.h")) {
-            git clone --branch v1.5.2 --depth 1 https://github.com/xiph/opus.git third_party/opus
           }
 
       - name: Configure plugin (ProgramData layout)

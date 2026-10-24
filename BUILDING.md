@@ -68,13 +68,24 @@ cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
 
 ### 2. 依存ライブラリを取得
 
+websocketpp と libopus の取得先コミットは、リポジトリ直下の `THIRD_PARTY_REFS` で固定しています。下記のコミット SHA は `THIRD_PARTY_REFS` の値に読み替えてください。
+
 ```powershell
 cd C:\obs-delay-stream
 mkdir third_party
 cd third_party
-git clone https://github.com/zaphoyd/websocketpp.git
+git init websocketpp
+git -C websocketpp fetch --depth 1 https://github.com/zaphoyd/websocketpp.git <WEBSOCKETPP_COMMIT>
+git -C websocketpp checkout --detach FETCH_HEAD
 git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git
+git init opus
+git -C opus fetch --depth 1 https://github.com/xiph/opus.git <OPUS_COMMIT>
+git -C opus checkout --detach FETCH_HEAD
+# libopus は git describe からバージョンを得るため、タグを付ける
+git -C opus tag v<OPUS_VERSION> <OPUS_COMMIT>
 ```
+
+`THIRD_PARTY_REFS` を更新する場合は、上流リリースのタグが指すコミットを `git ls-remote <URL> "refs/tags/<タグ>^{}"` で確認してから書き換えます。
 
 ### 3. プラグインを構成/ビルド
 

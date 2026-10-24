@@ -3,7 +3,7 @@ obs-delay-stream. These notices are required by the respective licenses.
 
 ========================================================================
 
-WebSocket++ (websocketpp) 0.8.2
+WebSocket++ (websocketpp) 0.8.2 (master, commit 4dfe1be74e684acca19ac1cf96cce0df9eac2a2d)
 https://github.com/zaphoyd/websocketpp
 License: BSD 3-Clause
 
