@@ -2,7 +2,7 @@
 
 作成日: 2026-10-24（JST）  
 対象: obs-delay-stream / Windows / cloudflared / FFmpeg / HTTP・WebSocket受信処理  
-状態: P2の即効項目と、通常利用で挙動が変わらない追加対策は実装済み（PR #53、2026-10-24にmainへマージ）。P1（cloudflared・FFmpegの承認版の固定と検証付き取得、Asioのコミット固定）とFFmpegの入力制限は、ブランチ fix/security-2 で実装した。OBS・Chrome・トンネル・RTSP計測での実機確認は未実施。残りの各作業は実行範囲の承認後に行う。
+状態: P2の即効項目と、通常利用で挙動が変わらない追加対策は実装済み（PR #53、2026-10-24にmainへマージ）。P1（cloudflared・FFmpegの承認版の固定と検証付き取得、Asioのコミット固定）とFFmpegの入力制限も実装済み（PR #55、2026-10-24にmainへマージ）。OBS・Chrome・トンネル・RTSP計測での実機確認は未実施。残りの各作業は実行範囲の承認後に行う。
 
 ## 1. 目的と進め方
 
@@ -21,7 +21,7 @@
 
 ## 2. 実施済みの対策
 
-PR #53（mainへマージ済み）と、ブランチ fix/security-2 で実装した。各項目はコミット単位でレビューできる。自己チェック（`stream-router-utils-check`、`plugin-utils-check`）はCIで実行する。
+PR #53とPR #55で実装し、いずれもmainへマージした。各項目はコミット単位でレビューできる。自己チェック（`stream-router-utils-check`、`plugin-utils-check`）はCIで実行する。
 
 **受信サーバー（P2）**
 
@@ -37,12 +37,12 @@ PR #53（mainへマージ済み）と、ブランチ fix/security-2 で実装し
 
 - RTSP URLのschemeをrtsp・rtsps・rtsptに限定した。
 - FFmpegの引数をWindows CRTの規則どおりにクォートし、`\"`による引数注入を防いだ（`core/string-format.hpp`の`quote_windows_arg`）。
-- FFmpegの入力を、入力形式RTSP（`-f rtsp`）、音声だけのSETUP（`-allowed_media_types audio`）、プロトコル`tcp,tls`（`-protocol_whitelist`）、デコーダー`aac,opus`（`-codec_whitelist`）に限った（fix/security-2）。プロトコル名はFFmpeg n9.0.2のソースで確認した。
+- FFmpegの入力を、入力形式RTSP（`-f rtsp`）、音声だけのSETUP（`-allowed_media_types audio`）、プロトコル`tcp,tls`（`-protocol_whitelist`）、デコーダー`aac,opus`（`-codec_whitelist`）に限った。プロトコル名はFFmpeg n9.0.2のソースで確認した。
 
-**外部実行ファイル（P1、fix/security-2）**
+**外部実行ファイル（P1）**
 
 - cloudflared 2026.10.3とFFmpeg n9.0.2-17（BtbN autobuild-2026-09-30の9.0系LGPL静的ビルド）を承認一覧`src/core/approved-binaries.hpp`に固定した。自動（Auto）モードは承認版だけを取得し、サイズとSHA-256が一致したものだけを配置する。取得は`.partial`へ行い、不一致・失敗時は既存の配置に触れない。
-- 配置先を版ごとのディレクトリにし、更新時も既存・実行中のexeを上書きしない。起動のたびにワーカースレッドで配置済みのexeを照合する。FFmpegは展開後の`ffmpeg.exe`も照合し、再帰探索をやめた。
+- 配置先を版ごとのディレクトリにし、更新時も既存・実行中のexeを上書きしない。起動のたびにワーカースレッドで配置済みのexeを照合する。FFmpegは展開後の`ffmpeg.exe`も照合し、再帰探索をやめた。展開はPowerShellの`Expand-Archive`をやめ、System32の`tar.exe`でZIPから`ffmpeg.exe`だけを取り出す（`core/binary-verify`の`extract_zip_entry`）。
 - 設定が以前の自動取得先（`bin\cloudflared.exe`、`bin\ffmpeg\ffmpeg-master-latest-win64-gpl`）を指していれば、読込時に自動へ戻す。PATH・手動指定のexeは検証せずに使い、UIに「検証しない」旨を表示する。
 
 **依存物・ビルド・CI（P0・P1の一部）**
@@ -60,7 +60,7 @@ PR #53（mainへマージ済み）と、ブランチ fix/security-2 で実装し
 |---|---|---|
 | トンネル | `tunnel --url http://127.0.0.1:<port>` でQuick Tunnelを開始し、メール認証の引数を渡していない | `src/tunnel/tunnel-manager.cpp` / `run_cloudflared()` |
 | cloudflared取得 | 自動では承認版2026.10.3を版ごとのディレクトリへ取得し、取得時と起動前にSHA-256を照合する | 同ファイル / `ensure_auto_cloudflared_path()`、`src/core/binary-verify.cpp` |
-| FFmpeg取得 | 自動では承認版のZIPを取得して照合してから展開し、展開後と起動前に`ffmpeg.exe`を照合する | `src/network/rtsp-e2e-prober.cpp` / `ensure_auto_ffmpeg_binary()` |
+| FFmpeg取得 | 自動では承認版のZIPを取得して照合し、System32の`tar.exe`で`ffmpeg.exe`だけを取り出して、取り出し後と起動前に照合する | `src/network/rtsp-e2e-prober.cpp` / `ensure_auto_ffmpeg_binary()` |
 | FFmpeg用途 | RTSP E2E計測時に、配信者自身のOBSが配信サーバーへ送った音声を、ワールドのプレイヤーと同じRTSP経路で受信してPCMとしてパイプへ出力する。入力はRTSP形式・音声のみ・`tcp,tls`・`aac,opus`に限る | 同ファイル / `build_ffmpeg_cmdline()` |
 | コード生成 | 配信IDは12文字、チャンネルコードは8文字（英数字、約47 bit）。生成器は`BCryptGenRandom` | `src/plugin/plugin-utils.cpp` / `generate_stream_id()` |
 | 接続数 | チャンネルごとの単一接続（同じチャンネルへの新しい接続が古い接続を退去させる）はあるが、総接続数・未完了ハンドシェイク数の上限はない | `src/network/stream-router.cpp` / `on_open()` |
@@ -103,7 +103,7 @@ Cloudflare WAFはWebSocketの初期HTTP要求を検査するが、接続成立�
 | 段階 | 状態 | 残りの成果物 | 着手条件・依存 |
 |---|---|---|---|
 | P0 現物把握・暫定運用 | 一部完了（依存物一覧、承認版の選定） | 利用者PCの実体確認、公開停止／再開手順 | 現物確認・更新の実行範囲を承認後 |
-| P1 更新管理 | 実装完了（fix/security-2） | 取得経路の実機確認（V01・V02） | P0で取得元・承認版を確定 |
+| P1 更新管理 | 実装完了 | ZIP取り出しの自己チェック、配布物のブラウザー警告への対応、取得経路の実機確認（V01・V02） | P0で取得元・承認版を確定 |
 | P2 受信サーバーの防御 | 即効項目・追加対策は完了 | 総接続数・送信待ちの上限、コード長の拡大と移行、`/config`の開示範囲 | P0・P1とは独立して実装可能 |
 | P3 入口認証 | 未着手 | メール認証付きQuick Tunnel、本番向けAccess運用、Hostの許可リスト | P1・P2。認証方式に応じた接続確認 |
 | P4 子プロセスの制限 | 一部完了（scheme制限・引数クォート・入力の制限） | ハンドル継承の制限、Job Object、AppContainerでの隔離、ログ抑制 | P1。P2・P3と並行可能 |
@@ -146,6 +146,11 @@ Cloudflare WAFはWebSocketの初期HTTP要求を検査するが、接続成立�
 - ネットワーク障害時は、既知危険版でない検証済み配置だけを使用可能とする。検証失敗や認証機能の不足を理由に、安全性の低い起動へ自動で切り替えない。
 - 初期段階の新しい承認一覧はプラグイン更新で配布する。上流の版確認は手動操作とリリース前確認を基本とし、任意のリモート一覧をそのまま信頼する自動更新は後続検討にする。
 - ~~Asioのコミット固定~~ 完了（`THIRD_PARTY_REFS`）。
+
+**P1の残作業**
+
+- `extract_zip_entry`の自己チェックを追加する。テスト用のZIPを作り、指定したエントリだけが`dest_dir`配下の期待するパスへ取り出されること、存在しないエントリで失敗することを確かめる。
+- CIの成果物（プラグインDLLを含むZIP）が、Chromeで「危険なダウンロード」としてブロックされた（2026-10-24）。DLLは署名がなく、取得（`URLDownloadToFileA`）・起動（`CreateProcessA`）・PowerShellの実行ポリシー迂回という、ダウンローダー型マルウェアと同じ特徴を持っていた。PowerShellは除いた（2章）。PR #55 マージ後の成果物で警告が解消したかを確かめ、残る場合はコード署名（Azure Trusted Signingなど）の採否と、Google Safe Browsingへの誤検知報告を検討する（11章）。
 
 Windows版cloudflaredは自身では自動更新しないため、この更新経路と運用を明示する。[公式説明](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)
 
@@ -243,7 +248,7 @@ P1〜P4では、認証済み接続から届くHTTP／WebSocketをOBS内で解析
 
 | 実装単位 | 状態 | 主な既存ファイル／追加候補 | 主な責務 |
 |---|---|---|---|
-| A: 依存物管理（P1） | 実装完了（fix/security-2） | `src/tunnel/tunnel-manager.{hpp,cpp}`、`src/network/rtsp-e2e-prober.{hpp,cpp}`、`src/plugin/plugin-helpers.cpp`、`CMakeLists.txt` | 取得・検証・配置・起動の一貫化。承認一覧と最小限の共通処理を追加 |
+| A: 依存物管理（P1） | 実装完了 | `src/tunnel/tunnel-manager.{hpp,cpp}`、`src/network/rtsp-e2e-prober.{hpp,cpp}`、`src/plugin/plugin-helpers.cpp`、`CMakeLists.txt` | 取得・検証・配置・起動の一貫化。承認一覧と最小限の共通処理を追加 |
 | B: 受信防御（P2） | 一部完了（総接続数・送信待ちが残る） | `src/network/stream-router.{hpp,cpp}`、`stream-router-types.hpp`、`stream-router-utils.{hpp,cpp}`、`src/core/constants.hpp` | 接続・送信キュー上限 |
 | C: コード移行（P2） | 一部完了（コード長と移行が残る） | `src/plugin/plugin-utils.{hpp,cpp}`、`plugin-settings.cpp`、`src/ui/properties-channels.cpp`、`src/model/settings-repo.hpp`、`receiver/src/{connection,ui}.ts` | 128 bitコード、移行、共有URLと再接続 |
 | D: 認証・共有（P3） | 未着手 | `src/tunnel/tunnel-manager.{hpp,cpp}`、`src/ui/properties-builder.cpp`、`properties-url-share.cpp`、`url-share-renderer.cpp`、`receiver/src/{connection,ui}.ts` | 許可メール、認証状態、外部管理の公開URL、Host許可リスト |
@@ -315,8 +320,17 @@ P1〜P4では、認証済み接続から届くHTTP／WebSocketをOBS内で解析
 | 既存コードの切替時刻 | 配信停止中に再発行して再共有 | P2のコード移行の前 |
 | `/config`の開示範囲 | 有効チャンネル数の開示を受容するか認可済み要求に限定するか | P2の残作業の前 |
 | 検証環境と許可範囲 | ローカル境界テスト、次にOBS／Chrome実機 | 各検証の実行前 |
+| プラグインDLLのコード署名 | 配布物のブラウザー警告が残る場合に採用を検討（費用と証明書の手続きを伴う） | PR #55 マージ後の成果物を確認した時点 |
 | P5の採否 | 初期対策後の残余リスクと運用要件から決定 | P1〜P4の評価後 |
 
 LAN直接配信は撤去で確定し、実施済み。cloudflaredは2026.10.3、FFmpegはn9.0.2-17（9.0系LGPL）を承認し、FFmpegが上流から消えたら承認し直す（自前では再配布しない）ことで確定した。
 
-次の着手は、実機確認でPR #53 と fix/security-2 の対策を検証すること（V01〜V05、V10、V11の計測値の比較、V13〜V15）と、P0の利用者PCの実体確認。その後、B・Cの残り、D、Eの残り（AppContainerを含む）を、それぞれ独立してレビューできる差分に分ける。
+残りの着手順は次のとおり。各項目は独立してレビューできる差分に分ける。
+
+1. 実機確認: PR #53・PR #55 の対策を検証する（V01〜V05、V10、V11の計測値の比較、V13〜V15）。結果に応じて、映像を受信しない入力制限を見直す。あわせて、配布物のブラウザー警告が解消したかを確かめる。
+2. P1の残作業: `extract_zip_entry`の自己チェック。警告が残る場合はコード署名と誤検知報告。
+3. P0の残作業: 利用者PCの実体確認と、公開停止／再開手順の案内。
+4. P2の残り（実装単位B・C）: 総接続数・送信待ちの上限は、20人運用の実機確認と並行して入れる。コード長の拡大と移行は、切り替え時期（11章）を決めてから行う。`/config`の開示範囲を決める。
+5. P4の残り（実装単位E）: 子プロセスの試験環境を用意してから、ハンドル継承の制限、Job Object、AppContainerでの隔離を入れる。
+6. P3（実装単位D）: 外部共有の認証方式を決めてから、メール認証付きQuick TunnelとHostの許可リスト、管理対象Tunnel + Accessを入れる。
+7. P5: P1〜P4の効果と残余リスクを評価してから採否を決める。
