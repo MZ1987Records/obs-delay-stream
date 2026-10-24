@@ -41,6 +41,18 @@ int main() {
 		  "path ok");
 	check(parse_path_code("/sid123", sid, code) == PathParseResult::Invalid, "path without code");
 	check(parse_path_code("//code456", sid, code) == PathParseResult::Invalid, "path without sid");
+	check(parse_path_code("/sid123/code456?x=1", sid, code) == PathParseResult::Ok && code == "code456",
+		  "query is not part of code");
+	// 不正な文字は除去して読み替えず拒否する（"co-de" を "code" として照合しない）
+	check(parse_path_code("/sid123/co-de", sid, code) == PathParseResult::Invalid, "symbol in code");
+	check(parse_path_code("/sid123/code456/", sid, code) == PathParseResult::Invalid, "extra segment");
+	check(parse_path_code("/sid%31/code456", sid, code) == PathParseResult::Invalid, "percent in sid");
+
+	check(is_valid_id("abcXYZ019"), "alnum id");
+	check(is_valid_id(std::string(64, 'a')), "64 chars");
+	check(!is_valid_id(std::string(65, 'a')), "65 chars");
+	check(!is_valid_id(""), "empty id");
+	check(!is_valid_id("ab cd"), "space in id");
 
 	if (failures == 0) std::printf("stream-router-utils-check: OK\n");
 	return failures == 0 ? 0 : 1;

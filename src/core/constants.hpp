@@ -36,6 +36,7 @@ namespace ods::core {
 	// 受信サーバーの入力上限（受信者が送るのは pong と audio_codec の短い JSON だけ）
 	static constexpr std::size_t WS_MAX_MESSAGE_BYTES = 4 * 1024; ///< WebSocket 受信メッセージ上限（フラグメント結合後）
 	static constexpr std::size_t HTTP_MAX_BODY_BYTES  = 1024;     ///< HTTP リクエスト本文の上限（配信用 GET は本文不要）
+	static constexpr std::size_t HTTP_MAX_URL_BYTES   = 2048;     ///< リクエスト URL（パス＋クエリ）の上限
 
 	// cloudflared トンネル管理
 	static constexpr int CLOUDFLARED_URL_TIMEOUT_S = 60;   ///< cloudflared が URL を出力するまでの待機上限 (s)

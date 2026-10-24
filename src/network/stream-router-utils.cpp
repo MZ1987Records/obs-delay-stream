@@ -92,14 +92,20 @@ namespace ods::network {
 		auto slash = p.find('/');
 		if (slash == std::string::npos || slash == 0) return PathParseResult::Invalid;
 
-		stream_id            = sanitize_id(p.substr(0, slash));
+		stream_id            = p.substr(0, slash);
 		std::string raw_code = p.substr(slash + 1);
 		auto        q        = raw_code.find_first_of("?#");
 		if (q != std::string::npos) raw_code = raw_code.substr(0, q);
 
-		code = sanitize_id(raw_code);
-		if (stream_id.empty() || code.empty()) return PathParseResult::Invalid;
+		code = raw_code;
+		if (!is_valid_id(stream_id) || !is_valid_id(code)) return PathParseResult::Invalid;
 		return PathParseResult::Ok;
+	}
+
+	bool is_valid_id(const std::string &id) {
+		constexpr std::size_t kMaxIdLength = 64;
+		if (id.empty() || id.size() > kMaxIdLength) return false;
+		return std::all_of(id.begin(), id.end(), [](char c) { return std::isalnum((unsigned char)c) != 0; });
 	}
 
 	bool is_same_origin(const std::string &origin, const std::string &host) {

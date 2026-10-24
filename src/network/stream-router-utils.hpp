@@ -10,6 +10,10 @@ namespace ods::network {
 	/// 英数字のみを残して ID として安全な文字列にする。
 	std::string sanitize_id(const std::string &raw);
 
+	/// 受信者が送った配信 ID・チャンネルコードが英数字 1〜64 文字かを判定する。
+	/// 不正な文字を除去して照合すると別の値へ読み替えてしまうため、除去せずに拒否する。
+	bool is_valid_id(const std::string &id);
+
 	/// JSON 文字列へ埋め込めるようにエスケープする。
 	std::string json_escape(const std::string &s);
 

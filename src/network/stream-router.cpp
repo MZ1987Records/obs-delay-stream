@@ -699,6 +699,10 @@ namespace ods::network {
 		if (!srv) return false;
 		auto con = srv->get_con_from_hdl(h);
 
+		if (con->get_resource().size() > HTTP_MAX_URL_BYTES) {
+			con->set_status(websocketpp::http::status_code::request_uri_too_long);
+			return false;
+		}
 		if (!is_same_origin(con->get_request_header("Origin"), con->get_request_header("Host"))) {
 			con->set_status(websocketpp::http::status_code::forbidden);
 			return false;
@@ -936,7 +940,13 @@ namespace ods::network {
 			con->replace_header("Cross-Origin-Opener-Policy", "same-origin");
 			con->replace_header("Cross-Origin-Embedder-Policy", "require-corp");
 			con->replace_header("Cross-Origin-Resource-Policy", "same-origin");
-			std::string raw  = con->get_resource();
+			std::string raw = con->get_resource();
+			if (raw.size() > HTTP_MAX_URL_BYTES) {
+				con->set_status(websocketpp::http::status_code::request_uri_too_long);
+				con->replace_header("Content-Type", "text/plain; charset=utf-8");
+				con->set_body("URI Too Long");
+				return;
+			}
 			std::string path = raw;
 			std::string query;
 			auto        qpos = path.find('?');
@@ -980,9 +990,9 @@ namespace ods::network {
 					pos = amp + 1;
 				}
 
-				std::string sid  = sanitize_id(sid_param);
-				std::string code = sanitize_id(code_param);
-				if (sid.empty() || code.empty()) {
+				const std::string &sid  = sid_param;
+				const std::string &code = code_param;
+				if (!is_valid_id(sid) || !is_valid_id(code)) {
 					con->set_status(websocketpp::http::status_code::bad_request);
 					con->replace_header("Content-Type", "text/plain; charset=utf-8");
 					con->set_body("Bad Request");
