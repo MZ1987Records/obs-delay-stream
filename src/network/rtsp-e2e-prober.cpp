@@ -14,6 +14,7 @@
 
 #include "core/approved-binaries.hpp"
 #include "core/binary-verify.hpp"
+#include "core/child-process.hpp"
 #include "core/constants.hpp"
 #include "core/string-format.hpp"
 
@@ -303,35 +304,24 @@ namespace ods::network {
 				return false;
 			}
 
-			STARTUPINFOA si{};
-			si.cb         = sizeof(si);
-			si.dwFlags    = STARTF_USESTDHANDLES;
-			si.hStdOutput = stdout_write;
-			si.hStdError  = stderr_write;
-			si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
-
-			std::string       cmdline = build_ffmpeg_cmdline(ffmpeg_exe_path, rtsp_url);
-			std::vector<char> cmdline_buf(cmdline.begin(), cmdline.end());
-			cmdline_buf.push_back('\0');
-
-			BOOL ok = CreateProcessA(
-				ffmpeg_exe_path.c_str(),
-				cmdline_buf.data(),
-				nullptr,
-				nullptr,
-				TRUE,
-				CREATE_NO_WINDOW,
-				nullptr,
-				nullptr,
-				&si,
-				&pi);
+			// 継承させるのは標準出力・標準エラー出力のパイプだけ（-nostdin のため標準入力は渡さない）。
+			// OBS 異常終了時も Job Object で終了させる。
+			bool        in_job     = false;
+			const bool  ok         = launch_child_process(ffmpeg_exe_path,
+															  build_ffmpeg_cmdline(ffmpeg_exe_path, rtsp_url),
+															  nullptr,
+															  stdout_write,
+															  stderr_write,
+															  pi,
+															  in_job);
+			const DWORD launch_err = GetLastError();
 
 			close_handle(stdout_write);
 			close_handle(stderr_write);
 
 			if (!ok) {
 				char  msg[256] = {};
-				DWORD err      = GetLastError();
+				DWORD err      = launch_err;
 				FormatMessageA(
 					FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 					nullptr,
@@ -344,6 +334,9 @@ namespace ods::network {
 				close_handle(stdout_read);
 				close_handle(stderr_read);
 				return false;
+			}
+			if (!in_job) {
+				blog(LOG_WARNING, "[obs-delay-stream] ffmpeg is not in the kill-on-close job; it may survive an OBS crash");
 			}
 
 			return true;

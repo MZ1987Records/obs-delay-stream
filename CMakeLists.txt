@@ -65,6 +65,7 @@ add_subdirectory(third_party/opus EXCLUDE_FROM_ALL)
 # ---- Plugin target ----
 add_library(obs-delay-stream MODULE
   src/core/binary-verify.cpp
+  src/core/child-process.cpp
   src/plugin/plugin-main.cpp
   src/plugin/plugin-utils.cpp
   src/plugin/plugin-services.cpp
@@ -245,6 +246,7 @@ endif()
 add_executable(plugin-utils-check EXCLUDE_FROM_ALL
   tests/plugin-utils-check.cpp
   src/core/binary-verify.cpp
+  src/core/child-process.cpp
   src/plugin/plugin-utils.cpp
 )
 target_include_directories(plugin-utils-check PRIVATE src)

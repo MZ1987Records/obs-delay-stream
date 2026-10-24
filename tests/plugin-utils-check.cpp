@@ -11,6 +11,7 @@
 
 #include "core/approved-binaries.hpp"
 #include "core/binary-verify.hpp"
+#include "core/child-process.hpp"
 #include "core/string-format.hpp"
 #include "plugin/plugin-utils.hpp"
 
@@ -18,6 +19,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -67,9 +69,61 @@ namespace {
 		return code == 0;
 	}
 
+	std::string system_exe(const char *name) {
+		char sys_dir[MAX_PATH] = {};
+		GetSystemDirectoryA(sys_dir, MAX_PATH);
+		return std::string(sys_dir) + "\\" + name;
+	}
+
+	// 子プロセスを起動し、標準出力をすべて読んで終了を待つ。
+	bool run_and_capture(const std::string &exe, const std::string &cmdline, std::string &out, bool &in_job) {
+		SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+		HANDLE              rd = nullptr;
+		HANDLE              wr = nullptr;
+		if (!CreatePipe(&rd, &wr, &sa, 0)) return false;
+		SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+		PROCESS_INFORMATION pi{};
+		const bool          ok = launch_child_process(exe, cmdline, nullptr, wr, wr, pi, in_job);
+		CloseHandle(wr);
+		if (!ok) {
+			CloseHandle(rd);
+			return false;
+		}
+		char  buf[256];
+		DWORD n = 0;
+		while (ReadFile(rd, buf, sizeof(buf), &n, nullptr) && n > 0)
+			out.append(buf, n);
+		WaitForSingleObject(pi.hProcess, 30000);
+		CloseHandle(rd);
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+		return true;
+	}
+
+	// 中継役: 長く動く子（ping）を Job に入れて起動し、その PID を出力してすぐ終了する。
+	// 中継役のプロセスが終わると Job のハンドルが閉じられ、子も終了するはず。
+	int spawn_long_child_and_exit() {
+		const std::string   ping = system_exe("PING.EXE");
+		PROCESS_INFORMATION pi{};
+		bool                in_job = false;
+		HANDLE              out    = GetStdHandle(STD_OUTPUT_HANDLE);
+		if (!launch_child_process(ping, quote_windows_arg(ping) + " -n 60 127.0.0.1", nullptr, nullptr, nullptr, pi,
+								  in_job)) {
+			return 2;
+		}
+		const std::string line = std::to_string(pi.dwProcessId) + (in_job ? " job\n" : " nojob\n");
+		DWORD             n    = 0;
+		WriteFile(out, line.data(), static_cast<DWORD>(line.size()), &n, nullptr);
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+		return 0;
+	}
+
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	if (argc > 1 && std::strcmp(argv[1], "--spawn-long-child") == 0) return spawn_long_child_and_exit();
+
 	const std::string a = generate_stream_id(12);
 	check(a.size() == 12, "length 12");
 	check(generate_stream_id(8).size() == 8, "length 8");
@@ -150,6 +204,35 @@ int main() {
 				  !err.empty(),
 			  "missing zip fails");
 		fs::remove_all(dir);
+	}
+
+	// 子プロセスの起動: 指定したパイプだけを継承して出力を受け取れ、Job に登録される
+	{
+		const std::string cmd = system_exe("cmd.exe");
+		std::string       out;
+		bool              in_job = false;
+		check(run_and_capture(cmd, quote_windows_arg(cmd) + " /c echo child-ok", out, in_job), "launch child");
+		check(out.find("child-ok") != std::string::npos, "child output through inherited pipe");
+		check(in_job, "child is in the kill-on-close job");
+	}
+
+	// 親（中継役）が終了すると、Job に入れた子も終了する（OBS の異常終了で子が残らないこと）
+	{
+		char self[MAX_PATH] = {};
+		GetModuleFileNameA(nullptr, self, MAX_PATH);
+		std::string out;
+		bool        in_job = false;
+		check(run_and_capture(self, quote_windows_arg(self) + " --spawn-long-child", out, in_job), "launch relay");
+		const DWORD pid = static_cast<DWORD>(std::strtoul(out.c_str(), nullptr, 10));
+		check(pid != 0 && out.find(" job") != std::string::npos, "relay put its child in a job");
+		HANDLE child = pid ? OpenProcess(SYNCHRONIZE, FALSE, pid) : nullptr;
+		// 既に終了して開けない場合も、子は残っていない
+		const bool gone = !child || WaitForSingleObject(child, 5000) == WAIT_OBJECT_0;
+		check(gone, "child is terminated when its parent exits");
+		if (child) {
+			if (!gone) TerminateProcess(child, 1);
+			CloseHandle(child);
+		}
 	}
 
 	// 承認一覧の値の形（版を固定した URL・64 桁の小文字 16 進）
