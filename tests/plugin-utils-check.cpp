@@ -1,16 +1,27 @@
-// ID 生成と、外部実行ファイルの検証（SHA-256・承認値との照合）の自己チェック。
+// ID 生成と、外部実行ファイルの検証（SHA-256・承認値との照合・ZIP からの取り出し）の自己チェック。
 // 失敗すると非 0 で終了する。
 //   cmake --build build --config RelWithDebInfo --target plugin-utils-check
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "core/approved-binaries.hpp"
 #include "core/binary-verify.hpp"
+#include "core/string-format.hpp"
 #include "plugin/plugin-utils.hpp"
+
+#include <windows.h>
 
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <string>
 #include <system_error>
@@ -27,6 +38,33 @@ namespace {
 			std::printf("FAIL: %s\n", what);
 			++failures;
 		}
+	}
+
+	std::string read_all(const std::filesystem::path &path) {
+		std::ifstream ifs(path, std::ios::binary);
+		return std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
+	}
+
+	// テスト用の ZIP を System32 の tar.exe で作る（-a で拡張子から ZIP 形式を選ぶ）。
+	bool make_zip(const std::string &zip_path, const std::string &base_dir, const std::string &entry) {
+		char sys_dir[MAX_PATH] = {};
+		if (GetSystemDirectoryA(sys_dir, MAX_PATH) == 0) return false;
+		const std::string tar = std::string(sys_dir) + "\\tar.exe";
+		std::string cmd = quote_windows_arg(tar) + " -a -cf " + quote_windows_arg(zip_path) + " -C " +
+						  quote_windows_arg(base_dir) + " " + quote_windows_arg(entry);
+		STARTUPINFOA        si{};
+		PROCESS_INFORMATION pi{};
+		si.cb = sizeof(si);
+		if (!CreateProcessA(tar.c_str(), cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+							&si, &pi)) {
+			return false;
+		}
+		WaitForSingleObject(pi.hProcess, 60000);
+		DWORD code = 1;
+		GetExitCodeProcess(pi.hProcess, &code);
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+		return code == 0;
 	}
 
 } // namespace
@@ -80,6 +118,38 @@ int main() {
 			fs::remove_all(dir, ec);
 			check(!ec, "remove unique temp directory");
 		}
+	}
+
+	// ZIP から 1 エントリだけを取り出す（FFmpeg の承認版 ZIP から ffmpeg.exe だけを取り出す処理）
+	{
+		namespace fs   = std::filesystem;
+		const auto dir = fs::temp_directory_path() / "ods-plugin-utils-check-zip";
+		fs::remove_all(dir);
+		fs::create_directories(dir / "src" / "pkg" / "bin");
+		std::ofstream(dir / "src" / "pkg" / "bin" / "tool.exe", std::ios::binary) << "tool-content";
+		std::ofstream(dir / "src" / "pkg" / "readme.txt", std::ios::binary) << "readme";
+		const std::string zip = (dir / "test.zip").string();
+		check(make_zip(zip, (dir / "src").string(), "pkg"), "create test zip with tar.exe");
+
+		std::string err;
+		const auto  out = dir / "out";
+		check(extract_zip_entry(zip, out.string(), "pkg\\bin\\tool.exe", err), "extract entry");
+		check(read_all(out / "pkg" / "bin" / "tool.exe") == "tool-content", "extracted content");
+		check(!fs::exists(out / "pkg" / "readme.txt"), "other entries are not extracted");
+
+		const auto out2 = dir / "out2";
+		check(extract_zip_entry(zip, out2.string(), "pkg/bin/tool.exe", err), "entry with forward slashes");
+		check(read_all(out2 / "pkg" / "bin" / "tool.exe") == "tool-content", "extracted content (forward slashes)");
+
+		err.clear();
+		check(!extract_zip_entry(zip, (dir / "out3").string(), "pkg\\bin\\missing.exe", err) && !err.empty(),
+			  "missing entry fails");
+		check(!fs::exists(dir / "out3" / "pkg" / "bin" / "missing.exe"), "missing entry leaves no file");
+		err.clear();
+		check(!extract_zip_entry((dir / "missing.zip").string(), (dir / "out4").string(), "pkg\\bin\\tool.exe", err) &&
+				  !err.empty(),
+			  "missing zip fails");
+		fs::remove_all(dir);
 	}
 
 	// 承認一覧の値の形（版を固定した URL・64 桁の小文字 16 進）
