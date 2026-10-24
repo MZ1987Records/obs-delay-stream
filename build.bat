@@ -38,11 +38,13 @@ if exist "%PLUGIN_DIR%\OBS_STUDIO_REF" (
     for /f "usebackq" %%R in ("%PLUGIN_DIR%\OBS_STUDIO_REF") do set "OBS_STUDIO_REF=%%R"
 )
 set "WEBSOCKETPP_COMMIT="
+set "ASIO_COMMIT="
 set "OPUS_VERSION="
 set "OPUS_COMMIT="
 if exist "%PLUGIN_DIR%\THIRD_PARTY_REFS" (
     for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%PLUGIN_DIR%\THIRD_PARTY_REFS") do (
         if /I "%%A"=="WEBSOCKETPP_COMMIT" set "WEBSOCKETPP_COMMIT=%%B"
+        if /I "%%A"=="ASIO_COMMIT" set "ASIO_COMMIT=%%B"
         if /I "%%A"=="OPUS_VERSION" set "OPUS_VERSION=%%B"
         if /I "%%A"=="OPUS_COMMIT" set "OPUS_COMMIT=%%B"
     )
@@ -200,24 +202,15 @@ cd /d "%PLUGIN_DIR%"
 if not exist "%PLUGIN_DIR%\third_party" mkdir "%PLUGIN_DIR%\third_party"
 
 if "%WEBSOCKETPP_COMMIT%"=="" goto :refs_missing
+if "%ASIO_COMMIT%"=="" goto :refs_missing
 if "%OPUS_COMMIT%"=="" goto :refs_missing
 if "%OPUS_VERSION%"=="" goto :refs_missing
 call :ensure_git_pin websocketpp "%PLUGIN_DIR%\third_party\websocketpp" https://github.com/zaphoyd/websocketpp.git %WEBSOCKETPP_COMMIT%
 if errorlevel 1 goto :error
 
-if exist "%PLUGIN_DIR%\third_party\asio\asio\include\asio.hpp" goto :asio_ok
-if exist "%PLUGIN_DIR%\third_party\asio\include\asio.hpp" goto :asio_ok
-if exist "%PLUGIN_DIR%\third_party\asio" rmdir /s /q "%PLUGIN_DIR%\third_party\asio"
-echo   Cloning asio v1.18.2...
-git clone --branch asio-1-18-2 --depth 1 https://github.com/chriskohlhoff/asio.git "%PLUGIN_DIR%\third_party\asio"
+call :ensure_git_pin asio "%PLUGIN_DIR%\third_party\asio" https://github.com/chriskohlhoff/asio.git %ASIO_COMMIT%
 if errorlevel 1 goto :error
-echo   asio: OK
-goto :opus_check
 
-:asio_ok
-echo   asio: already exists
-
-:opus_check
 call :ensure_git_pin "opus v%OPUS_VERSION%" "%PLUGIN_DIR%\third_party\opus" https://github.com/xiph/opus.git %OPUS_COMMIT%
 if errorlevel 1 goto :error
 rem opus derives its version from "git describe"; a commit-only fetch has no tag.
@@ -441,7 +434,7 @@ pause
 exit /b 0
 
 :refs_missing
-echo [ERROR] WEBSOCKETPP_COMMIT / OPUS_VERSION / OPUS_COMMIT not found in THIRD_PARTY_REFS.
+echo [ERROR] WEBSOCKETPP_COMMIT / ASIO_COMMIT / OPUS_VERSION / OPUS_COMMIT not found in THIRD_PARTY_REFS.
 goto :error
 
 rem ensure_git_pin <name> <dir> <url> <commit>

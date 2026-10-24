@@ -23,7 +23,7 @@
 |---|---|---|---|---|
 | WebSocket++ | 0.8.2 以降の master | `4dfe1be74e684acca19ac1cf96cce0df9eac2a2d` | `THIRD_PARTY_REFS` | 手動。リリースは 0.8.2（2020 年）が最後 |
 | libopus | 1.6.1 | `22244de5a79bd1d6d623c32e72bf1954b56235be` | `THIRD_PARTY_REFS` | 手動 |
-| Asio（Standalone） | 1.18.2 | `a4d820dd69b37fb8daee275d20eb162054453414` | タグ `asio-1-18-2`（コミットは未検証） | 手動。最新は 1.38.2 だが、WebSocket++ が使う旧 API が削除されているため単純には更新できない |
+| Asio（Standalone） | 1.18.2 | `a4d820dd69b37fb8daee275d20eb162054453414` | `THIRD_PARTY_REFS` | 手動。最新は 1.38.2 だが、WebSocket++ が使う旧 API が削除されているため単純には更新できない |
 
 取得処理: `build.bat`、`.github/workflows/build.yml`、`.github/workflows/build-test.yml`。
 
