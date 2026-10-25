@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(obs-delay-stream VERSION 8.2.0)
+project(obs-delay-stream VERSION 9.0.0)
 
 # プレリリースの表示用 suffix（例: -rc.1）。CI がタグから渡す。版の比較と設定互換の判定は
 # - 以降を読まないため、表示・ログ・保存される版名にだけ付く。
