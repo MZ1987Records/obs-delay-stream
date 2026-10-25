@@ -33,6 +33,7 @@
 
 #include "core/approved-binaries.hpp"
 #include "core/binary-verify.hpp"
+#include "core/child-process.hpp"
 #include "core/string-format.hpp"
 #include "tunnel/tunnel-manager.hpp"
 
@@ -305,30 +306,16 @@ namespace ods::tunnel {
 			return false;
 		}
 
-		STARTUPINFOA si{};
-		si.cb         = sizeof(si);
-		si.dwFlags    = STARTF_USESTDHANDLES;
-		si.hStdOutput = hFile;
-		si.hStdError  = hFile;
-		si.hStdInput  = INVALID_HANDLE_VALUE;
-
-		std::string         cmdline = "\"" + exe_path + "\" " + args;
+		// 継承させるのはログファイルのハンドルだけ。OBS 異常終了時も Job Object で終了させる。
+		const std::string   cmdline = quote_windows_arg(exe_path) + " " + args;
 		PROCESS_INFORMATION pi{};
-		BOOL                ok = CreateProcessA(
-			exe_path.c_str(),
-			cmdline.data(),
-			nullptr,
-			nullptr,
-			TRUE,
-			CREATE_NO_WINDOW,
-			nullptr,
-			nullptr,
-			&si,
-			&pi);
+		bool                in_job = false;
+		const bool          ok     = launch_child_process(exe_path, cmdline, nullptr, hFile, hFile, pi, in_job);
+		const DWORD         launch_err = GetLastError();
 		CloseHandle(hFile); // 親側のハンドルを閉じる
 
 		if (!ok) {
-			DWORD err         = GetLastError();
+			DWORD err         = launch_err;
 			char  errmsg[256] = {};
 			FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 						   nullptr,
@@ -340,6 +327,9 @@ namespace ods::tunnel {
 			blog(LOG_ERROR, "[obs-delay-stream] CreateProcess failed: err=%lu [%s] exe=[%s]", err, errmsg, exe_path.c_str());
 			last_launch_error_ = string_printf("CreateProcess failed: err=%lu [%s]", err, errmsg);
 			return false;
+		}
+		if (!in_job) {
+			blog(LOG_WARNING, "[obs-delay-stream] cloudflared is not in the kill-on-close job; it may survive an OBS crash");
 		}
 		{
 			std::lock_guard<std::mutex> lk(proc_mtx_);
