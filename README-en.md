@@ -118,7 +118,7 @@ To stop sharing with performers, stop in this order:
 1. On the **Tunnel** tab, click **Stop**. The issued URL stops working and nobody can connect from the internet.
 2. On the **WS Streaming** tab, click **Stop** for the WebSocket server. All connected performers are disconnected.
 
-Quitting OBS also stops both. Even if OBS crashes, the cloudflared process started by the plugin is terminated.
+Quitting OBS also stops both. If OBS crashes, the cloudflared process started by the plugin is normally terminated as well. However, if the OBS log shows the warning `cloudflared is not in the kill-on-close job`, cloudflared may keep running. If it is left running and OBS is restarted, the previous URL becomes reachable again, so end `cloudflared.exe` in Task Manager.
 
 To resume, start the tunnel again. Each time the tunnel starts, the URL domain changes, so share the URL list with performers again from the **URL Sharing** tab.
 
