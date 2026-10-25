@@ -37,7 +37,7 @@ PR #53とPR #55で実装し、いずれもmainへマージした。各項目は�
 
 - RTSP URLのschemeをrtsp・rtsps・rtsptに限定した。
 - FFmpegの引数をWindows CRTの規則どおりにクォートし、`\"`による引数注入を防いだ（`core/string-format.hpp`の`quote_windows_arg`）。
-- cloudflaredとFFmpegの起動を`core/child-process`の`launch_child_process`にまとめた。継承させるのは標準出力・標準エラー出力だけ（`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`）で、一時停止状態で起動してプロセス全体で1つのJob Object（`KILL_ON_JOB_CLOSE`）へ登録してから再開する。OBSが異常終了しても子プロセスは残らない（未マージ）。
+- cloudflaredとFFmpegの起動を`core/child-process`の`launch_child_process`にまとめた。継承させるのは標準入力・標準出力・標準エラー出力だけ（`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`）で、渡さない標準ハンドルはNULで補い、継承できないハンドルは拒否する。一時停止状態で起動してプロセス全体で1つのJob Object（`KILL_ON_JOB_CLOSE`）へ登録してから再開し、再開に失敗したら子を終了して失敗を返す。Job登録に成功していれば、OBSが異常終了しても子プロセスは残らない。登録に失敗した環境では起動を続けてログに警告を残し、READMEでその場合の対処を案内する（未マージ）。
 - FFmpegの入力を、入力形式RTSP（`-f rtsp`）、音声だけのSETUP（`-allowed_media_types audio`）、プロトコル`tcp,tls`（`-protocol_whitelist`）、デコーダー`aac,opus`（`-codec_whitelist`）に限った。プロトコル名はFFmpeg n9.0.2のソースで確認した。
 
 **外部実行ファイル（P1）**
