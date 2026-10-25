@@ -129,11 +129,20 @@ namespace {
 		return 0;
 	}
 
+	// 子として起動され、作業ディレクトリを報告する。
+	int report_cwd() {
+		const std::string line = std::filesystem::current_path().string();
+		DWORD             n    = 0;
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &n, nullptr);
+		return 0;
+	}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--spawn-long-child") == 0) return spawn_long_child_and_exit();
 	if (argc > 1 && std::strcmp(argv[1], "--report-stdin") == 0) return report_stdin();
+	if (argc > 1 && std::strcmp(argv[1], "--report-cwd") == 0) return report_cwd();
 
 	const std::string a = generate_stream_id(12);
 	check(a.size() == 12, "length 12");
@@ -267,6 +276,41 @@ int main(int argc, char **argv) {
 		bool        in_job = false;
 		check(run_and_capture(self, quote_windows_arg(self) + " --report-stdin", out, in_job), "launch stdin reporter");
 		check(out.find("stdin-ok") != std::string::npos, "missing stdin is replaced with NUL");
+	}
+
+	// 子の作業ディレクトリは親のものを引き継がず、exe の配置先になる
+	{
+		char self[MAX_PATH] = {};
+		GetModuleFileNameA(nullptr, self, MAX_PATH);
+		std::error_code ec;
+		const auto      parent_cwd = std::filesystem::current_path();
+		std::filesystem::current_path(std::filesystem::temp_directory_path(), ec);
+		std::string out;
+		bool        in_job = false;
+		check(run_and_capture(self, quote_windows_arg(self) + " --report-cwd", out, in_job), "launch cwd reporter");
+		std::filesystem::current_path(parent_cwd, ec);
+		check(_stricmp(out.c_str(), std::filesystem::path(self).parent_path().string().c_str()) == 0,
+			  "child runs in the exe directory");
+	}
+
+	// URL の userinfo を伏せる（パスワード中の @ も含む）。それ以外は変えない
+	check(redact_url_userinfo("rtsp://user:pa@ss@host:554/live/key: 401") == "rtsp://***@host:554/live/key: 401",
+		  "redact userinfo with @ in password");
+	check(redact_url_userinfo("a rtsps://u@h/x and rtsp://v:w@h2") == "a rtsps://***@h/x and rtsp://***@h2",
+		  "redact every url");
+	check(redact_url_userinfo("rtsp://host/live@x Connection refused") == "rtsp://host/live@x Connection refused",
+		  "keep @ in path");
+	check(redact_url_userinfo("Connection refused") == "Connection refused", "keep text without url");
+	check(redact_url_userinfo("rtsp://") == "rtsp://", "keep empty authority");
+	check(redact_url_userinfo("rtsp://u:pa ss@host/x: 401") == "rtsp://***@host/x: 401", "redact space in password");
+	{
+		// 保持量の上限で @ より前が切れた長い資格情報は、:// 以降をすべて伏せる
+		const std::string cut = "Error rtsp://user:" + std::string(4096, 'p');
+		check(redact_url_userinfo(cut, true) == "Error rtsp://***", "redact userinfo cut before @");
+		check(redact_url_userinfo(cut) == cut, "keep untruncated url without @");
+		check(redact_url_userinfo("rtsp://a:b@h/x rtsp://c:" + std::string(100, 'q'), true) ==
+				  "rtsp://***@h/x rtsp://***",
+			  "redact complete and cut urls");
 	}
 
 	// 継承できないハンドルを渡すと、黙って除外せずに失敗する

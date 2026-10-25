@@ -1,5 +1,6 @@
 #include "core/child-process.hpp"
 
+#include <filesystem>
 #include <mutex>
 #include <vector>
 
@@ -108,6 +109,10 @@ namespace ods::core {
 		}
 		si.lpAttributeList = attrs;
 
+		// 作業ディレクトリを OBS から引き継がず、exe の配置先にする。カレントディレクトリは DLL の
+		// 探索先に入るため、OBS の起動場所に置かれた DLL を子に読み込ませない。
+		const std::string work_dir = std::filesystem::path(exe).parent_path().string();
+
 		cmdline.push_back('\0');
 		const BOOL ok = CreateProcessA(exe.c_str(),
 									   cmdline.data(),
@@ -116,7 +121,7 @@ namespace ods::core {
 									   inherit.empty() ? FALSE : TRUE,
 									   CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
 									   nullptr,
-									   nullptr,
+									   work_dir.empty() ? nullptr : work_dir.c_str(),
 									   &si.StartupInfo,
 									   &pi);
 		const DWORD create_err = GetLastError();

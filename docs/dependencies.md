@@ -44,7 +44,9 @@
 | @fortawesome/fontawesome-free | 7.3.1 | npm（`receiver/package-lock.json`） | Dependabot |
 | bulma | 1.0.4 | npm | Dependabot |
 | i18next | 26.3.6 | npm | Dependabot |
-| opus-decoder（wasm-audio-decoders） | 不明 | `receiver/third_party/opus-decoder/` に同梱（7da57ca で追加） | 手動。SHA-256 `fd73ee0a9c8a5e233c0b88234df14f46003ad89bb4ba27435bc8714db2a6dc62`。版の特定は P0 の残作業 |
+| opus-decoder（wasm-audio-decoders） | 0.7.11（内蔵の libopus は 1.5.2） | `receiver/third_party/opus-decoder/` に同梱（7da57ca で追加） | 手動。SHA-256 `fd73ee0a9c8a5e233c0b88234df14f46003ad89bb4ba27435bc8714db2a6dc62` |
+
+opus-decoder の版は、同梱ファイルの SHA-256 を npm の各版の `dist/opus-decoder.min.js` と比べて特定した（2026-10-25、0.7.11 と一致）。内蔵の libopus は、0.7.11 の上流コミット（`8f2428c`）が参照する submodule `modules/opus` が `ddbe483` で、これは libopus の v1.5.2 のタグと同じコミット。確認時の最新は 0.7.12（2026-08-27）で、内蔵の libopus は同じ。変更は不具合修正（`free()` の待機、コンストラクタのプロパティ名の圧縮回避）とほかのデコーダーの追加だけなので、更新はセキュリティ上の理由では急がない。
 
 ビルドだけに使うもの: typescript 7.0.2、vite 8.3.5（npm、Dependabot）。ビルドは `npm ci` で lockfile どおりに入れる。
 

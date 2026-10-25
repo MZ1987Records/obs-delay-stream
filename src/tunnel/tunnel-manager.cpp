@@ -5,7 +5,7 @@
  * 取得したパブリックURL (wss://) を返す。
  *
  * cloudflared:
- *   起動: cloudflared.exe tunnel --url http://127.0.0.1:<WS_PORT>
+ *   起動: cloudflared.exe tunnel --loglevel info --url http://127.0.0.1:<WS_PORT>
  *   URL取得: stderr に出力される "https://xxxx.trycloudflare.com" を捕捉
  *   URL形式: https:// → wss:// に変換
  *   ※ 無料・認証不要・固定でない（起動毎にURLが変わる）
@@ -385,7 +385,9 @@ namespace ods::tunnel {
 
 	bool TunnelManager::run_cloudflared() {
 		// localhost は ::1 へ解決され得るため、ループバック待受と同じ IPv4 アドレスを明示する。
-		const std::string args = "tunnel --url http://127.0.0.1:" + std::to_string(ws_port_);
+		// loglevel を明示するのは、config.yml や環境変数 TUNNEL_LOGLEVEL で debug にされていても、
+		// 要求 URL（配信 ID・チャンネルコードを含む）をログファイルへ書かせないため。
+		const std::string args = "tunnel --loglevel info --url http://127.0.0.1:" + std::to_string(ws_port_);
 
 		if (!launch_process(exe_path_, args)) {
 			if (!last_launch_error_.empty())
