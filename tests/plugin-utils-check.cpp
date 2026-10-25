@@ -119,10 +119,21 @@ namespace {
 		return 0;
 	}
 
+	// 子として起動され、標準入力が有効なハンドル（NUL などのデバイス・ファイル）かを報告する。
+	int report_stdin() {
+		const HANDLE      in   = GetStdHandle(STD_INPUT_HANDLE);
+		const bool        ok   = in && in != INVALID_HANDLE_VALUE && GetFileType(in) != FILE_TYPE_UNKNOWN;
+		const std::string line = ok ? "stdin-ok\n" : "stdin-invalid\n";
+		DWORD             n    = 0;
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &n, nullptr);
+		return 0;
+	}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--spawn-long-child") == 0) return spawn_long_child_and_exit();
+	if (argc > 1 && std::strcmp(argv[1], "--report-stdin") == 0) return report_stdin();
 
 	const std::string a = generate_stream_id(12);
 	check(a.size() == 12, "length 12");
@@ -177,8 +188,7 @@ int main(int argc, char **argv) {
 	// ZIP から 1 エントリだけを取り出す（FFmpeg の承認版 ZIP から ffmpeg.exe だけを取り出す処理）
 	{
 		namespace fs   = std::filesystem;
-		const auto dir = fs::temp_directory_path() / "ods-plugin-utils-check-zip";
-		fs::remove_all(dir);
+		const auto dir = fs::temp_directory_path() / ("ods-plugin-utils-check-zip-" + generate_stream_id(12));
 		fs::create_directories(dir / "src" / "pkg" / "bin");
 		std::ofstream(dir / "src" / "pkg" / "bin" / "tool.exe", std::ios::binary) << "tool-content";
 		std::ofstream(dir / "src" / "pkg" / "readme.txt", std::ios::binary) << "readme";
@@ -214,6 +224,67 @@ int main(int argc, char **argv) {
 		check(run_and_capture(cmd, quote_windows_arg(cmd) + " /c echo child-ok", out, in_job), "launch child");
 		check(out.find("child-ok") != std::string::npos, "child output through inherited pipe");
 		check(in_job, "child is in the kill-on-close job");
+	}
+
+	// 渡していない継承可能なハンドルは子に引き継がれない（OBS のファイル・ソケットを漏らさない）。
+	// 書き込み端を継承可能にしたパイプを用意し、子には渡さずに起動する。親が自分の書き込み端を
+	// 閉じたとき、子が複製を持っていなければ読み取り端は ERROR_BROKEN_PIPE になる。
+	{
+		SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+		HANDLE              out_rd = nullptr, out_wr = nullptr; // 子の標準出力（継承を有効にするため渡す）
+		HANDLE              leak_rd = nullptr, leak_wr = nullptr; // 子に渡さない継承可能なハンドル
+		CreatePipe(&out_rd, &out_wr, &sa, 0);
+		CreatePipe(&leak_rd, &leak_wr, &sa, 0);
+		SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
+		SetHandleInformation(leak_rd, HANDLE_FLAG_INHERIT, 0);
+
+		const std::string   ping = system_exe("PING.EXE");
+		PROCESS_INFORMATION pi{};
+		bool                in_job = false;
+		const bool          ok     = launch_child_process(
+			ping, quote_windows_arg(ping) + " -n 30 127.0.0.1", nullptr, out_wr, out_wr, pi, in_job);
+		check(ok, "launch child with an unrelated inheritable handle open");
+		CloseHandle(leak_wr);
+		DWORD      avail = 0;
+		const BOOL peek  = PeekNamedPipe(leak_rd, nullptr, 0, nullptr, &avail, nullptr);
+		check(ok && !peek && GetLastError() == ERROR_BROKEN_PIPE, "unrelated inheritable handle is not inherited");
+		if (ok) {
+			TerminateProcess(pi.hProcess, 1);
+			WaitForSingleObject(pi.hProcess, 5000);
+			CloseHandle(pi.hThread);
+			CloseHandle(pi.hProcess);
+		}
+		CloseHandle(out_wr);
+		CloseHandle(out_rd);
+		CloseHandle(leak_rd);
+	}
+
+	// 渡さなかった標準入力は NUL で補われ、子から見て有効なハンドルになる
+	{
+		char self[MAX_PATH] = {};
+		GetModuleFileNameA(nullptr, self, MAX_PATH);
+		std::string out;
+		bool        in_job = false;
+		check(run_and_capture(self, quote_windows_arg(self) + " --report-stdin", out, in_job), "launch stdin reporter");
+		check(out.find("stdin-ok") != std::string::npos, "missing stdin is replaced with NUL");
+	}
+
+	// 継承できないハンドルを渡すと、黙って除外せずに失敗する
+	{
+		HANDLE rd = nullptr, wr = nullptr;
+		CreatePipe(&rd, &wr, nullptr, 0); // 継承不可
+		const std::string   cmd = system_exe("cmd.exe");
+		PROCESS_INFORMATION pi{};
+		bool                in_job = false;
+		const bool          ok = launch_child_process(cmd, quote_windows_arg(cmd) + " /c echo x", nullptr, wr, wr, pi, in_job);
+		check(!ok && GetLastError() == ERROR_INVALID_HANDLE, "non-inheritable handle is rejected");
+		if (ok) {
+			WaitForSingleObject(pi.hProcess, 5000);
+			CloseHandle(pi.hThread);
+			CloseHandle(pi.hProcess);
+		}
+		CloseHandle(wr);
+		CloseHandle(rd);
 	}
 
 	// 親（中継役）が終了すると、Job に入れた子も終了する（OBS の異常終了で子が残らないこと）

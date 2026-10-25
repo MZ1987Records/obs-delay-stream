@@ -14,8 +14,10 @@ namespace ods::core {
 
 	/// 外部実行ファイル（cloudflared・FFmpeg）を子プロセスとして起動する。
 	///
-	/// - 継承させるハンドルは std_out・std_err（とあれば std_in）だけに限る。OBS が持つ
-	///   ほかの継承可能なハンドルは渡さない
+	/// - 継承させるハンドルは標準入力・標準出力・標準エラー出力の 3 つだけに限る。OBS が持つ
+	///   ほかの継承可能なハンドルは渡さない。nullptr を渡した標準ハンドルは NUL デバイスで補い、
+	///   3 つとも nullptr なら標準ハンドルを指定しない
+	/// - 一時停止状態から再開できなかった場合は、子を終了して失敗を返す
 	/// - プロセス全体で 1 つの Job Object（KILL_ON_JOB_CLOSE）に登録する。OBS が異常終了しても
 	///   Job のハンドルが閉じられて子プロセスは終了する
 	/// - 一時停止状態で起動し、Job へ登録してから再開する。登録前に動き出さない
@@ -24,9 +26,10 @@ namespace ods::core {
 	/// 続け、in_job を false にする。呼び出し側は終了の保証が無いことをログに残す。
 	/// @param exe      実行ファイルの絶対パス
 	/// @param cmdline  コマンドライン全体（引数は quote_windows_arg でクォート済み）
-	/// @param std_in   子の標準入力。不要なら nullptr
-	/// @param std_out  子の標準出力（継承可能なハンドル）
+	/// @param std_in   子の標準入力（継承可能なハンドル）。不要なら nullptr（NUL で補う）
+	/// @param std_out  子の標準出力（継承可能なハンドル）。不要なら nullptr（NUL で補う）
 	/// @param std_err  子の標準エラー出力（継承可能なハンドル。std_out と同じでもよい）
+	///                 継承できないハンドルを渡すと ERROR_INVALID_HANDLE で失敗する
 	/// @param pi       起動したプロセス・スレッドのハンドル（呼び出し側が閉じる）
 	/// @param in_job   Job Object へ登録できたか
 	/// @return 失敗時は false。GetLastError() で理由を得られる
