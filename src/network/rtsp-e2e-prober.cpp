@@ -345,15 +345,20 @@ namespace ods::network {
 		// 使うのは先頭行だけ。エラー行を出し続けるストリームでもメモリを使い切らないよう保持量を
 		// 限る。FFmpeg が書き込みで止まらないよう、超過分も読み捨てる。
 		constexpr size_t kMaxStderrBytes = 4096;
+		// 1 回の呼び出しで読む量。出力が途切れなくても呼び出し元のタイムアウト・キャンセル確認へ戻る。
+		constexpr size_t kMaxDrainBytesPerCall = 64 * 1024;
 
 		void drain_text_pipe(HANDLE pipe, std::string &dst) {
 			if (!pipe || pipe == INVALID_HANDLE_VALUE) return;
-			DWORD avail = 0;
-			while (PeekNamedPipe(pipe, nullptr, 0, nullptr, &avail, nullptr) && avail > 0) {
+			DWORD  avail   = 0;
+			size_t drained = 0;
+			while (drained < kMaxDrainBytesPerCall &&
+				   PeekNamedPipe(pipe, nullptr, 0, nullptr, &avail, nullptr) && avail > 0) {
 				char  buf[512];
 				DWORD to_read = std::min<DWORD>(avail, static_cast<DWORD>(sizeof(buf)));
 				DWORD read    = 0;
 				if (!ReadFile(pipe, buf, to_read, &read, nullptr) || read == 0) break;
+				drained += read;
 				if (dst.size() < kMaxStderrBytes) dst.append(buf, std::min<size_t>(read, kMaxStderrBytes - dst.size()));
 			}
 		}
