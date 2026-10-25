@@ -129,11 +129,20 @@ namespace {
 		return 0;
 	}
 
+	// 子として起動され、作業ディレクトリを報告する。
+	int report_cwd() {
+		const std::string line = std::filesystem::current_path().string();
+		DWORD             n    = 0;
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &n, nullptr);
+		return 0;
+	}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--spawn-long-child") == 0) return spawn_long_child_and_exit();
 	if (argc > 1 && std::strcmp(argv[1], "--report-stdin") == 0) return report_stdin();
+	if (argc > 1 && std::strcmp(argv[1], "--report-cwd") == 0) return report_cwd();
 
 	const std::string a = generate_stream_id(12);
 	check(a.size() == 12, "length 12");
@@ -267,6 +276,21 @@ int main(int argc, char **argv) {
 		bool        in_job = false;
 		check(run_and_capture(self, quote_windows_arg(self) + " --report-stdin", out, in_job), "launch stdin reporter");
 		check(out.find("stdin-ok") != std::string::npos, "missing stdin is replaced with NUL");
+	}
+
+	// 子の作業ディレクトリは親のものを引き継がず、exe の配置先になる
+	{
+		char self[MAX_PATH] = {};
+		GetModuleFileNameA(nullptr, self, MAX_PATH);
+		std::error_code ec;
+		const auto      parent_cwd = std::filesystem::current_path();
+		std::filesystem::current_path(std::filesystem::temp_directory_path(), ec);
+		std::string out;
+		bool        in_job = false;
+		check(run_and_capture(self, quote_windows_arg(self) + " --report-cwd", out, in_job), "launch cwd reporter");
+		std::filesystem::current_path(parent_cwd, ec);
+		check(_stricmp(out.c_str(), std::filesystem::path(self).parent_path().string().c_str()) == 0,
+			  "child runs in the exe directory");
 	}
 
 	// 継承できないハンドルを渡すと、黙って除外せずに失敗する
