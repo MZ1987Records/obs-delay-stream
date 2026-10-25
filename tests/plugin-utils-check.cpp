@@ -13,6 +13,7 @@
 #include <fstream>
 #include <set>
 #include <string>
+#include <system_error>
 
 using namespace ods::core;
 using ods::plugin::generate_stream_id;
@@ -49,29 +50,36 @@ int main() {
 
 	// SHA-256 と承認値との照合
 	{
-		const auto dir = std::filesystem::temp_directory_path() / "ods-plugin-utils-check";
-		std::filesystem::remove_all(dir);
-		std::filesystem::create_directories(dir);
-		const std::string small = (dir / "abc.bin").string();
-		const std::string large = (dir / "large.bin").string();
-		std::ofstream(small, std::ios::binary) << "abc";
-		std::ofstream(large, std::ios::binary) << std::string(2500000, 'a'); // 1 MiB の読込単位をまたぐ
+		namespace fs   = std::filesystem;
+		const auto dir = fs::temp_directory_path() / ("ods-plugin-utils-check-" + generate_stream_id(12));
+		std::error_code ec;
+		const bool      created = fs::create_directory(dir, ec);
+		check(created, "create unique temp directory");
+		if (created) {
+			const std::string small = (dir / "abc.bin").string();
+			const std::string large = (dir / "large.bin").string();
+			std::ofstream(small, std::ios::binary) << "abc";
+			std::ofstream(large, std::ios::binary) << std::string(2500000, 'a'); // 1 MiB の読込単位をまたぐ
 
-		const char *abc_sha   = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-		const char *large_sha = "38a637965059125eeb67f54c30e7f48a61859a467a800ba09740ba48a924f2b9";
-		check(sha256_file_hex(small) == abc_sha, "sha256 of abc");
-		check(sha256_file_hex(large) == large_sha, "sha256 across read buffers");
-		check(sha256_file_hex((dir / "missing.bin").string()).empty(), "sha256 of missing file");
+			const char *abc_sha   = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+			const char *large_sha = "38a637965059125eeb67f54c30e7f48a61859a467a800ba09740ba48a924f2b9";
+			check(sha256_file_hex(small) == abc_sha, "sha256 of abc");
+			check(sha256_file_hex(large) == large_sha, "sha256 across read buffers");
+			check(sha256_file_hex((dir / "missing.bin").string()).empty(), "sha256 of missing file");
 
-		check(verify_file(small, 3, abc_sha) == VerifyResult::Ok, "verify ok");
-		check(verify_file(small, 3, "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD") ==
-				  VerifyResult::Ok,
-			  "verify accepts uppercase hex");
-		check(verify_file(small, 4, abc_sha) == VerifyResult::Mismatch, "verify size mismatch");
-		check(verify_file(small, 3, large_sha) == VerifyResult::Mismatch, "verify hash mismatch");
-		check(verify_file((dir / "missing.bin").string(), 3, abc_sha) == VerifyResult::Missing, "verify missing");
-		check(verify_file(dir.string(), 0, abc_sha) == VerifyResult::Missing, "directory is not a file");
-		std::filesystem::remove_all(dir);
+			check(verify_file(small, 3, abc_sha) == VerifyResult::Ok, "verify ok");
+			check(verify_file(small, 3, "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD") ==
+					  VerifyResult::Ok,
+				  "verify accepts uppercase hex");
+			check(verify_file(small, 4, abc_sha) == VerifyResult::Mismatch, "verify size mismatch");
+			check(verify_file(small, 3, large_sha) == VerifyResult::Mismatch, "verify hash mismatch");
+			check(verify_file((dir / "missing.bin").string(), 3, abc_sha) == VerifyResult::Missing, "verify missing");
+			check(verify_file(dir.string(), 0, abc_sha) == VerifyResult::Missing, "directory is not a file");
+
+			ec.clear();
+			fs::remove_all(dir, ec);
+			check(!ec, "remove unique temp directory");
+		}
 	}
 
 	// 承認一覧の値の形（版を固定した URL・64 桁の小文字 16 進）
