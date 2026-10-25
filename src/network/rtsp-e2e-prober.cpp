@@ -582,6 +582,11 @@ namespace ods::network {
 		latencies_ms.reserve(static_cast<size_t>(sets));
 		if (on_progress) on_progress(0, sets);
 		for (int i = 0; i < sets && running_.load(std::memory_order_acquire); ++i) {
+			// 各セットで新しいプロセスを起動するため、自動配置版も起動直前に毎回検証する。
+			if (i > 0 && !resolve_ffmpeg_path(ffmpeg_path_hint_, ffmpeg_exe_path, resolve_error)) {
+				last_error = resolve_error.empty() ? "ffmpeg.exe が見つかりません。" : resolve_error;
+				break;
+			}
 			impulse_sent_.store(false, std::memory_order_release);
 			{
 				std::lock_guard<std::mutex> lk(t0_mtx_);
