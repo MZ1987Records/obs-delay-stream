@@ -2,7 +2,7 @@
 
 作成日: 2026-10-24（JST）  
 対象: obs-delay-stream / Windows / cloudflared / FFmpeg / HTTP・WebSocket受信処理  
-状態: P2の即効項目と、通常利用で挙動が変わらない追加対策は実装済み（PR #53、2026-10-24にmainへマージ）。P1（cloudflared・FFmpegの承認版の固定と検証付き取得、Asioのコミット固定）とFFmpegの入力制限も実装済み（PR #55、2026-10-24にmainへマージ）。子プロセスの継承ハンドルの限定とJob Object、公開停止手順も実装済み（PR #56、2026-10-25にmainへマージ）。OBS・Chrome・トンネル・RTSP計測での実機確認は未実施。残りの各作業は実行範囲の承認後に行う。
+状態: P2の即効項目と、通常利用で挙動が変わらない追加対策は実装済み（PR #53、2026-10-24にmainへマージ）。P1（cloudflared・FFmpegの承認版の固定と検証付き取得、Asioのコミット固定）とFFmpegの入力制限も実装済み（PR #55、2026-10-24にmainへマージ）。子プロセスの継承ハンドルの限定とJob Object、公開停止手順も実装済み（PR #56、2026-10-25にmainへマージ）。子プロセスの作業ディレクトリの固定、FFmpegのstderrの制限と認証情報の伏せ字、cloudflaredのログレベルの固定も実装済み（PR #58、2026-10-25にmainへマージ）。OBS・Chrome・トンネル・RTSP計測での実機確認は未実施。残りの各作業は実行範囲の承認後に行う。
 
 ## 1. 目的と進め方
 
@@ -21,7 +21,7 @@
 
 ## 2. 実施済みの対策
 
-PR #53・PR #55・PR #56で実装し、いずれもmainへマージした。各項目はコミット単位でレビューできる。自己チェック（`stream-router-utils-check`、`plugin-utils-check`）はCIで実行する。
+PR #53・PR #55・PR #56・PR #58で実装し、いずれもmainへマージした。各項目はコミット単位でレビューできる。自己チェック（`stream-router-utils-check`、`plugin-utils-check`）はCIで実行する。
 
 **受信サーバー（P2）**
 
@@ -39,9 +39,9 @@ PR #53・PR #55・PR #56で実装し、いずれもmainへマージした。各�
 - FFmpegの引数をWindows CRTの規則どおりにクォートし、`\"`による引数注入を防いだ（`core/string-format.hpp`の`quote_windows_arg`）。
 - cloudflaredとFFmpegの起動を`core/child-process`の`launch_child_process`にまとめた。継承させるのは標準入力・標準出力・標準エラー出力だけ（`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`）で、渡さない標準ハンドルはNULで補い、継承できないハンドルは拒否する。一時停止状態で起動してプロセス全体で1つのJob Object（`KILL_ON_JOB_CLOSE`）へ登録してから再開し、再開に失敗したら子を終了して失敗を返す。Job登録に成功していれば、OBSが異常終了しても子プロセスは残らない。登録に失敗した環境では起動を続けてログに警告を残し、READMEでその場合の対処を案内する。
 - FFmpegの入力を、入力形式RTSP（`-f rtsp`）、音声だけのSETUP（`-allowed_media_types audio`）、プロトコル`tcp,tls`（`-protocol_whitelist`）、デコーダー`aac,opus`（`-codec_whitelist`）に限った。プロトコル名はFFmpeg n9.0.2のソースで確認した。
-- 子プロセスの作業ディレクトリをexeの配置先にし、OBSのカレントディレクトリを引き継がない（DLLの探索先からOBSの起動場所を外す）（未マージ）。
-- FFmpegのstderrの保持を4 KiBまでにし、1回に読む量も64 KiBに限って計測ループのタイムアウト・キャンセル確認へ必ず戻す。UIに出すエラー行からURLのuserinfo（`user:pass@`）を伏せ、上限で切れてホスト部が末尾まで続くURLは`://`以降をすべて伏せる（`core/string-format.hpp`の`redact_url_userinfo`）（未マージ）。
-- cloudflaredを`--loglevel info`で起動する。debugでは要求URL（配信ID・チャンネルコードを含む）をログに書くため、config.ymlや環境変数`TUNNEL_LOGLEVEL`で上書きされないよう明示する（未マージ）。
+- 子プロセスの作業ディレクトリをexeの配置先にし、OBSのカレントディレクトリを引き継がない（DLLの探索先からOBSの起動場所を外す）。
+- FFmpegのstderrの保持を4 KiBまでにし、1回に読む量も64 KiBに限って計測ループのタイムアウト・キャンセル確認へ必ず戻す。UIに出すエラー行からURLのuserinfo（`user:pass@`）を伏せ、上限で切れてホスト部が末尾まで続くURLは`://`以降をすべて伏せる（`core/string-format.hpp`の`redact_url_userinfo`）。
+- cloudflaredを`--loglevel info`で起動する。debugでは要求URL（配信ID・チャンネルコードを含む）をログに書くため、config.ymlや環境変数`TUNNEL_LOGLEVEL`で上書きされないよう明示する。
 
 **外部実行ファイル（P1）**
 
@@ -70,7 +70,7 @@ PR #53・PR #55・PR #56で実装し、いずれもmainへマージした。各�
 | 接続数 | チャンネルごとの単一接続（同じチャンネルへの新しい接続が古い接続を退去させる）はあるが、総接続数・未完了ハンドシェイク数の上限はない | `src/network/stream-router.cpp` / `on_open()` |
 | 送信待ち | 遅い受信者への送信待ちに上限がない | `src/network/stream-router.cpp` |
 | 未認証HTTP | `/config`は認証なしで最大チャンネル数と有効チャンネル数を返す | `src/network/stream-router.cpp` / `on_http()` |
-| 子プロセス | cloudflaredとFFmpegは、継承ハンドルを標準出力・標準エラー出力に限り、Job Object（KILL_ON_JOB_CLOSE）に登録して起動する（未マージ）。権限の分離（AppContainer）はない | `src/core/child-process.cpp` / `launch_child_process()` |
+| 子プロセス | cloudflaredとFFmpegは、継承ハンドルを標準ハンドルに限り、作業ディレクトリをexeの配置先にして、Job Object（KILL_ON_JOB_CLOSE）に登録して起動する。権限の分離（AppContainer）はない | `src/core/child-process.cpp` / `launch_child_process()` |
 | 継続更新 | DependabotはGitHub Actionsとreceiverのnpm依存を対象にしている。それ以外は`docs/dependencies.md`で手動追跡 | `.github/dependabot.yml`、`docs/dependencies.md` |
 
 未確認事項は、配置済みexeのバージョン・ハッシュ・署名、OBSの実行権限、既存のCloudflare設定、cloudflaredがトンネル経由の要求で元の`Host`を転送すること（Origin検査の前提）、各脆弱性の実際の到達性と悪用可能性。ソース上の改善点を、侵害の発生やRCEの実証と混同しない。
@@ -331,7 +331,7 @@ LAN直接配信は撤去で確定し、実施済み。cloudflaredは2026.10.3、
 
 残りの着手順は次のとおり。各項目は独立してレビューできる差分に分ける。
 
-1. 実機確認: PR #53・PR #55・PR #56 とこのブランチの対策を、`docs/verification-checklist.md`の手順で検証する（V01〜V07、V10〜V15）。結果に応じて、映像を受信しない入力制限を見直す。あわせて、配布物のブラウザー警告が解消したかを確かめる。
+1. 実機確認: PR #53・PR #55・PR #56・PR #58 の対策を、`docs/verification-checklist.md`の手順で検証する（V01〜V07、V10〜V15）。結果に応じて、映像を受信しない入力制限を見直す。あわせて、配布物のブラウザー警告が解消したかを確かめる。
 2. P1の残作業: 配布物の警告が残る場合はコード署名と誤検知報告（`extract_zip_entry`の自己チェックは完了）。
 3. P0の残作業: 利用者PCの実体確認（公開停止／再開手順はREADMEに記載済み）。
 4. P2の残り（実装単位B・C）: 総接続数・送信待ちの上限は、20人運用の実機確認と並行して入れる。コード長の拡大と移行は、切り替え時期（11章）を決めてから行う。`/config`の開示範囲を決める。
