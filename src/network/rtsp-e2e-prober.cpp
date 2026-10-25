@@ -555,7 +555,11 @@ namespace ods::network {
 		}
 		if (!result.valid) {
 			const std::string ffmpeg_err = first_non_empty_line(ffmpeg_stderr);
-			if (!ffmpeg_err.empty()) result.error_msg += "\nffmpeg: " + redact_url_userinfo(ffmpeg_err);
+			if (!ffmpeg_err.empty()) {
+				// 保持量の上限で切れていれば、先頭行の URL も @ の手前で切れている可能性がある。
+				const bool truncated = ffmpeg_stderr.size() >= kMaxStderrBytes;
+				result.error_msg += "\nffmpeg: " + redact_url_userinfo(ffmpeg_err, truncated);
+			}
 		}
 		return result;
 	}

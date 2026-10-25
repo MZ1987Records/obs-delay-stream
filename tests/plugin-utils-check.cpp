@@ -302,6 +302,16 @@ int main(int argc, char **argv) {
 		  "keep @ in path");
 	check(redact_url_userinfo("Connection refused") == "Connection refused", "keep text without url");
 	check(redact_url_userinfo("rtsp://") == "rtsp://", "keep empty authority");
+	check(redact_url_userinfo("rtsp://u:pa ss@host/x: 401") == "rtsp://***@host/x: 401", "redact space in password");
+	{
+		// 保持量の上限で @ より前が切れた長い資格情報は、:// 以降をすべて伏せる
+		const std::string cut = "Error rtsp://user:" + std::string(4096, 'p');
+		check(redact_url_userinfo(cut, true) == "Error rtsp://***", "redact userinfo cut before @");
+		check(redact_url_userinfo(cut) == cut, "keep untruncated url without @");
+		check(redact_url_userinfo("rtsp://a:b@h/x rtsp://c:" + std::string(100, 'q'), true) ==
+				  "rtsp://***@h/x rtsp://***",
+			  "redact complete and cut urls");
+	}
 
 	// 継承できないハンドルを渡すと、黙って除外せずに失敗する
 	{

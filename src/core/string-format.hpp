@@ -64,13 +64,19 @@ namespace ods::core {
 	}
 
 	/// 文字列中の URL の userinfo（scheme://user:pass@host の user:pass）を *** に置き換える。
-	/// FFmpeg のエラー行は入力 URL を含み得るため、UI に出す前に通す。パスワード中の @ を
-	/// 取りこぼさないよう、ホスト部の終わりまでで最後の @ を区切りとする（FFmpeg の解析と同じ）。
-	inline std::string redact_url_userinfo(std::string text) {
+	/// FFmpeg のエラー行は入力 URL を含み得るため、UI に出す前に通す。FFmpeg の解析と同じく
+	/// ホスト部は / ? # の手前までとし（空白も含む）、その中で最後の @ を区切りとする。
+	/// @param truncated text が途中で切られている場合は true。ホスト部が末尾まで続く URL は
+	///                  @ が切り捨てられた可能性があるため、:// 以降をすべて伏せる
+	inline std::string redact_url_userinfo(std::string text, bool truncated = false) {
 		for (size_t pos = text.find("://"); pos != std::string::npos; pos = text.find("://", pos)) {
 			pos += 3;
-			const size_t end = (std::min)(text.find_first_of("/?# \t\r\n", pos), text.size()); // windows.h の min 対策
-			const size_t at  = text.rfind('@', end - 1);
+			const size_t end = (std::min)(text.find_first_of("/?#\r\n", pos), text.size()); // windows.h の min 対策
+			if (truncated && end == text.size()) {
+				text.replace(pos, end - pos, "***");
+				break;
+			}
+			const size_t at = text.rfind('@', end - 1);
 			if (end > pos && at != std::string::npos && at >= pos) {
 				text.replace(pos, at - pos, "***");
 				pos += 3;
