@@ -9,7 +9,7 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
     "bulma": "^1.0.4",
-    "i18next": "^26.3.6"
+    "i18next": "^26.5.5"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
