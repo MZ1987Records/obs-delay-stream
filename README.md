@@ -133,6 +133,28 @@ URLが関係者以外に漏れた場合も、トンネルを起動し直せば�
 4. **RTSP計測** タブでOBS配信遅延を計測（OBSの配信を事前に開始しておく）
 5. 必要に応じて **微調整** タブで環境遅延やアバター遅延を設定
 
+### cloudflared・FFmpeg に脆弱性が見つかったとき
+
+**自動取得** で使う cloudflared と FFmpeg は、プラグインが承認した版に固定されています。承認版の版番号は、**トンネル** タブの **cloudflaredパス** と、**RTSP計測** タブの **ffmpegパス** の下にある注記に表示されます。承認版に脆弱性が見つかり、プラグインの修正版がまだ出ていない場合は、次の手順で自分で更新した exe に差し替えられます。
+
+1. 該当する exe を止める
+   - cloudflared: [公開の停止と再開](#公開の停止と再開) の手順でトンネルを停止する
+   - FFmpeg: **RTSP計測** タブの計測を実行しない（FFmpeg は計測中だけ起動する）
+2. 公式の入手元から最新版を入れる
+   - cloudflared: Cloudflare 公式の GitHub リリース（<https://github.com/cloudflare/cloudflared/releases>）から `cloudflared-windows-amd64.exe` を取得する。または `winget install --id Cloudflare.cloudflared` でインストールする
+   - FFmpeg: FFmpeg 公式サイトのダウンロードページ（<https://ffmpeg.org/download.html>）が案内する Windows ビルド（gyan.dev または BtbN）から win64 の ZIP を取得し、展開した `bin\ffmpeg.exe` を使う
+3. プラグインの exe パス設定を切り替える
+   - **cloudflaredパス** または **ffmpegパス** のプルダウンで、次のどちらかを選ぶ
+   - **%PATH%から解決**: PATH の通ったフォルダーにある `cloudflared.exe`／`ffmpeg.exe` を使う。ファイル名はこのとおりである必要がある。PATH を変更した場合や winget でインストールした場合は、OBS を起動し直してから選ぶ。どの exe が使われるかは、コマンドプロンプトで `where cloudflared`／`where ffmpeg` を実行すると確かめられる
+   - **絶対パス指定**: 入力欄に exe のフルパスを入力する（例: `C:\tools\cloudflared\cloudflared-windows-amd64.exe`）
+4. 切り替えた exe で起動し直す
+   - cloudflared: トンネルを **起動** する。URLのドメインが変わるため、**URL共有** タブから改めて出演者にURLを共有する
+   - FFmpeg: 次回の計測から新しい exe が使われる
+
+> **注意:** **%PATH%から解決** と **絶対パス指定** で使う exe は、注記にあるとおりプラグインが検証しません。入手元が上記の公式サイトであることを自分で確かめ、配布元が公開しているハッシュがあれば照合してください。
+
+プラグインの修正版が出たら、更新したうえで **cloudflaredパス**・**ffmpegパス** を **自動取得** に戻してください。自動取得に戻すと、新しい承認版が取得され、起動のたびに検証されるようになります。
+
 ---
 
 ## 開発者向け情報
