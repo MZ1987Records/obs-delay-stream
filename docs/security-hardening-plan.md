@@ -40,7 +40,7 @@ PR #53・PR #55・PR #56で実装し、いずれもmainへマージした。各�
 - cloudflaredとFFmpegの起動を`core/child-process`の`launch_child_process`にまとめた。継承させるのは標準入力・標準出力・標準エラー出力だけ（`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`）で、渡さない標準ハンドルはNULで補い、継承できないハンドルは拒否する。一時停止状態で起動してプロセス全体で1つのJob Object（`KILL_ON_JOB_CLOSE`）へ登録してから再開し、再開に失敗したら子を終了して失敗を返す。Job登録に成功していれば、OBSが異常終了しても子プロセスは残らない。登録に失敗した環境では起動を続けてログに警告を残し、READMEでその場合の対処を案内する。
 - FFmpegの入力を、入力形式RTSP（`-f rtsp`）、音声だけのSETUP（`-allowed_media_types audio`）、プロトコル`tcp,tls`（`-protocol_whitelist`）、デコーダー`aac,opus`（`-codec_whitelist`）に限った。プロトコル名はFFmpeg n9.0.2のソースで確認した。
 - 子プロセスの作業ディレクトリをexeの配置先にし、OBSのカレントディレクトリを引き継がない（DLLの探索先からOBSの起動場所を外す）（未マージ）。
-- FFmpegのstderrの保持を4 KiBまでにし、UIに出すエラー行からURLのuserinfo（`user:pass@`）を伏せる（`core/string-format.hpp`の`redact_url_userinfo`）（未マージ）。
+- FFmpegのstderrの保持を4 KiBまでにし、1回に読む量も64 KiBに限って計測ループのタイムアウト・キャンセル確認へ必ず戻す。UIに出すエラー行からURLのuserinfo（`user:pass@`）を伏せ、上限で切れてホスト部が末尾まで続くURLは`://`以降をすべて伏せる（`core/string-format.hpp`の`redact_url_userinfo`）（未マージ）。
 - cloudflaredを`--loglevel info`で起動する。debugでは要求URL（配信ID・チャンネルコードを含む）をログに書くため、config.ymlや環境変数`TUNNEL_LOGLEVEL`で上書きされないよう明示する（未マージ）。
 
 **外部実行ファイル（P1）**
