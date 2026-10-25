@@ -293,6 +293,16 @@ int main(int argc, char **argv) {
 			  "child runs in the exe directory");
 	}
 
+	// URL の userinfo を伏せる（パスワード中の @ も含む）。それ以外は変えない
+	check(redact_url_userinfo("rtsp://user:pa@ss@host:554/live/key: 401") == "rtsp://***@host:554/live/key: 401",
+		  "redact userinfo with @ in password");
+	check(redact_url_userinfo("a rtsps://u@h/x and rtsp://v:w@h2") == "a rtsps://***@h/x and rtsp://***@h2",
+		  "redact every url");
+	check(redact_url_userinfo("rtsp://host/live@x Connection refused") == "rtsp://host/live@x Connection refused",
+		  "keep @ in path");
+	check(redact_url_userinfo("Connection refused") == "Connection refused", "keep text without url");
+	check(redact_url_userinfo("rtsp://") == "rtsp://", "keep empty authority");
+
 	// 継承できないハンドルを渡すと、黙って除外せずに失敗する
 	{
 		HANDLE rd = nullptr, wr = nullptr;

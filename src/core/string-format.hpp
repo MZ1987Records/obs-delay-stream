@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <string>
@@ -60,6 +61,22 @@ namespace ods::core {
 		quoted.append(backslashes * 2, '\\');
 		quoted += '"';
 		return quoted;
+	}
+
+	/// 文字列中の URL の userinfo（scheme://user:pass@host の user:pass）を *** に置き換える。
+	/// FFmpeg のエラー行は入力 URL を含み得るため、UI に出す前に通す。パスワード中の @ を
+	/// 取りこぼさないよう、ホスト部の終わりまでで最後の @ を区切りとする（FFmpeg の解析と同じ）。
+	inline std::string redact_url_userinfo(std::string text) {
+		for (size_t pos = text.find("://"); pos != std::string::npos; pos = text.find("://", pos)) {
+			pos += 3;
+			const size_t end = (std::min)(text.find_first_of("/?# \t\r\n", pos), text.size()); // windows.h の min 対策
+			const size_t at  = text.rfind('@', end - 1);
+			if (end > pos && at != std::string::npos && at >= pos) {
+				text.replace(pos, at - pos, "***");
+				pos += 3;
+			}
+		}
+		return text;
 	}
 
 } // namespace ods::core

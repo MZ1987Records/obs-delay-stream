@@ -342,6 +342,10 @@ namespace ods::network {
 			return true;
 		}
 
+		// 使うのは先頭行だけ。エラー行を出し続けるストリームでもメモリを使い切らないよう保持量を
+		// 限る。FFmpeg が書き込みで止まらないよう、超過分も読み捨てる。
+		constexpr size_t kMaxStderrBytes = 4096;
+
 		void drain_text_pipe(HANDLE pipe, std::string &dst) {
 			if (!pipe || pipe == INVALID_HANDLE_VALUE) return;
 			DWORD avail = 0;
@@ -350,7 +354,7 @@ namespace ods::network {
 				DWORD to_read = std::min<DWORD>(avail, static_cast<DWORD>(sizeof(buf)));
 				DWORD read    = 0;
 				if (!ReadFile(pipe, buf, to_read, &read, nullptr) || read == 0) break;
-				dst.append(buf, buf + read);
+				if (dst.size() < kMaxStderrBytes) dst.append(buf, std::min<size_t>(read, kMaxStderrBytes - dst.size()));
 			}
 		}
 
@@ -546,7 +550,7 @@ namespace ods::network {
 		}
 		if (!result.valid) {
 			const std::string ffmpeg_err = first_non_empty_line(ffmpeg_stderr);
-			if (!ffmpeg_err.empty()) result.error_msg += "\nffmpeg: " + ffmpeg_err;
+			if (!ffmpeg_err.empty()) result.error_msg += "\nffmpeg: " + redact_url_userinfo(ffmpeg_err);
 		}
 		return result;
 	}
