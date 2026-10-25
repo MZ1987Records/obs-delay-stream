@@ -7,6 +7,8 @@ on:
     tags:
       - "v*.*.*"
   pull_request:
+  # binary-watch が GITHUB_TOKEN で作った PR では pull_request が動かないため、そこから起動する。
+  workflow_dispatch:
 
 # 同じブランチ／PR への連続 push は古い実行を取り消す。タグのリリースビルドは取り消さない。
 concurrency:
