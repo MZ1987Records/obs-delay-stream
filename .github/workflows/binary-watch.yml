@@ -1,0 +1,131 @@
+name: binary-watch
+
+# cloudflared と FFmpeg の承認版（src/core/approved-binaries.hpp）を上流と毎日比べる。
+# 新しい版や承認版の消失を見つけたら、承認一覧を書き換えた PR を作る。承認・マージ・リリースは人が行う。
+# 判定と書き換えは .github/scripts/binary_watch.py にある（`selftest` で取得なしに確かめられる）。
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # 毎日 12:17 JST
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: binary-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # 上流から取得するジョブには書き込み権限を渡さない。
+    permissions:
+      contents: read
+    outputs:
+      result: ${{ steps.check.outputs.result }}
+      updates: ${{ steps.check.outputs.updates }}
+      alerts: ${{ steps.check.outputs.alerts }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Self-check
+        run: python3 -I .github/scripts/binary_watch.py selftest
+
+      - name: Check upstream
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # 取得物はスクリプトと別のディレクトリに置き、ハッシュを計算するだけで実行しない。
+          python3 -I .github/scripts/binary_watch.py check \
+            --download-dir "$RUNNER_TEMP/binary-watch-download" --out "$RUNNER_TEMP/result.json"
+          {
+            echo "result=$(cat "$RUNNER_TEMP/result.json")"
+            echo "updates=$(jq '.updates | length' "$RUNNER_TEMP/result.json")"
+            echo "alerts=$(jq '.alerts | length' "$RUNNER_TEMP/result.json")"
+          } >> "$GITHUB_OUTPUT"
+
+  propose:
+    needs: check
+    if: needs.check.outputs.updates != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write # build を workflow_dispatch で起動する
+      issues: write # PR を作れなかったときに Issue で知らせる
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Open pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.check.outputs.result }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/result.json"
+          printf '%s' "$RESULT" > "$result"
+          start=$(git rev-parse HEAD)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # gh の失敗を「作成済み」と取り違えないよう、結果は代入で受けて set -e で止める。
+          issues=$(gh issue list --state all --search "author:app/github-actions" --limit 200 --json title)
+          for i in $(seq 0 $(($(jq '.updates | length' "$result") - 1))); do
+            u() { jq -r ".updates[$i].$1" "$result"; }
+            name=$(u name); branch=$(u branch); title=$(u title)
+            # フォークの同名ブランチの PR では止めない。
+            prs=$(gh pr list --state all --head "$branch" --json isCrossRepository --jq 'map(select(.isCrossRepository | not)) | length')
+            # 閉じた PR・Issue も数え、人が却下した候補を毎日作り直さない。
+            if [ "$prs" != 0 ] || jq -e --arg t "$title" 'any(.[]; .title == $t)' <<< "$issues" > /dev/null; then
+              echo "::notice::$branch は作成済み"
+              continue
+            fi
+            git checkout --quiet -B "$branch" "$start"
+            python3 -I .github/scripts/binary_watch.py apply --result "$result" --name "$name"
+            git commit --quiet -am "$(u commit_message)"
+            # PR を作る前に失敗した前回の実行が残したブランチは上書きする。
+            git push --force origin "HEAD:refs/heads/$branch"
+            u body > "$RUNNER_TEMP/body.md"
+            if ! gh pr create --base "$BASE" --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
+              # リポジトリ設定「Allow GitHub Actions to create and approve pull requests」が無効だと PR を作れない。
+              compare="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$BASE...$branch?expand=1"
+              printf '> [!IMPORTANT]\n> ワークフローから PR を作れなかったため Issue で知らせる。ブランチ `%s` は push 済みで、PR は %s から作れる。\n\n' \
+                "$branch" "$compare" | cat - "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/issue.md"
+              gh issue create --title "$title" --body-file "$RUNNER_TEMP/issue.md"
+            fi
+            # GITHUB_TOKEN で作った PR では pull_request の build が動かないため、workflow_dispatch で起動する。
+            gh workflow run build.yml --ref "$branch"
+          done
+
+  notify:
+    needs: check
+    if: needs.check.outputs.alerts != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.check.outputs.result }}
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/result.json"
+          printf '%s' "$RESULT" > "$result"
+          existing=$(gh issue list --state all --search "author:app/github-actions" --limit 200 --json title)
+          for i in $(seq 0 $(($(jq '.alerts | length' "$result") - 1))); do
+            title=$(jq -r ".alerts[$i].title" "$result")
+            # 警告の題には版やタグを含めているため、同じ題の Issue は閉じたものも含めて作り直さない。
+            if jq -e --arg t "$title" 'any(.[]; .title == $t)' <<< "$existing" > /dev/null; then
+              echo "::notice::作成済み: $title"
+              continue
+            fi
+            jq -r ".alerts[$i].body" "$result" > "$RUNNER_TEMP/alert.md"
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/alert.md"
+          done
