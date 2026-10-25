@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(obs-delay-stream VERSION 8.2.0)
 
+# プレリリースの表示用 suffix（例: -rc.1）。CI がタグから渡す。版の比較と設定互換の判定は
+# - 以降を読まないため、表示・ログ・保存される版名にだけ付く。
+set(ODS_VERSION_SUFFIX "" CACHE STRING "Pre-release suffix of the displayed version (e.g. -rc.1)")
+if(ODS_VERSION_SUFFIX AND NOT ODS_VERSION_SUFFIX MATCHES "^-[0-9A-Za-z.]+$")
+  message(FATAL_ERROR "ODS_VERSION_SUFFIX must look like -rc.1: ${ODS_VERSION_SUFFIX}")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -217,7 +224,7 @@ target_compile_definitions(obs-delay-stream PRIVATE
   NOMINMAX
   # Tell SIMDe to NOT redefine standard integer types
   SIMDE_NO_NATIVE
-  PLUGIN_VERSION="${PROJECT_VERSION}"
+  PLUGIN_VERSION="${PROJECT_VERSION}${ODS_VERSION_SUFFIX}"
 )
 
 # ---- Qt stepper widget ----

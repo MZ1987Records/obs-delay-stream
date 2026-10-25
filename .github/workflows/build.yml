@@ -31,6 +31,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Resolve plugin version suffix
+        shell: pwsh
+        run: |
+          # 版の正は CMakeLists.txt の project(VERSION)。タグの X.Y.Z がそれと食い違えば、
+          # 表示と設定互換の判定が別の版になるため、OBS のビルドより前に止める。
+          # プレリリースのタグ（例: v9.0.0-rc.1）は suffix を表示用の版へ渡す。
+          $cmake = Get-Content "$env:GITHUB_WORKSPACE/CMakeLists.txt" -Raw
+          if ($cmake -notmatch 'project\(obs-delay-stream VERSION (\d+\.\d+\.\d+)\)') { throw "project VERSION not found in CMakeLists.txt" }
+          $projectVersion = $Matches[1]
+          $suffix = ""
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+            if ($tag -notmatch '^v(\d+\.\d+\.\d+)(-[0-9A-Za-z.]+)?$') { throw "Unexpected tag format: $tag" }
+            if ($Matches[1] -ne $projectVersion) { throw "Tag $tag does not match CMakeLists.txt VERSION $projectVersion" }
+            if ($Matches[2]) { $suffix = $Matches[2] }
+          }
+          Add-Content $env:GITHUB_ENV "ODS_VERSION_SUFFIX=$suffix"
+          Write-Host "Plugin version: $projectVersion$suffix"
+
       - name: Resolve target OBS ref (single source of truth)
         shell: pwsh
         run: |
@@ -304,7 +323,7 @@ jobs:
       - name: Configure plugin (ProgramData layout)
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=OFF
+          cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=OFF -DODS_VERSION_SUFFIX="$env:ODS_VERSION_SUFFIX"
 
       - name: Build plugin
         shell: pwsh
@@ -350,7 +369,7 @@ jobs:
       - name: Configure legacy layout
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=ON
+          cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DOBS_SOURCE_DIR="$env:GITHUB_WORKSPACE/third_party/obs-studio" -DOBS_PLUGIN_LEGACY_INSTALL=ON -DODS_VERSION_SUFFIX="$env:ODS_VERSION_SUFFIX"
 
       - name: Install to dist (Program Files legacy layout)
         shell: pwsh
