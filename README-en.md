@@ -132,6 +132,28 @@ If a URL leaks to someone outside the performers, restarting the tunnel also mak
 4. In the **RTSP Measurement** tab, measure OBS broadcast latency (start OBS streaming beforehand).
 5. If needed, use the **Fine Tune** tab to adjust environment latency and avatar latency.
 
+### When a Vulnerability Is Found in cloudflared or FFmpeg
+
+The cloudflared and FFmpeg used in **Auto** mode are pinned to versions the plugin has approved. The approved versions are shown in the notes under **cloudflared path** on the **Tunnel** tab and **ffmpeg path** on the **RTSP Measurement** tab. If a vulnerability is found in an approved version and a fixed plugin release is not out yet, you can switch to an exe you updated yourself as follows.
+
+1. Stop the affected exe.
+   - cloudflared: Stop the tunnel as described in [Stopping and Resuming Public Access](#stopping-and-resuming-public-access).
+   - FFmpeg: Do not run measurements on the **RTSP Measurement** tab (FFmpeg runs only while measuring).
+2. Install the latest version from the official source.
+   - cloudflared: Download `cloudflared-windows-amd64.exe` from Cloudflare's official GitHub releases (<https://github.com/cloudflare/cloudflared/releases>), or install it with `winget install --id Cloudflare.cloudflared`.
+   - FFmpeg: Download a win64 ZIP from one of the Windows builds (gyan.dev or BtbN) linked from the official FFmpeg download page (<https://ffmpeg.org/download.html>), extract it, and use `bin\ffmpeg.exe`.
+3. Switch the plugin's exe path setting.
+   - In the **cloudflared path** or **ffmpeg path** dropdown, choose one of the following.
+   - **Resolve via %PATH%**: Uses `cloudflared.exe` / `ffmpeg.exe` in a folder on PATH. The file name must be exactly this. If you changed PATH or installed with winget, restart OBS before choosing this. To check which exe will be used, run `where cloudflared` / `where ffmpeg` in Command Prompt.
+   - **Absolute path**: Enter the full path to the exe in the input field (for example, `C:\tools\cloudflared\cloudflared-windows-amd64.exe`).
+4. Start again with the new exe.
+   - cloudflared: **Start** the tunnel. The URL domain changes, so share the URL list with performers again from the **URL Sharing** tab.
+   - FFmpeg: The new exe is used from the next measurement.
+
+> **Note:** The plugin does not verify the exe used with **Resolve via %PATH%** or **Absolute path**, as the note says. Confirm yourself that it came from the official source above, and check it against a hash if the distributor publishes one.
+
+Once a fixed plugin release is out, update the plugin and set **cloudflared path** and **ffmpeg path** back to **Auto**. Back in Auto mode, the new approved version is downloaded and verified before each launch.
+
 ---
 
 ## Developer Information
