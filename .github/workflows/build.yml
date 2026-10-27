@@ -434,7 +434,8 @@ jobs:
 
   release:
     needs: build
-    if: github.ref_type == 'tag'
+    # workflow_dispatch をタグに対して起動しても、公開済みリリースを再ビルド物で上書きしない。
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
