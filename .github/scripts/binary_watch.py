@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import traceback
 import urllib.error
 import urllib.request
 import zipfile
@@ -29,6 +30,7 @@ TOKEN_RE = re.compile(r'"((?:[^"\\]|\\.)*)"|(\d+)|(nullptr)')
 CF_REPO = 'cloudflare/cloudflared'
 CF_ASSET = 'cloudflared-windows-amd64.exe'
 CF_VERSION_RE = re.compile(r'\d{4}\.\d{1,2}\.\d{1,3}')
+CF_DATE_RE = re.compile(r'（(\d{4}-\d{2}-\d{2}) 公開）')
 FF_REPO = 'BtbN/FFmpeg-Builds'
 FF_TAG_RE = re.compile(r'autobuild-(\d{4})-(\d{2})-\d{2}-\d{2}-\d{2}')
 # win64 の LGPL 静的ビルド。shared・GPL・master（N-xxxxx）・latest は一致しない。
@@ -281,7 +283,7 @@ def check_cloudflared(approved, dl, today, updates, alerts, summary):
     if not DATE_RE.fullmatch(date):
         raise ValueError(f'unexpected published_at: {date!r}')
     pairs = [(old['version'], ver), (old['download_size'], size), (old['download_sha256'], sha)]
-    old_date = re.search(r'（(\d{4}-\d{2}-\d{2}) 公開）', old['comment'])
+    old_date = CF_DATE_RE.search(old['comment'])
     if old_date:
         pairs.append((old_date[1], date))
     expected = {'version': ver, 'url': url, 'download_size': size, 'download_sha256': sha, 'exe_size': size, 'exe_sha256': sha}
@@ -387,14 +389,24 @@ def cmd_check(args):
     approved = parse_approved(Path(args.hpp).read_text(encoding='utf-8'))
     today = datetime.datetime.now(datetime.timezone.utc).date()
     updates, alerts, summary = [], [], []
-    for fn in (check_cloudflared, check_ffmpeg):
-        fn(approved, Path(args.download_dir), today, updates, alerts, summary)
+    failed = False
+    for name, fn in (('cloudflared', check_cloudflared), ('FFmpeg', check_ffmpeg)):
+        # 片方の失敗（上流の形式変更や通信エラー）で、もう片方の候補と警告まで失わないようにする。
+        try:
+            fn(approved, Path(args.download_dir), today, updates, alerts, summary)
+        except Exception as e:
+            traceback.print_exc()
+            print(f'::error::{name} の確認に失敗した: {e!r}')
+            summary.append(f'- {name}: 確認に失敗した（{e!r}）')
+            failed = True
     Path(args.out).write_text(json.dumps({'updates': updates, 'alerts': alerts}, ensure_ascii=False), encoding='utf-8')
     text = '## binary-watch\n\n' + '\n'.join(summary) + '\n' + ''.join(f'- 警告: {a["title"]}\n' for a in alerts)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
             f.write(text)
     print(text)
+    # 結果を書いたうえで失敗を返し、実行を失敗扱いにして気づけるようにする。
+    return 1 if failed else 0
 
 
 def cmd_apply(args):
@@ -411,8 +423,12 @@ def cmd_selftest(args):
     approved = parse_approved(hpp_text)
     cf, ff = approved['kApprovedCloudflared'], approved['kApprovedFfmpeg']
     assert cf['exe_in_archive'] is None and SHA_RE.fullmatch(cf['exe_sha256']), cf
-    assert ff['url'].endswith('-win64-lgpl-9.0.zip') and ff['exe_in_archive'].endswith('\\bin\\ffmpeg.exe'), ff
-    assert ff['version'] in ff['url'] and ff['version'] in ff['exe_in_archive'], ff
+    # 承認値そのもの（版・タグ・系統）は直書きしない。承認版を更新しても selftest が通るようにする。
+    ff_tag, ff_asset = ff['url'].split('/')[-2:]
+    fm = FF_ASSET_RE.fullmatch(ff_asset)
+    assert FF_TAG_RE.fullmatch(ff_tag) and fm and fm[1] == ff['version'], ff
+    assert ff['exe_in_archive'] == ff_asset.removesuffix('.zip') + '\\bin\\ffmpeg.exe', ff
+    ff_series = f'{fm[5]}.{fm[6]}'
 
     assert version_key('2026.10.10') > version_key('2026.10.3') > version_key('2026.9.30')
     tags = ['latest', 'autobuild-2026-10-24-13-02', 'autobuild-2026-09-30-13-08', 'autobuild-2026-09-29-13-00',
@@ -433,25 +449,28 @@ def cmd_selftest(args):
     assert verify_download(1, 'a' * 64, 1, {'x': 'a' * 64, 'y': 'b' * 64})
     assert replace_tokens('x55329336 55329336 a55329336', [(55329336, 1)]) == 'x55329336 1 a55329336'
 
-    # 両方を書き換え、相手のブロック・行に触れないことを確かめる。
+    # 両方を書き換え、相手のブロック・行に触れないことを確かめる。新しい値は承認値と重ならないものにする。
     new_sha, new_exe_sha = 'a' * 64, 'b' * 64
+    cf_ver, cf_date = '9999.1.0', '2099-01-02'
+    old_date = CF_DATE_RE.search(cf['comment'])
+    assert old_date, cf['comment']
     cf_upd = {'id': 'kApprovedCloudflared',
-        'pairs': [(cf['version'], '2026.11.0'), (cf['download_size'], 123), (cf['download_sha256'], new_sha), ('2026-10-21', '2026-11-02')],
-        'expected': {'version': '2026.11.0', 'download_size': 123, 'exe_size': 123, 'exe_sha256': new_sha,
-            'url': cf['url'].replace(cf['version'], '2026.11.0')}}
+        'pairs': [(cf['version'], cf_ver), (cf['download_size'], 123), (cf['download_sha256'], new_sha), (old_date[1], cf_date)],
+        'expected': {'version': cf_ver, 'download_size': 123, 'exe_size': 123, 'exe_sha256': new_sha,
+            'url': cf['url'].replace(cf['version'], cf_ver)}}
     h1, d1 = apply_update(hpp_text, deps_text, cf_upd)
-    assert '2026-11-02 公開' in h1 and '2026.11.0（2026-11-02 公開）' in d1 and '（123 bytes）' in d1
-    ver = 'n9.0.3-2-gabcdef1234'
+    assert f'{cf_date} 公開' in h1 and f'{cf_ver}（{cf_date} 公開）' in d1 and '（123 bytes）' in d1
+    ver, tag = f'n{ff_series}.99-2-gabcdef1234', 'autobuild-2099-01-31-13-00'
     ff_upd = {'id': 'kApprovedFfmpeg',
-        'pairs': [(ff['version'], ver), ('autobuild-2026-09-30-13-08', 'autobuild-2026-11-30-13-00'),
+        'pairs': [(ff['version'], ver), (ff_tag, tag),
             (ff['download_size'], 1234567), (ff['download_sha256'], new_sha), (ff['exe_size'], 7654321), (ff['exe_sha256'], new_exe_sha)],
         'expected': {'version': ver, 'download_size': 1234567, 'exe_size': 7654321, 'exe_sha256': new_exe_sha,
-            'url': f'https://github.com/{FF_REPO}/releases/download/autobuild-2026-11-30-13-00/ffmpeg-{ver}-win64-lgpl-9.0.zip',
-            'exe_in_archive': f'ffmpeg-{ver}-win64-lgpl-9.0\\bin\\ffmpeg.exe'}}
+            'url': f'https://github.com/{FF_REPO}/releases/download/{tag}/ffmpeg-{ver}-win64-lgpl-{ff_series}.zip',
+            'exe_in_archive': f'ffmpeg-{ver}-win64-lgpl-{ff_series}\\bin\\ffmpeg.exe'}}
     h2, d2 = apply_update(h1, d1, ff_upd)
     after = parse_approved(h2)
-    assert after['kApprovedCloudflared']['version'] == '2026.11.0' and after['kApprovedFfmpeg']['version'] == ver
-    assert '1,234,567 bytes' in d2 and '7,654,321 bytes' in d2 and ff['version'] not in d2 and '2026.11.0' in d2
+    assert after['kApprovedCloudflared']['version'] == cf_ver and after['kApprovedFfmpeg']['version'] == ver
+    assert '1,234,567 bytes' in d2 and '7,654,321 bytes' in d2 and ff['version'] not in d2 and cf_ver in d2
     assert h2.count('\n') == hpp_text.count('\n') and d2.count('\n') == deps_text.count('\n')
     try:
         apply_update(hpp_text, deps_text, dict(ff_upd, expected={'version': 'n0'}))
@@ -474,7 +493,7 @@ def main():
     a.add_argument('--name', required=True)
     sub.add_parser('selftest')
     args = p.parse_args()
-    {'check': cmd_check, 'apply': cmd_apply, 'selftest': cmd_selftest}[args.cmd](args)
+    return {'check': cmd_check, 'apply': cmd_apply, 'selftest': cmd_selftest}[args.cmd](args)
 
 
 if __name__ == '__main__':

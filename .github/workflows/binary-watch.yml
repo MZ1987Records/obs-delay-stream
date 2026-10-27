@@ -39,17 +39,27 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           # 取得物はスクリプトと別のディレクトリに置き、ハッシュを計算するだけで実行しない。
+          # 片方の確認が失敗しても、もう片方の結果は書かれる。出力を渡してから次のステップで失敗させる。
+          status=0
           python3 -I .github/scripts/binary_watch.py check \
-            --download-dir "$RUNNER_TEMP/binary-watch-download" --out "$RUNNER_TEMP/result.json"
+            --download-dir "$RUNNER_TEMP/binary-watch-download" --out "$RUNNER_TEMP/result.json" || status=$?
           {
             echo "result=$(cat "$RUNNER_TEMP/result.json")"
             echo "updates=$(jq '.updates | length' "$RUNNER_TEMP/result.json")"
             echo "alerts=$(jq '.alerts | length' "$RUNNER_TEMP/result.json")"
+            echo "status=$status"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Fail if a check failed
+        if: steps.check.outputs.status != '0'
+        run: |
+          echo "::error::上流の確認の一部が失敗した。Check upstream の記録を確かめる。"
+          exit 1
 
   propose:
     needs: check
-    if: needs.check.outputs.updates != '0'
+    # check が一部失敗しても、作れた候補は PR にする。
+    if: ${{ !cancelled() && fromJSON(needs.check.outputs.updates || '0') > 0 }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -104,7 +114,7 @@ jobs:
 
   notify:
     needs: check
-    if: needs.check.outputs.alerts != '0'
+    if: ${{ !cancelled() && fromJSON(needs.check.outputs.alerts || '0') > 0 }}
     runs-on: ubuntu-latest
     permissions:
       issues: write
