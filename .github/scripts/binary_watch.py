@@ -17,6 +17,7 @@ import re
 import sys
 import traceback
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -132,14 +133,22 @@ def ffmpeg_ref(version):
     return m[4] if m and m[4] else version
 
 
+def verify_refs(refs):
+    missing = [k for k, v in refs.items() if not v]
+    if missing:
+        return f'照合に必要な {"・".join(missing)} が上流にない'
+    if len(set(refs.values())) > 1:
+        return '上流に記載された SHA-256 同士が違う'
+    return None
+
+
 def verify_download(size, sha, api_size, refs):
     """取得物を上流の記載と照合する。問題があれば理由を、なければ None を返す。"""
     if size != api_size:
         return f'サイズ {size:,} bytes が GitHub API の記載 {api_size:,} bytes と違う'
-    known = {k: v for k, v in refs.items() if v}
-    if not known:
-        return '照合できる SHA-256 が上流にない（GitHub API の digest もリリース本文の記載もない）'
-    bad = [k for k, v in known.items() if v != sha]
+    if problem := verify_refs(refs):
+        return problem
+    bad = [k for k, v in refs.items() if v != sha]
     if bad:
         return f'SHA-256 `{sha}` が {"・".join(bad)} と違う'
     return None
@@ -196,6 +205,37 @@ def digest_of(asset):
     return d.removeprefix('sha256:') if SHA_RE.fullmatch(d.removeprefix('sha256:')) else None
 
 
+def checksum_refs(repo, release, asset):
+    refs = {'GitHub API の digest': digest_of(asset)}
+    if repo == CF_REPO:
+        m = re.search(rf'^{re.escape(CF_ASSET)}:\s*([0-9a-f]{{64}})\s*$', (release or {}).get('body') or '', re.M)
+        refs['リリース本文のチェックサム'] = m and m[1]
+    return refs
+
+
+def update_title(name, old_label, new_label):
+    return f'{name} の承認版を {old_label} から {new_label} に更新する（自動検知）'
+
+
+def already_reported(branch, title):
+    """同じ候補の PR または Issue があれば、取得物を毎日ダウンロードし直さない。"""
+    repo = os.environ.get('GITHUB_REPOSITORY')
+    if not repo:
+        return False
+    try:
+        owner = repo.split('/', 1)[0]
+        head = urllib.parse.quote(f'{owner}:{branch}', safe='')
+        if api(f'repos/{repo}/pulls?state=all&head={head}&per_page=100'):
+            return True
+        query = urllib.parse.quote(f'repo:{repo} is:issue in:title "{title}"', safe='')
+        issues = api(f'search/issues?q={query}&per_page=100') or {}
+        return any(item.get('title') == title for item in issues.get('items', []))
+    except Exception as e:
+        # 重複確認の失敗で本来の上流確認を止めず、従来どおり取得して後段でも重複を確かめる。
+        print(f'::warning::候補 {branch} の重複確認に失敗したため再取得する: {e!r}')
+        return False
+
+
 # ---- 報告文 ----
 
 def run_url():
@@ -212,7 +252,8 @@ def alert(title, body):
 def check_approved(repo, tag, asset_name, old, alerts):
     """承認版が上流にまだあり、記載が承認値と同じかを確かめる。消えていれば警告文を返す。"""
     label = f'{old["name"]} {old["version"]}'
-    asset = find_asset(api(f'repos/{repo}/releases/tags/{tag}'), asset_name)
+    release = api(f'repos/{repo}/releases/tags/{tag}')
+    asset = find_asset(release, asset_name)
     if asset is None:
         body = (f'承認版の取得元 {old["url"]} が上流のリリースから消えている。'
             'Auto モードで新しく取得する利用者は使えなくなる（取得済みで照合に通る exe はそのまま使える）。\n\n'
@@ -220,12 +261,11 @@ def check_approved(repo, tag, asset_name, old, alerts):
             '候補が無ければ手動で新しい版を選び、承認一覧と docs/dependencies.md を更新する。')
         alerts.append(alert(f'承認版の {label} が上流から取得できない', body))
         return body
-    digest = digest_of(asset)
-    if asset['size'] != old['download_size'] or (digest and digest != old['download_sha256']):
+    problem = verify_download(old['download_size'], old['download_sha256'], asset['size'], checksum_refs(repo, release, asset))
+    if problem:
         alerts.append(alert(
             f'承認版の {label} の上流の記載が承認値と違う',
-            f'上流の {asset_name} は {asset["size"]:,} bytes、digest `{digest}`。'
-            f'承認値は {old["download_size"]:,} bytes、`{old["download_sha256"]}`。'
+            f'上流の {asset_name}: {problem}。承認値は {old["download_size"]:,} bytes、`{old["download_sha256"]}`。'
             '上流で取得物が差し替えられた可能性がある。告知を確かめ、必要なら公開停止を判断する（docs/security-hardening-plan.md 10 章）。'))
     return None
 
@@ -243,13 +283,13 @@ def make_update(name, ident, old_label, new_label, branch, pairs, expected, rows
     lines += [''] + [f'- {x}' for x in links] + ['', '## 承認前に確かめること', '']
     lines += [f'- [ ] {x}' for x in checks]
     lines += ['', '## CI について', '',
-        f'GITHUB_TOKEN で作った PR では `pull_request` の build が動かない。代わりに build を workflow_dispatch で `{branch}` に対して起動した'
+        f'GITHUB_TOKEN で作った PR の `pull_request` build は承認待ちになる。人の承認を待たず確認できるよう、build を workflow_dispatch で `{branch}` に対して起動した'
         f'（[実行一覧](https://github.com/{repo}/actions/workflows/build.yml?query=branch%3A{branch})）。'
-        'PR のチェック欄に結果を出したいときは、PR を一度閉じて開き直す（人の操作なので `pull_request` の build が動く）。',
+        '`pull_request` 側も実行するときは、PR のチェック欄でワークフロー実行を承認する。',
         '', '同じ候補の PR は、閉じたものも含めて一度しか作らない。却下するときはこの PR を閉じればよい。']
     return {
         'name': name, 'id': ident, 'branch': branch,
-        'title': f'{name} の承認版を {old_label} から {new_label} に更新する（自動検知）',
+        'title': update_title(name, old_label, new_label),
         'commit_message': f'chore(deps): {name} の承認版を {new_label} に更新する\n\nbinary-watch ワークフローが上流の変化を検知して書き換えた。',
         'pairs': pairs, 'expected': expected, 'body': '\n'.join(lines) + '\n',
     }
@@ -270,10 +310,19 @@ def check_cloudflared(approved, dl, today, updates, alerts, summary):
         alerts.append(alert(f'cloudflared {ver} に {CF_ASSET} がない', f'上流の最新 {ver} に Windows amd64 の exe が無い。リリースを確かめる。'))
         summary.append(f'- cloudflared: {ver} に {CF_ASSET} が無い')
         return
+    refs = checksum_refs(CF_REPO, latest, asset)
+    problem = verify_refs(refs)
+    if problem:
+        alerts.append(alert(f'cloudflared {ver} を上流の記載で照合できない', f'{asset["browser_download_url"]}: {problem}。PR は作らない。'))
+        summary.append(f'- cloudflared: {ver} の照合に失敗（{problem}）')
+        return
+    branch = f'binary-watch/cloudflared-{ver}'
+    title = update_title('cloudflared', old['version'], ver)
+    if already_reported(branch, title):
+        summary.append(f'- cloudflared: {ver} の候補は報告済み（再取得しない）')
+        return
     url = f'https://github.com/{CF_REPO}/releases/download/{ver}/{CF_ASSET}'
     size, sha = download(url, dl / 'cloudflared' / ver / CF_ASSET)
-    m = re.search(rf'^{re.escape(CF_ASSET)}:\s*([0-9a-f]{{64}})\s*$', latest.get('body') or '', re.M)
-    refs = {'GitHub API の digest': digest_of(asset), 'リリース本文のチェックサム': m and m[1]}
     problem = verify_download(size, sha, asset['size'], refs)
     if problem:
         alerts.append(alert(f'cloudflared {ver} の取得物が上流の記載と一致しない', f'{url}: {problem}。PR は作らない。'))
@@ -302,7 +351,7 @@ def check_cloudflared(approved, dl, today, updates, alerts, summary):
         'build ワークフローが通る（下記）',
         '実機で Quick Tunnel の公開と停止ができる',
         f'`{DEPS}` の確認日を更新する']
-    updates.append(make_update('cloudflared', 'kApprovedCloudflared', old['version'], ver, f'binary-watch/cloudflared-{ver}',
+    updates.append(make_update('cloudflared', 'kApprovedCloudflared', old['version'], ver, branch,
         pairs, expected, rows, links, checks, gone))
     summary.append(f'- cloudflared: {old["version"]} → {ver} の候補を作った')
 
@@ -342,11 +391,22 @@ def check_ffmpeg(approved, dl, today, updates, alerts, summary):
     if ver == old['version'] and not gone:
         summary.append(f'- FFmpeg: 月末ビルド {tag} も {ver} のまま（承認版と同じ）')
         return
+    asset = find_asset(rel, asset_name)
+    refs = checksum_refs(FF_REPO, rel, asset)
+    problem = verify_refs(refs)
+    if problem:
+        alerts.append(alert(f'FFmpeg {ver} を上流の記載で照合できない', f'{asset["browser_download_url"]}: {problem}。PR は作らない。'))
+        summary.append(f'- FFmpeg: {ver} の照合に失敗（{problem}）')
+        return
+    branch_name = f'binary-watch/ffmpeg-{tag}'
+    old_label, new_label = f'{old["version"]}（{old_tag}）', f'{ver}（{tag}）'
+    if already_reported(branch_name, update_title('FFmpeg', old_label, new_label)):
+        summary.append(f'- FFmpeg: {ver}（{tag}）の候補は報告済み（再取得しない）')
+        return
     url = f'https://github.com/{FF_REPO}/releases/download/{tag}/{asset_name}'
     zip_path = dl / 'ffmpeg' / tag / asset_name
     size, sha = download(url, zip_path)
-    asset = find_asset(rel, asset_name)
-    problem = verify_download(size, sha, asset['size'], {'GitHub API の digest': digest_of(asset)})
+    problem = verify_download(size, sha, asset['size'], refs)
     stem = asset_name.removesuffix('.zip')
     if not problem:
         try:
@@ -380,8 +440,8 @@ def check_ffmpeg(approved, dl, today, updates, alerts, summary):
         '実機で RTSP E2E 計測が動き、`ffmpeg -version` の構成が LGPL の静的ビルドのまま',
         f'`{DEPS}` の確認日を更新する']
     # 同じ版が別の月末ビルドに載ることがあるため、ブランチ名は月末ビルドのタグで決める。
-    updates.append(make_update('FFmpeg', 'kApprovedFfmpeg', f'{old["version"]}（{old_tag}）', f'{ver}（{tag}）',
-        f'binary-watch/ffmpeg-{tag}', pairs, expected, rows, links, checks, gone))
+    updates.append(make_update('FFmpeg', 'kApprovedFfmpeg', old_label, new_label,
+        branch_name, pairs, expected, rows, links, checks, gone))
     summary.append(f'- FFmpeg: {old["version"]} → {ver}（{tag}）の候補を作った')
 
 
@@ -444,9 +504,15 @@ def cmd_selftest(args):
     assert builds == {(9, 0): ('ffmpeg-n9.0.2-35-g9a9b70bb8c-win64-lgpl-9.0.zip', 'n9.0.2-35-g9a9b70bb8c'),
         (10, 0): ('ffmpeg-n10.0-win64-lgpl-10.0.zip', 'n10.0')}, builds
     assert ffmpeg_ref('n9.0.2-17-g2a571b6068') == '2a571b6068' and ffmpeg_ref('n9.0.3') == 'n9.0.3'
-    assert verify_download(1, 'a' * 64, 1, {'x': 'a' * 64, 'y': None}) is None
+    assert verify_download(1, 'a' * 64, 1, {'x': 'a' * 64}) is None
+    assert verify_refs({'x': 'a' * 64, 'y': 'a' * 64}) is None
+    assert verify_download(1, 'a' * 64, 1, {'x': 'a' * 64, 'y': None})
     assert verify_download(1, 'a' * 64, 1, {'x': None}) and verify_download(1, 'a' * 64, 2, {'x': 'a' * 64})
     assert verify_download(1, 'a' * 64, 1, {'x': 'a' * 64, 'y': 'b' * 64})
+    release = {'body': f'{CF_ASSET}: {"a" * 64}'}
+    asset = {'digest': f'sha256:{"a" * 64}'}
+    assert checksum_refs(CF_REPO, release, asset) == {
+        'GitHub API の digest': 'a' * 64, 'リリース本文のチェックサム': 'a' * 64}
     assert replace_tokens('x55329336 55329336 a55329336', [(55329336, 1)]) == 'x55329336 1 a55329336'
 
     # 両方を書き換え、相手のブロック・行に触れないことを確かめる。新しい値は承認値と重ならないものにする。

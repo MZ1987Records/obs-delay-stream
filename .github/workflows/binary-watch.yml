@@ -5,6 +5,12 @@ name: binary-watch
 # 判定と書き換えは .github/scripts/binary_watch.py にある（`selftest` で取得なしに確かめられる）。
 
 on:
+  pull_request:
+    paths:
+      - .github/scripts/binary_watch.py
+      - .github/workflows/binary-watch.yml
+      - src/core/approved-binaries.hpp
+      - docs/dependencies.md
   schedule:
     - cron: "17 3 * * *" # 毎日 12:17 JST
   workflow_dispatch:
@@ -16,11 +22,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Self-check
+        run: python3 -I .github/scripts/binary_watch.py selftest
+
   check:
+    needs: selftest
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # 上流から取得するジョブには書き込み権限を渡さない。
     permissions:
       contents: read
+      issues: read
+      pull-requests: read
     outputs:
       result: ${{ steps.check.outputs.result }}
       updates: ${{ steps.check.outputs.updates }}
@@ -29,9 +51,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
-      - name: Self-check
-        run: python3 -I .github/scripts/binary_watch.py selftest
 
       - name: Check upstream
         id: check
@@ -83,34 +102,55 @@ jobs:
           start=$(git rev-parse HEAD)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # gh の失敗を「作成済み」と取り違えないよう、結果は代入で受けて set -e で止める。
-          issues=$(gh issue list --state all --search "author:app/github-actions" --limit 200 --json title)
+          issue_exists() {
+            local found
+            found=$(gh issue list --state all --search "\"$1\" in:title" --limit 100 --json title) || return 2
+            jq -e --arg t "$1" 'any(.[]; .title == $t)' <<< "$found" > /dev/null
+          }
+          failed=0
           for i in $(seq 0 $(($(jq '.updates | length' "$result") - 1))); do
-            u() { jq -r ".updates[$i].$1" "$result"; }
-            name=$(u name); branch=$(u branch); title=$(u title)
-            # フォークの同名ブランチの PR では止めない。
-            prs=$(gh pr list --state all --head "$branch" --json isCrossRepository --jq 'map(select(.isCrossRepository | not)) | length')
-            # 閉じた PR・Issue も数え、人が却下した候補を毎日作り直さない。
-            if [ "$prs" != 0 ] || jq -e --arg t "$title" 'any(.[]; .title == $t)' <<< "$issues" > /dev/null; then
-              echo "::notice::$branch は作成済み"
-              continue
+            set +e
+            (
+              set -euo pipefail
+              u() { jq -r ".updates[$i].$1" "$result"; }
+              name=$(u name); branch=$(u branch); title=$(u title)
+              # フォークの同名ブランチの PR では止めない。
+              prs=$(gh pr list --state all --head "$branch" --json isCrossRepository --jq 'map(select(.isCrossRepository | not)) | length')
+              if [ "$prs" != 0 ]; then
+                echo "::notice::$branch は作成済み"
+                exit 0
+              fi
+              if issue_exists "$title"; then
+                echo "::notice::$title は Issue で報告済み"
+                exit 0
+              else
+                status=$?
+                [ "$status" -eq 1 ] || exit "$status"
+              fi
+              git checkout --quiet -B "$branch" "$start"
+              python3 -I .github/scripts/binary_watch.py apply --result "$result" --name "$name"
+              git commit --quiet -am "$(u commit_message)"
+              # PR を作る前に失敗した前回の実行が残したブランチは上書きする。
+              git push --force origin "HEAD:refs/heads/$branch"
+              u body > "$RUNNER_TEMP/body.md"
+              if ! gh pr create --base "$BASE" --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
+                # リポジトリ設定「Allow GitHub Actions to create and approve pull requests」が無効だと PR を作れない。
+                compare="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$BASE...$branch?expand=1"
+                printf '> [!IMPORTANT]\n> ワークフローから PR を作れなかったため Issue で知らせる。ブランチ `%s` は push 済みで、PR は %s から作れる。\n\n' \
+                  "$branch" "$compare" | cat - "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/issue.md"
+                gh issue create --title "$title" --body-file "$RUNNER_TEMP/issue.md"
+              fi
+              # GITHUB_TOKEN で作った PR の pull_request build は承認待ちになるため、別途起動する。
+              gh workflow run build.yml --ref "$branch"
+            )
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              echo "::error::更新候補 $i の処理に失敗した（status $status）"
+              failed=1
             fi
-            git checkout --quiet -B "$branch" "$start"
-            python3 -I .github/scripts/binary_watch.py apply --result "$result" --name "$name"
-            git commit --quiet -am "$(u commit_message)"
-            # PR を作る前に失敗した前回の実行が残したブランチは上書きする。
-            git push --force origin "HEAD:refs/heads/$branch"
-            u body > "$RUNNER_TEMP/body.md"
-            if ! gh pr create --base "$BASE" --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
-              # リポジトリ設定「Allow GitHub Actions to create and approve pull requests」が無効だと PR を作れない。
-              compare="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$BASE...$branch?expand=1"
-              printf '> [!IMPORTANT]\n> ワークフローから PR を作れなかったため Issue で知らせる。ブランチ `%s` は push 済みで、PR は %s から作れる。\n\n' \
-                "$branch" "$compare" | cat - "$RUNNER_TEMP/body.md" > "$RUNNER_TEMP/issue.md"
-              gh issue create --title "$title" --body-file "$RUNNER_TEMP/issue.md"
-            fi
-            # GITHUB_TOKEN で作った PR では pull_request の build が動かないため、workflow_dispatch で起動する。
-            gh workflow run build.yml --ref "$branch"
           done
+          exit "$failed"
 
   notify:
     needs: check
@@ -128,14 +168,33 @@ jobs:
           set -euo pipefail
           result="$RUNNER_TEMP/result.json"
           printf '%s' "$RESULT" > "$result"
-          existing=$(gh issue list --state all --search "author:app/github-actions" --limit 200 --json title)
+          issue_exists() {
+            local found
+            found=$(gh issue list --state all --search "\"$1\" in:title" --limit 100 --json title) || return 2
+            jq -e --arg t "$1" 'any(.[]; .title == $t)' <<< "$found" > /dev/null
+          }
+          failed=0
           for i in $(seq 0 $(($(jq '.alerts | length' "$result") - 1))); do
-            title=$(jq -r ".alerts[$i].title" "$result")
-            # 警告の題には版やタグを含めているため、同じ題の Issue は閉じたものも含めて作り直さない。
-            if jq -e --arg t "$title" 'any(.[]; .title == $t)' <<< "$existing" > /dev/null; then
-              echo "::notice::作成済み: $title"
-              continue
+            set +e
+            (
+              set -euo pipefail
+              title=$(jq -r ".alerts[$i].title" "$result")
+              # 完全一致する Issue は閉じたものも含めて作り直さない。
+              if issue_exists "$title"; then
+                echo "::notice::作成済み: $title"
+                exit 0
+              else
+                status=$?
+                [ "$status" -eq 1 ] || exit "$status"
+              fi
+              jq -r ".alerts[$i].body" "$result" > "$RUNNER_TEMP/alert.md"
+              gh issue create --title "$title" --body-file "$RUNNER_TEMP/alert.md"
+            )
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ]; then
+              echo "::error::警告 $i の Issue 作成に失敗した（status $status）"
+              failed=1
             fi
-            jq -r ".alerts[$i].body" "$result" > "$RUNNER_TEMP/alert.md"
-            gh issue create --title "$title" --body-file "$RUNNER_TEMP/alert.md"
           done
+          exit "$failed"
