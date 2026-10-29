@@ -17,9 +17,10 @@ on:
 
 permissions: {}
 
+# 定期・手動実行は 1 本ずつ流し、PR の selftest に待機中の実行を取り消させない。PR は古い実行を取り消す。
 concurrency:
-  group: binary-watch
-  cancel-in-progress: false
+  group: binary-watch-${{ github.event_name == 'pull_request' && github.ref || 'watch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   selftest:
