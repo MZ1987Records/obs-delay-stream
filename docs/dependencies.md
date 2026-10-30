@@ -10,8 +10,8 @@
 
 | 依存物 | 承認版 | 取得元 | SHA-256 | 追跡 |
 |---|---|---|---|---|
-| cloudflared | 2026.10.3（2026-10-21 公開） | `cloudflare/cloudflared` の Release `2026.10.3` の `cloudflared-windows-amd64.exe`（55,329,336 bytes） | `76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2`（リリースノートと GitHub API の digest で照合） | 手動。Cloudflare の告知とリリースを確認する |
-| FFmpeg | n9.0.2-17-g2a571b6068（9.0 系、LGPL、静的ビルド） | `BtbN/FFmpeg-Builds` の Release `autobuild-2026-09-30-13-08` の `ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-9.0.zip`（171,535,354 bytes） | ZIP `6b264b9e6019103f601d98c292bd332fd87acf1c5e941ddff4fb71760fe63432`、`ffmpeg.exe`（134,497,280 bytes）`0e482b853f2fd4821055d20cdce510f0eea6027037c04b994f454a2136e8868e` | 手動。BtbN の月末ビルドは約 2 年保持される。取得できなくなったら新しい月末ビルドを承認し直す（自前では再配布しない） |
+| cloudflared | 2026.10.3（2026-10-21 公開） | `cloudflare/cloudflared` の Release `2026.10.3` の `cloudflared-windows-amd64.exe`（55,329,336 bytes） | `76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2`（リリースノートと GitHub API の digest で照合） | binary-watch（毎日）が新しい版と承認版の消失を検知して PR を作る。告知の確認と承認は手動 |
+| FFmpeg | n9.0.2-17-g2a571b6068（9.0 系、LGPL、静的ビルド） | `BtbN/FFmpeg-Builds` の Release `autobuild-2026-09-30-13-08` の `ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-9.0.zip`（171,535,354 bytes） | ZIP `6b264b9e6019103f601d98c292bd332fd87acf1c5e941ddff4fb71760fe63432`、`ffmpeg.exe`（134,497,280 bytes）`0e482b853f2fd4821055d20cdce510f0eea6027037c04b994f454a2136e8868e` | binary-watch（毎日）が同じ系統・LGPL の新しい月末ビルドと承認版の消失を検知して PR を作る。BtbN の月末ビルドは約 2 年保持される。取得できなくなったら新しい月末ビルドを承認し直す（自前では再配布しない） |
 
 配置先: `%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared\<版>\cloudflared.exe`、`%LOCALAPPDATA%\obs-delay-stream\bin\ffmpeg\<展開ディレクトリ>\bin\ffmpeg.exe`。以前の版が `latest` を自動取得した `bin\cloudflared.exe` と `bin\ffmpeg\ffmpeg-master-latest-win64-gpl\` は使わない。設定がこれらを指していれば、読込時に自動へ戻す。
 
@@ -61,4 +61,11 @@ opus-decoder の版は、同梱ファイルの SHA-256 を npm の各版の `dis
 ## 追跡の分担
 
 - Dependabot: GitHub Actions と `receiver/` の npm 依存物。
-- 手動: cloudflared、FFmpeg、WebSocket++、libopus、Asio、OBS、opus-decoder、md-to-pdf。リリース前と定期確認（計画書の 10 章）で公式の告知を確認する。
+- binary-watch（`.github/workflows/binary-watch.yml`、毎日と手動実行）: cloudflared と FFmpeg。上流の新しい版を取得してサイズと SHA-256 を計算し（実行はしない）、承認一覧とこの表を書き換えた PR を作る。承認版が上流から消えたとき、取得物が上流の記載と一致しないとき、FFmpeg の別の系統（例: 9.1）が出たときは Issue で知らせる。採否の判断・マージ・リリースは人が行い、自動マージはしない。
+  - cloudflared: GitHub の最新リリースの `cloudflared-windows-amd64.exe` を、GitHub API の digest とリリース本文のチェックサムの両方で照合する。どちらかが無い、または一致しない場合は候補にしない。
+  - FFmpeg: BtbN の前月までの月末ビルドのうち最新のものから、承認版と同じ系統の win64 LGPL 静的ビルドを候補にする。日次ビルドは約 2 週間で消えるため候補にしない。そのため月の途中に出た修正は、次の月初まで PR にならない。急ぐときは手動で承認する。
+  - 判定と書き換えは `.github/scripts/binary_watch.py`。`python3 -I .github/scripts/binary_watch.py selftest` で取得なしに確かめられ、関連ファイルの PR でもこの自己チェックだけを実行する。
+  - 同じ候補の PR または Issue が開閉を問わず存在するときは、同じ取得物を毎日ダウンロードし直さない。
+  - `GITHUB_TOKEN` で作った PR の `pull_request` build は承認待ちになるため、人の承認を待たず確認できるよう `build` を workflow_dispatch でも起動する。`pull_request` 側も実行するときは、PR のチェック欄でワークフロー実行を承認する。
+  - PR を作るにはリポジトリ設定「Allow GitHub Actions to create and approve pull requests」が要る。無効のときは、push したブランチと比較リンクを Issue で知らせる。
+- 手動: WebSocket++、libopus、Asio、OBS、opus-decoder、md-to-pdf。cloudflared と FFmpeg も告知（セキュリティ情報）は人が確認する。リリース前と定期確認（計画書の 10 章）で公式の告知を確認する。

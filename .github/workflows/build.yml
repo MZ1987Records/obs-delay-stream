@@ -7,6 +7,8 @@ on:
     tags:
       - "v*.*.*"
   pull_request:
+  # binary-watch が GITHUB_TOKEN で作った PR の pull_request 実行は承認待ちになるため、そこから別途起動する。
+  workflow_dispatch:
 
 # 同じブランチ／PR への連続 push は古い実行を取り消す。タグのリリースビルドは取り消さない。
 concurrency:
@@ -432,7 +434,8 @@ jobs:
 
   release:
     needs: build
-    if: github.ref_type == 'tag'
+    # workflow_dispatch をタグに対して起動しても、公開済みリリースを再ビルド物で上書きしない。
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
