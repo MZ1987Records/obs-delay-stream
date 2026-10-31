@@ -10,7 +10,7 @@
 
 | 依存物 | 承認版 | 取得元 | SHA-256 | 追跡 |
 |---|---|---|---|---|
-| cloudflared | 2026.10.3（2026-10-21 公開） | `cloudflare/cloudflared` の Release `2026.10.3` の `cloudflared-windows-amd64.exe`（55,329,336 bytes） | `76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2`（リリースノートと GitHub API の digest で照合） | binary-watch（毎日）が新しい版と承認版の消失を検知して PR を作る。告知の確認と承認は手動 |
+| cloudflared | 2026.10.7（2026-10-30 公開） | `cloudflare/cloudflared` の Release `2026.10.7` の `cloudflared-windows-amd64.exe`（55,390,512 bytes） | `2493dbc168923bb3e59e5e7716f71deced92992eea9acd6e9d74f84ac7751343`（リリースノートと GitHub API の digest で照合） | binary-watch（毎日）が新しい版と承認版の消失を検知して PR を作る。告知の確認と承認は手動 |
 | FFmpeg | n9.0.2-17-g2a571b6068（9.0 系、LGPL、静的ビルド） | `BtbN/FFmpeg-Builds` の Release `autobuild-2026-09-30-13-08` の `ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-9.0.zip`（171,535,354 bytes） | ZIP `6b264b9e6019103f601d98c292bd332fd87acf1c5e941ddff4fb71760fe63432`、`ffmpeg.exe`（134,497,280 bytes）`0e482b853f2fd4821055d20cdce510f0eea6027037c04b994f454a2136e8868e` | binary-watch（毎日）が同じ系統・LGPL の新しい月末ビルドと承認版の消失を検知して PR を作る。BtbN の月末ビルドは約 2 年保持される。取得できなくなったら新しい月末ビルドを承認し直す（自前では再配布しない） |
 
 配置先: `%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared\<版>\cloudflared.exe`、`%LOCALAPPDATA%\obs-delay-stream\bin\ffmpeg\<展開ディレクトリ>\bin\ffmpeg.exe`。以前の版が `latest` を自動取得した `bin\cloudflared.exe` と `bin\ffmpeg\ffmpeg-master-latest-win64-gpl\` は使わない。設定がこれらを指していれば、読込時に自動へ戻す。
