@@ -2,7 +2,7 @@
 
 `docs/security-hardening-plan.md` の P0「現物把握」のうち、リポジトリから確認できる範囲をまとめる。利用者の PC に実際に置かれている exe の版・ハッシュ・署名は含まない（P0 の残作業）。
 
-確認日: 2026-10-24。版を更新したら、この一覧と確認日を併せて更新する。
+確認日: 2026-11-07。版を更新したら、この一覧と確認日を併せて更新する。
 
 ## プラグインが実行時に取得する実行ファイル
 
@@ -10,7 +10,7 @@
 
 | 依存物 | 承認版 | 取得元 | SHA-256 | 追跡 |
 |---|---|---|---|---|
-| cloudflared | 2026.10.3（2026-10-21 公開） | `cloudflare/cloudflared` の Release `2026.10.3` の `cloudflared-windows-amd64.exe`（55,329,336 bytes） | `76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2`（リリースノートと GitHub API の digest で照合） | binary-watch（毎日）が新しい版と承認版の消失を検知して PR を作る。告知の確認と承認は手動 |
+| cloudflared | 2026.10.7（2026-10-30 公開） | `cloudflare/cloudflared` の Release `2026.10.7` の `cloudflared-windows-amd64.exe`（55,390,512 bytes） | `2493dbc168923bb3e59e5e7716f71deced92992eea9acd6e9d74f84ac7751343`（リリースノートと GitHub API の digest で照合） | binary-watch（毎日）が新しい版と承認版の消失を検知して PR を作る。告知の確認と承認は手動 |
 | FFmpeg | n9.0.2-39-g7adfbe40dc（9.0 系、LGPL、静的ビルド） | `BtbN/FFmpeg-Builds` の Release `autobuild-2026-10-31-12-59` の `ffmpeg-n9.0.2-39-g7adfbe40dc-win64-lgpl-9.0.zip`（168,715,328 bytes） | ZIP `9d37c564e0d01c18cde184a079fa6ef04d7d2783ada41da81d04165cc8f1a650`、`ffmpeg.exe`（132,190,720 bytes）`d03c858a130cae1382902925d9f46eb15d7de42e025d34cc29b7ddca6cfb4c62` | binary-watch（毎日）が同じ系統・LGPL の新しい月末ビルドと承認版の消失を検知して PR を作る。BtbN の月末ビルドは約 2 年保持される。取得できなくなったら新しい月末ビルドを承認し直す（自前では再配布しない） |
 
 配置先: `%LOCALAPPDATA%\obs-delay-stream\bin\cloudflared\<版>\cloudflared.exe`、`%LOCALAPPDATA%\obs-delay-stream\bin\ffmpeg\<展開ディレクトリ>\bin\ffmpeg.exe`。以前の版が `latest` を自動取得した `bin\cloudflared.exe` と `bin\ffmpeg\ffmpeg-master-latest-win64-gpl\` は使わない。設定がこれらを指していれば、読込時に自動へ戻す。
