@@ -35,18 +35,18 @@ namespace ods::core {
 		"76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2",
 	};
 
-	// FFmpeg 9.0 系 LGPL 静的ビルド（BtbN autobuild-2026-09-30-13-08）。月末ビルドは約 2 年保持される。
+	// FFmpeg 9.0 系 LGPL 静的ビルド（BtbN autobuild-2026-10-31-12-59）。月末ビルドは約 2 年保持される。
 	// 上流から消えたら新しい月末ビルドを承認し直す（自前では再配布しない）。
 	inline constexpr ApprovedBinary kApprovedFfmpeg = {
 		"FFmpeg",
-		"n9.0.2-17-g2a571b6068",
-		"https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/"
-		"ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-9.0.zip",
-		171535354,
-		"6b264b9e6019103f601d98c292bd332fd87acf1c5e941ddff4fb71760fe63432",
-		"ffmpeg-n9.0.2-17-g2a571b6068-win64-lgpl-9.0\\bin\\ffmpeg.exe",
-		134497280,
-		"0e482b853f2fd4821055d20cdce510f0eea6027037c04b994f454a2136e8868e",
+		"n9.0.2-39-g7adfbe40dc",
+		"https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/"
+		"ffmpeg-n9.0.2-39-g7adfbe40dc-win64-lgpl-9.0.zip",
+		168715328,
+		"9d37c564e0d01c18cde184a079fa6ef04d7d2783ada41da81d04165cc8f1a650",
+		"ffmpeg-n9.0.2-39-g7adfbe40dc-win64-lgpl-9.0\\bin\\ffmpeg.exe",
+		132190720,
+		"d03c858a130cae1382902925d9f46eb15d7de42e025d34cc29b7ddca6cfb4c62",
 	};
 
 } // namespace ods::core
