@@ -23,16 +23,16 @@ namespace ods::core {
 		const char   *exe_sha256;      ///< 実行ファイルの SHA-256（起動前の検証に使う）
 	};
 
-	// cloudflared 2026.10.7（2026-10-30 公開）。SHA-256 はリリースノートの記載と GitHub API の digest で照合済み。
+	// cloudflared 2026.11.0（2026-11-12 公開）。SHA-256 はリリースノートの記載と GitHub API の digest で照合済み。
 	inline constexpr ApprovedBinary kApprovedCloudflared = {
 		"cloudflared",
-		"2026.10.7",
-		"https://github.com/cloudflare/cloudflared/releases/download/2026.10.7/cloudflared-windows-amd64.exe",
-		55390512,
-		"2493dbc168923bb3e59e5e7716f71deced92992eea9acd6e9d74f84ac7751343",
+		"2026.11.0",
+		"https://github.com/cloudflare/cloudflared/releases/download/2026.11.0/cloudflared-windows-amd64.exe",
+		55397592,
+		"d5c1d82031da6253dcdcff64c944cd0fe063016edeb2e4fd088075fc9bd52d0a",
 		nullptr,
-		55390512,
-		"2493dbc168923bb3e59e5e7716f71deced92992eea9acd6e9d74f84ac7751343",
+		55397592,
+		"d5c1d82031da6253dcdcff64c944cd0fe063016edeb2e4fd088075fc9bd52d0a",
 	};
 
 	// FFmpeg 9.0 系 LGPL 静的ビルド（BtbN autobuild-2026-10-31-12-59）。月末ビルドは約 2 年保持される。
